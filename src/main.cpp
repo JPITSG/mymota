@@ -23,7 +23,8 @@ namespace {
 constexpr uint32_t kConfigMagic = 0x4d594d4f;  // MYMO
 constexpr uint16_t kConfigVersionV1 = 1;
 constexpr uint16_t kConfigVersionV2 = 2;
-constexpr uint16_t kConfigVersion = 3;
+constexpr uint16_t kConfigVersionV3 = 3;
+constexpr uint16_t kConfigVersion = 4;
 constexpr size_t kEepromSize = 512;
 constexpr uint32_t kConnectTimeoutMs = 20000;
 constexpr uint32_t kReconnectStartApMs = 90000;
@@ -33,6 +34,13 @@ constexpr uint8_t kPhyModeAuto = 0;
 constexpr uint8_t kPhyModeFailsafe = WIFI_PHY_MODE_11G;
 constexpr size_t kTemplateSlotCount = 14;
 constexpr size_t kTemplateJsonMaxLen = 640;
+constexpr size_t kMqttHostMaxLen = 64;
+constexpr size_t kMqttTopicMaxLen = 150;
+constexpr uint16_t kMqttDefaultPort = 1883;
+constexpr uint16_t kMqttKeepaliveMax = 65535U;
+constexpr uint16_t kMqttProtocolKeepaliveSec = 30;
+constexpr uint32_t kMqttReconnectMs = 5000;
+constexpr uint32_t kMqttReadTimeoutMs = 1000;
 constexpr uint8_t kInvalidPin = 0xff;
 constexpr uint8_t kAdc0Pin = 17;
 constexpr uint8_t kMaxRelays = 8;
@@ -111,7 +119,7 @@ struct StoredConfigV2 {
   uint32_t crc;
 };
 
-struct StoredConfig {
+struct StoredConfigV3 {
   uint32_t magic;
   uint16_t version;
   uint16_t size;
@@ -125,6 +133,27 @@ struct StoredConfig {
   char template_name[33];
   uint16_t template_gpio[kTemplateSlotCount];
   uint8_t reserved[3];
+  uint32_t crc;
+};
+
+struct StoredConfig {
+  uint32_t magic;
+  uint16_t version;
+  uint16_t size;
+  char ssid[33];
+  char password[65];
+  char hostname[33];
+  uint8_t phy_mode;
+  uint8_t template_enabled;
+  uint16_t template_base;
+  uint32_t template_flag;
+  char template_name[33];
+  uint16_t template_gpio[kTemplateSlotCount];
+  uint16_t mqtt_port;
+  uint16_t mqtt_keepalive;
+  char mqtt_host[kMqttHostMaxLen + 1];
+  char mqtt_topic[kMqttTopicMaxLen + 1];
+  uint8_t reserved[18];
   uint32_t crc;
 };
 
@@ -201,6 +230,7 @@ struct EnergyState {
 };
 
 ESP8266WebServer server(80);
+WiFiClient mqtt_client;
 StoredConfig config{};
 RuntimeTemplate runtime_template{};
 ButtonState button_state[kMaxButtons]{};
@@ -216,6 +246,10 @@ uint32_t disconnected_since = 0;
 uint32_t last_ap_attempt = 0;
 uint32_t last_led_update = 0;
 uint32_t last_adc_update = 0;
+uint32_t next_mqtt_reconnect = 0;
+uint32_t last_mqtt_io = 0;
+uint32_t last_mqtt_state_publish = 0;
+uint16_t mqtt_pending_relay_mask = 0;
 bool relay_state[kMaxRelays]{};
 float adc_temperature_c = NAN;
 uint16_t adc_raw = 0;
@@ -260,6 +294,17 @@ String defaultHostname() {
   return "mymota-" + chipIdHex();
 }
 
+String defaultMqttTopic() {
+  return "mymota_" + chipIdHex();
+}
+
+void setDefaultMqttConfig() {
+  memset(config.mqtt_host, 0, sizeof(config.mqtt_host));
+  config.mqtt_port = kMqttDefaultPort;
+  config.mqtt_keepalive = 0;
+  strlcpy(config.mqtt_topic, defaultMqttTopic().c_str(), sizeof(config.mqtt_topic));
+}
+
 void setDefaultConfig() {
   memset(&config, 0, sizeof(config));
   config.magic = kConfigMagic;
@@ -267,6 +312,7 @@ void setDefaultConfig() {
   config.size = sizeof(StoredConfig);
   config.phy_mode = kPhyModeAuto;
   strlcpy(config.hostname, defaultHostname().c_str(), sizeof(config.hostname));
+  setDefaultMqttConfig();
   config.crc = configCrc(config);
   config_ok = false;
 }
@@ -284,10 +330,18 @@ void normalizeConfigStrings() {
   config.password[sizeof(config.password) - 1] = '\0';
   config.hostname[sizeof(config.hostname) - 1] = '\0';
   config.template_name[sizeof(config.template_name) - 1] = '\0';
+  config.mqtt_host[sizeof(config.mqtt_host) - 1] = '\0';
+  config.mqtt_topic[sizeof(config.mqtt_topic) - 1] = '\0';
   if (config.hostname[0] == '\0') {
     strlcpy(config.hostname, defaultHostname().c_str(), sizeof(config.hostname));
   }
   config.phy_mode = sanitizePhyMode(config.phy_mode);
+  if (config.mqtt_port == 0) {
+    config.mqtt_port = kMqttDefaultPort;
+  }
+  if (config.mqtt_topic[0] == '\0') {
+    strlcpy(config.mqtt_topic, defaultMqttTopic().c_str(), sizeof(config.mqtt_topic));
+  }
   if (!config.template_enabled) {
     clearTemplateConfig();
   } else {
@@ -313,6 +367,7 @@ bool commitConfig() {
 }
 
 bool saveWifiConfig(const char *ssid, const char *password, const char *hostname, uint8_t phy_mode);
+bool saveMqttConfig(const char *host, uint16_t port, const char *topic, uint16_t keepalive);
 
 bool loadConfig() {
   EEPROM.begin(kEepromSize);
@@ -334,6 +389,32 @@ bool loadConfig() {
     return config_ok;
   }
 
+  if (header.version == kConfigVersionV3 && header.size == sizeof(StoredConfigV3)) {
+    StoredConfigV3 old_config{};
+    EEPROM.get(0, old_config);
+    if (old_config.crc != configCrc(old_config)) {
+      setDefaultConfig();
+      return false;
+    }
+    old_config.ssid[sizeof(old_config.ssid) - 1] = '\0';
+    old_config.password[sizeof(old_config.password) - 1] = '\0';
+    old_config.hostname[sizeof(old_config.hostname) - 1] = '\0';
+    old_config.template_name[sizeof(old_config.template_name) - 1] = '\0';
+    memset(&config, 0, sizeof(config));
+    strlcpy(config.ssid, old_config.ssid, sizeof(config.ssid));
+    strlcpy(config.password, old_config.password, sizeof(config.password));
+    strlcpy(config.hostname, old_config.hostname, sizeof(config.hostname));
+    config.phy_mode = old_config.phy_mode;
+    config.template_enabled = old_config.template_enabled;
+    config.template_base = old_config.template_base;
+    config.template_flag = old_config.template_flag;
+    strlcpy(config.template_name, old_config.template_name, sizeof(config.template_name));
+    memcpy(config.template_gpio, old_config.template_gpio, sizeof(config.template_gpio));
+    setDefaultMqttConfig();
+    commitConfig();
+    return config_ok;
+  }
+
   if (header.version == kConfigVersionV2 && header.size == sizeof(StoredConfigV2)) {
     StoredConfigV2 old_config{};
     EEPROM.get(0, old_config);
@@ -350,6 +431,7 @@ bool loadConfig() {
     strlcpy(config.hostname, old_config.hostname, sizeof(config.hostname));
     config.phy_mode = old_config.phy_mode;
     clearTemplateConfig();
+    setDefaultMqttConfig();
     commitConfig();
     return config_ok;
   }
@@ -373,6 +455,7 @@ bool loadConfig() {
     strlcpy(config.hostname, old_config.hostname, sizeof(config.hostname));
     config.phy_mode = kPhyModeAuto;
     clearTemplateConfig();
+    setDefaultMqttConfig();
     commitConfig();
     return config_ok;
   }
@@ -390,6 +473,19 @@ bool saveWifiConfig(const char *ssid, const char *password, const char *hostname
     strlcpy(config.hostname, defaultHostname().c_str(), sizeof(config.hostname));
   }
   config.phy_mode = sanitizePhyMode(phy_mode);
+  return commitConfig();
+}
+
+bool saveMqttConfig(const char *host, uint16_t port, const char *topic, uint16_t keepalive) {
+  strlcpy(config.mqtt_host, host ? host : "", sizeof(config.mqtt_host));
+  config.mqtt_port = port;
+  strlcpy(config.mqtt_topic, topic ? topic : "", sizeof(config.mqtt_topic));
+  config.mqtt_keepalive = keepalive;
+  mqtt_client.stop();
+  next_mqtt_reconnect = 0;
+  last_mqtt_io = 0;
+  last_mqtt_state_publish = 0;
+  mqtt_pending_relay_mask = 0;
   return commitConfig();
 }
 
@@ -755,6 +851,38 @@ String currentTemplateJson() {
   return out;
 }
 
+bool parseUint16Input(const String &input, uint16_t min_value, uint16_t max_value, uint16_t &out) {
+  if (input.length() == 0) return false;
+  uint32_t value = 0;
+  for (size_t i = 0; i < input.length(); i++) {
+    const char c = input[i];
+    if (c < '0' || c > '9') return false;
+    value = (value * 10U) + static_cast<uint32_t>(c - '0');
+    if (value > max_value) return false;
+  }
+  if (value < min_value) return false;
+  out = static_cast<uint16_t>(value);
+  return true;
+}
+
+bool isValidMqttHost(const String &host) {
+  if (host.length() > kMqttHostMaxLen) return false;
+  for (size_t i = 0; i < host.length(); i++) {
+    const char c = host[i];
+    if (c <= ' ' || c == '/' || c == '\\') return false;
+  }
+  return true;
+}
+
+bool isValidMqttTopic(const String &topic) {
+  if (topic.length() == 0 || topic.length() > kMqttTopicMaxLen) return false;
+  for (size_t i = 0; i < topic.length(); i++) {
+    const uint8_t c = static_cast<uint8_t>(topic[i]);
+    if (c < 0x20 || c == 0x7f) return false;
+  }
+  return true;
+}
+
 String ipToString(const IPAddress &ip) {
   char buf[16];
   snprintf(buf, sizeof(buf), "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
@@ -777,6 +905,208 @@ const __FlashStringHelper *updateErrorName(uint8_t error) {
     case UPDATE_ERROR_BOOTSTRAP: return F("bad boot mode");
     case UPDATE_ERROR_SIGN: return F("signature failed");
     default: return F("unknown");
+  }
+}
+
+bool mqttConfigured() {
+  return config.mqtt_host[0] != '\0' && config.mqtt_topic[0] != '\0' && config.mqtt_port != 0;
+}
+
+bool mqttReadByte(uint8_t &value, uint32_t timeout_ms = kMqttReadTimeoutMs) {
+  const uint32_t start = millis();
+  while (!mqtt_client.available()) {
+    if (!mqtt_client.connected() || millis() - start >= timeout_ms) {
+      return false;
+    }
+    delay(1);
+  }
+  const int read_value = mqtt_client.read();
+  if (read_value < 0) return false;
+  value = static_cast<uint8_t>(read_value);
+  return true;
+}
+
+bool mqttWriteByte(uint8_t value) {
+  return mqtt_client.write(&value, 1) == 1;
+}
+
+bool mqttWriteRemainingLength(uint32_t length) {
+  do {
+    uint8_t encoded = length % 128U;
+    length /= 128U;
+    if (length) encoded |= 0x80U;
+    if (!mqttWriteByte(encoded)) return false;
+  } while (length);
+  return true;
+}
+
+bool mqttWriteString(const char *value) {
+  const uint16_t len = value ? strlen(value) : 0;
+  uint8_t header[2] = {
+    static_cast<uint8_t>(len >> 8),
+    static_cast<uint8_t>(len & 0xffU)
+  };
+  if (mqtt_client.write(header, sizeof(header)) != sizeof(header)) return false;
+  return len == 0 || mqtt_client.write(reinterpret_cast<const uint8_t *>(value), len) == len;
+}
+
+String mqttClientId() {
+  return "mymota_" + chipIdHex();
+}
+
+void mqttStop() {
+  mqtt_client.stop();
+}
+
+bool mqttConnect() {
+  if (!mqttConfigured() || WiFi.status() != WL_CONNECTED) return false;
+
+  mqttStop();
+  mqtt_client.setTimeout(kMqttReadTimeoutMs);
+  if (!mqtt_client.connect(config.mqtt_host, config.mqtt_port)) {
+    return false;
+  }
+
+  const String client_id = mqttClientId();
+  const uint32_t remaining_length = 10U + 2U + client_id.length();
+  bool ok = mqttWriteByte(0x10) &&
+            mqttWriteRemainingLength(remaining_length) &&
+            mqttWriteString("MQTT") &&
+            mqttWriteByte(0x04) &&
+            mqttWriteByte(0x02) &&
+            mqttWriteByte(static_cast<uint8_t>(kMqttProtocolKeepaliveSec >> 8)) &&
+            mqttWriteByte(static_cast<uint8_t>(kMqttProtocolKeepaliveSec & 0xffU)) &&
+            mqttWriteString(client_id.c_str());
+  if (!ok) {
+    mqttStop();
+    return false;
+  }
+  last_mqtt_io = millis();
+
+  uint8_t packet_type = 0;
+  uint8_t remaining = 0;
+  uint8_t flags = 0;
+  uint8_t return_code = 0;
+  ok = mqttReadByte(packet_type) && mqttReadByte(remaining) && mqttReadByte(flags) && mqttReadByte(return_code);
+  if (!ok || packet_type != 0x20 || remaining != 0x02 || return_code != 0x00) {
+    mqttStop();
+    return false;
+  }
+  return true;
+}
+
+bool mqttEnsureConnected() {
+  if (mqtt_client.connected()) return true;
+  const uint32_t now = millis();
+  if (next_mqtt_reconnect && now - next_mqtt_reconnect < kMqttReconnectMs) {
+    return false;
+  }
+  next_mqtt_reconnect = now;
+  return mqttConnect();
+}
+
+bool mqttPublish(const char *topic, const char *payload) {
+  if (!mqttEnsureConnected()) return false;
+
+  const uint16_t topic_len = topic ? strlen(topic) : 0;
+  const uint16_t payload_len = payload ? strlen(payload) : 0;
+  if (topic_len == 0) return false;
+
+  const uint32_t remaining_length = 2U + topic_len + payload_len;
+  const bool ok = mqttWriteByte(0x30) &&
+                  mqttWriteRemainingLength(remaining_length) &&
+                  mqttWriteString(topic) &&
+                  (payload_len == 0 || mqtt_client.write(reinterpret_cast<const uint8_t *>(payload), payload_len) == payload_len);
+  if (!ok) {
+    mqttStop();
+    return false;
+  }
+  last_mqtt_io = millis();
+  return true;
+}
+
+String mqttRelayTopic(uint8_t relay) {
+  String topic;
+  topic.reserve(kMqttTopicMaxLen + 16);
+  topic += F("stat/");
+  topic += config.mqtt_topic;
+  topic += F("/");
+  if (runtime_template.relay_count <= 1) {
+    topic += F("POWER");
+  } else {
+    topic += F("POWER");
+    topic += String(relay + 1);
+  }
+  return topic;
+}
+
+void scheduleMqttRelayPublish(uint8_t relay) {
+  if (!mqttConfigured()) return;
+  if (relay >= kMaxRelays) return;
+  mqtt_pending_relay_mask |= (1U << relay);
+}
+
+bool mqttPublishRelayState(uint8_t relay) {
+  if (relay >= runtime_template.relay_count || !hasPin(runtime_template.relays[relay])) return true;
+  const String topic = mqttRelayTopic(relay);
+  const bool ok = mqttPublish(topic.c_str(), relay_state[relay] ? "ON" : "OFF");
+  if (ok) {
+    last_mqtt_state_publish = millis();
+  }
+  return ok;
+}
+
+bool mqttPublishAllRelayStates() {
+  bool ok = true;
+  bool published = false;
+  for (uint8_t i = 0; i < runtime_template.relay_count; i++) {
+    if (!hasPin(runtime_template.relays[i])) continue;
+    published = true;
+    if (!mqttPublishRelayState(i)) {
+      ok = false;
+      break;
+    }
+  }
+  if (ok && published) {
+    last_mqtt_state_publish = millis();
+  }
+  return ok;
+}
+
+void maintainMqtt() {
+  if (!mqttConfigured() || WiFi.status() != WL_CONNECTED) {
+    mqttStop();
+    return;
+  }
+
+  if (!mqttEnsureConnected()) return;
+
+  while (mqtt_client.available()) {
+    mqtt_client.read();
+  }
+
+  const uint32_t now = millis();
+  if (now - last_mqtt_io >= (static_cast<uint32_t>(kMqttProtocolKeepaliveSec) * 1000UL)) {
+    if (mqttWriteByte(0xc0) && mqttWriteByte(0x00)) {
+      last_mqtt_io = now;
+    } else {
+      mqttStop();
+      return;
+    }
+  }
+
+  for (uint8_t i = 0; i < runtime_template.relay_count; i++) {
+    const uint16_t mask = 1U << i;
+    if (!(mqtt_pending_relay_mask & mask)) continue;
+    if (!mqttPublishRelayState(i)) return;
+    mqtt_pending_relay_mask &= ~mask;
+  }
+
+  if (config.mqtt_keepalive > 0 && runtime_template.relay_count > 0) {
+    const uint32_t interval_ms = static_cast<uint32_t>(config.mqtt_keepalive) * 1000UL;
+    if (now - last_mqtt_state_publish >= interval_ms) {
+      mqttPublishAllRelayStates();
+    }
   }
 }
 
@@ -848,8 +1178,12 @@ void setupEnergyMonitor() {
 
 void setRelay(uint8_t relay, bool on) {
   if (relay >= kMaxRelays || !hasPin(runtime_template.relays[relay])) return;
+  const bool changed = relay_state[relay] != on;
   relay_state[relay] = on;
   writeAssignedPin(runtime_template.relays[relay], on);
+  if (changed) {
+    scheduleMqttRelayPublish(relay);
+  }
 }
 
 void toggleRelay(uint8_t relay) {
@@ -1190,6 +1524,35 @@ void appendDeviceControls(String &page) {
   page += F("</ul>");
 }
 
+void appendMqttStatus(String &page) {
+  page += F("<h2>MQTT</h2><ul>");
+  if (config.mqtt_host[0] == '\0') {
+    page += F("<li>Broker: <span class='muted'>not configured</span></li>");
+  } else {
+    page += F("<li>Broker: <code>");
+    page += htmlEscape(config.mqtt_host);
+    page += F(":");
+    page += String(config.mqtt_port);
+    page += F("</code> ");
+    if (mqtt_client.connected()) {
+      page += F("<span class='ok'>connected</span>");
+    } else {
+      page += F("<span class='muted'>not connected</span>");
+    }
+    page += F("</li>");
+  }
+  page += F("<li>Topic: <code>");
+  page += htmlEscape(config.mqtt_topic);
+  page += F("</code></li><li>State keepalive: <code>");
+  if (config.mqtt_keepalive == 0) {
+    page += F("disabled");
+  } else {
+    page += String(config.mqtt_keepalive);
+    page += F("s");
+  }
+  page += F("</code></li></ul>");
+}
+
 void appendTemplateForm(String &page) {
   page += F("<h2>Template</h2><form method='post' action='/template'>");
   page += F("<div class='row'><label>Tasmota ESP8266 template JSON<br><textarea name='template' rows='5' maxlength='");
@@ -1198,6 +1561,25 @@ void appendTemplateForm(String &page) {
   page += htmlEscape(currentTemplateJson());
   page += F("</textarea></label></div>");
   page += F("<button type='submit'>Save template</button> <button type='submit' name='clear' value='1'>Clear template</button></form>");
+}
+
+void appendMqttForm(String &page) {
+  page += F("<h2>MQTT</h2><form method='post' action='/mqtt'>");
+  page += F("<div class='row'><label>Host<br><input name='host' maxlength='");
+  page += String(kMqttHostMaxLen);
+  page += F("' value='");
+  page += htmlEscape(config.mqtt_host);
+  page += F("'></label></div><div class='row'><label>Port<br><input name='port' type='number' min='1' max='65535' value='");
+  page += String(config.mqtt_port);
+  page += F("'></label></div><div class='row'><label>Topic<br><input name='topic' maxlength='");
+  page += String(kMqttTopicMaxLen);
+  page += F("' required value='");
+  page += htmlEscape(config.mqtt_topic);
+  page += F("'></label></div><div class='row'><label>State keepalive seconds<br><input name='keepalive' type='number' min='0' max='");
+  page += String(kMqttKeepaliveMax);
+  page += F("' value='");
+  page += String(config.mqtt_keepalive);
+  page += F("'></label></div><button type='submit'>Save MQTT</button></form>");
 }
 
 void appendPhyModeOption(String &page, uint8_t mode) {
@@ -1223,11 +1605,12 @@ void appendPhyModeSelect(String &page) {
 
 void handleRoot() {
   String page;
-  page.reserve(5200);
+  page.reserve(6500);
   appendHeader(page, F("Mymota"));
   appendStatusBlock(page);
   appendTemplateStatus(page);
   appendDeviceControls(page);
+  appendMqttStatus(page);
   page += F("<h2>Wi-Fi</h2><form method='post' action='/wifi'>");
   page += F("<div class='row'><label>SSID<br><input name='ssid' maxlength='32' required value='");
   page += htmlEscape(config.ssid);
@@ -1240,6 +1623,7 @@ void handleRoot() {
   page += F("<p><a href='/scan'>Scan networks</a></p>");
 
   appendTemplateForm(page);
+  appendMqttForm(page);
 
   page += F("<h2>Firmware</h2><form method='post' action='/update' enctype='multipart/form-data'>");
   page += F("<input type='file' name='firmware' accept='.bin,.bin.gz' required><br><button type='submit'>Upload firmware</button></form>");
@@ -1371,6 +1755,49 @@ void handleTemplateSave() {
   restart_at = millis() + 1200;
 }
 
+void handleMqttSave() {
+  String host = server.arg("host");
+  String port_arg = server.arg("port");
+  String topic = server.arg("topic");
+  String keepalive_arg = server.arg("keepalive");
+  host.trim();
+  port_arg.trim();
+  topic.trim();
+  keepalive_arg.trim();
+
+  uint16_t port = kMqttDefaultPort;
+  uint16_t keepalive = 0;
+  if (!isValidMqttHost(host)) {
+    server.send(400, F("text/plain"), F("Invalid MQTT host"));
+    return;
+  }
+  if (!parseUint16Input(port_arg, 1, 65535U, port)) {
+    server.send(400, F("text/plain"), F("Invalid MQTT port"));
+    return;
+  }
+  if (!isValidMqttTopic(topic)) {
+    server.send(400, F("text/plain"), F("Invalid MQTT topic"));
+    return;
+  }
+  if (!parseUint16Input(keepalive_arg, 0, kMqttKeepaliveMax, keepalive)) {
+    server.send(400, F("text/plain"), F("Invalid MQTT keepalive"));
+    return;
+  }
+
+  if (!saveMqttConfig(host.c_str(), port, topic.c_str(), keepalive)) {
+    server.send(500, F("text/plain"), F("Could not save MQTT settings"));
+    return;
+  }
+
+  String page;
+  page.reserve(700);
+  appendHeader(page, F("Mymota MQTT"));
+  page += F("<p class='ok'>MQTT settings saved.</p>");
+  page += F("<p><a href='/'>Back</a></p>");
+  appendFooter(page);
+  sendHtml(page);
+}
+
 void handlePowerSave() {
   if (!server.hasArg("relay") || !server.hasArg("state")) {
     server.send(400, F("text/plain"), F("Missing relay or state"));
@@ -1404,7 +1831,7 @@ void handleReboot() {
 
 void handleHealth() {
   String out;
-  out.reserve(900);
+  out.reserve(1150);
   out += F("{\"name\":\"mymota\",\"version\":\"");
   out += F(MYMOTA_VERSION);
   out += F("\",\"target\":\"");
@@ -1416,7 +1843,7 @@ void handleHealth() {
   out += F(",\"uptime\":");
   out += millis() / 1000;
   out += F(",\"wifi\":");
-  out += (WiFi.status() == WL_CONNECTED) ? F("true") : F("false");
+  out += ((WiFi.status() == WL_CONNECTED) ? F("true") : F("false"));
   out += F(",\"configured_phy_mode\":");
   out += config.phy_mode;
   out += F(",\"configured_phy\":\"");
@@ -1425,7 +1852,22 @@ void handleHealth() {
   out += WiFi.getPhyMode();
   out += F(",\"active_phy\":\"");
   out += phyModeName(WiFi.getPhyMode());
-  out += F("\",\"template\":{\"enabled\":");
+  out += F("\",\"mqtt\":{\"enabled\":");
+  out += (config.mqtt_host[0] ? F("true") : F("false"));
+  out += F(",\"connected\":");
+  out += (mqtt_client.connected() ? F("true") : F("false"));
+  out += F(",\"host\":\"");
+  out += jsonEscape(config.mqtt_host);
+  out += F("\",\"port\":");
+  out += config.mqtt_port;
+  out += F(",\"topic\":\"");
+  out += jsonEscape(config.mqtt_topic);
+  out += F("\",\"keepalive\":");
+  out += config.mqtt_keepalive;
+  out += F(",\"pending\":");
+  out += mqtt_pending_relay_mask;
+  out += F("}");
+  out += F(",\"template\":{\"enabled\":");
   if (runtime_template.enabled) {
     out += F("true");
   } else {
@@ -1661,6 +2103,7 @@ void setupRoutes() {
   server.on(F("/scan"), HTTP_GET, handleScan);
   server.on(F("/wifi"), HTTP_POST, handleWifiSave);
   server.on(F("/template"), HTTP_POST, handleTemplateSave);
+  server.on(F("/mqtt"), HTTP_POST, handleMqttSave);
   server.on(F("/power"), HTTP_POST, handlePowerSave);
   server.on(F("/reboot"), HTTP_GET, handleReboot);
   server.on(F("/health"), HTTP_GET, handleHealth);
@@ -1709,6 +2152,7 @@ void loop() {
   server.handleClient();
   maintainWifi();
   maintainDevice();
+  maintainMqtt();
 
   if (restart_at && millis() > restart_at) {
     delay(50);
