@@ -534,8 +534,47 @@ uint64_t energy_journal_saved_ukwh = 0;
 bool energy_persist_requested = false;
 float adc_temperature_c = NAN;
 uint16_t adc_raw = 0;
+uint32_t perf_window_start_ms = 0;
+bool perf_window_started = false;
+uint32_t perf_loop_count = 0;
+uint32_t perf_busy_us = 0;
+uint32_t perf_max_loop_us = 0;
+uint32_t perf_last_loop_hz = 0;
+uint8_t perf_last_loop_load = 0;
+uint32_t perf_last_loop_max_us = 0;
 
 bool hasPin(const PinAssignment &assignment);
+
+void recordLoopPerf(uint32_t started_us, uint32_t ended_us) {
+  const uint32_t now_ms = millis();
+  const uint32_t elapsed_us = ended_us - started_us;
+  if (!perf_window_started) {
+    perf_window_start_ms = now_ms;
+    perf_window_started = true;
+  }
+
+  perf_loop_count++;
+  perf_busy_us += elapsed_us;
+  if (elapsed_us > perf_max_loop_us) perf_max_loop_us = elapsed_us;
+
+  const uint32_t window_ms = now_ms - perf_window_start_ms;
+  if (window_ms < 1000) return;
+
+  perf_last_loop_hz = (perf_loop_count * 1000UL) / window_ms;
+  const uint32_t window_us = window_ms * 1000UL;
+  uint32_t load = 0;
+  if (window_us > 0) {
+    load = static_cast<uint32_t>((static_cast<uint64_t>(perf_busy_us) * 100ULL) / window_us);
+    if (load > 100) load = 100;
+  }
+  perf_last_loop_load = static_cast<uint8_t>(load);
+  perf_last_loop_max_us = perf_max_loop_us;
+
+  perf_window_start_ms = now_ms;
+  perf_loop_count = 0;
+  perf_busy_us = 0;
+  perf_max_loop_us = 0;
+}
 
 uint32_t fnv1a(const uint8_t *data, size_t len) {
   uint32_t hash = 2166136261UL;
@@ -3088,6 +3127,7 @@ void appendFooter(String &page, bool live_poll = true, bool reboot_wait = false)
   page += F("function fmt(v,d,u){return v==null?'n/a':Number(v).toFixed(d)+(u||'');}");
   page += F("function live(){fh().then(function(d){");
   page += F("t('live-heap',d.heap+' bytes');t('live-uptime',d.uptime+'s');t('live-active-phy',d.active_phy);");
+  page += F("if(d.perf){t('live-loop-load',d.perf.loop_load+'%');t('live-loop-hz',d.perf.loop_hz+'/s');t('live-loop-max',Number(d.perf.loop_max_us/1000).toFixed(1)+' ms');}");
   page += F("t('live-recovery',d.recovery.fast_boot_count+'/'+d.recovery.limit);");
   page += F("p('live-wifi',d.wifi?'connected':'disconnected',d.wifi?'pill ok':'pill bad');t('live-ssid',d.wifi_ssid||'n/a');t('live-ip',d.ip||'n/a');t('live-rssi',d.rssi==null?'n/a':d.rssi+' dBm');");
   page += F("p('live-mqtt',d.mqtt.enabled?(d.mqtt.connected?'connected':'disconnected'):'not configured',d.mqtt.enabled?(d.mqtt.connected?'pill ok':'pill bad'):'pill');");
@@ -3147,7 +3187,13 @@ void appendStatusBlock(String &page) {
   page += String(ESP.getFreeHeap());
   page += F(" bytes</code></div><span>Uptime</span><div><code id='live-uptime'>");
   page += String(millis() / 1000);
-  page += F("s</code></div><span>PHY mode</span><div><code>");
+  page += F("s</code></div><span>Loop load</span><div><code id='live-loop-load'>");
+  page += String(perf_last_loop_load);
+  page += F("%</code> app busy</div><span>Loop rate</span><div><code id='live-loop-hz'>");
+  page += String(perf_last_loop_hz);
+  page += F("/s</code></div><span>Slowest loop</span><div><code id='live-loop-max'>");
+  page += String(static_cast<float>(perf_last_loop_max_us) / 1000.0f, 1);
+  page += F(" ms</code></div><span>PHY mode</span><div><code>");
   page += phyModeName(config.phy_mode);
   page += F("</code> configured <code id='live-active-phy'>");
   page += phyModeName(WiFi.getPhyMode());
@@ -4156,6 +4202,13 @@ void handleHealth() {
   out += ESP.getFreeHeap();
   out += F(",\"uptime\":");
   out += millis() / 1000;
+  out += F(",\"perf\":{\"loop_hz\":");
+  out += perf_last_loop_hz;
+  out += F(",\"loop_load\":");
+  out += perf_last_loop_load;
+  out += F(",\"loop_max_us\":");
+  out += perf_last_loop_max_us;
+  out += F("}");
   out += F(",\"wifi\":");
   out += ((WiFi.status() == WL_CONNECTED) ? F("true") : F("false"));
   out += F(",\"wifi_ssid\":\"");
@@ -4606,6 +4659,8 @@ void setup() {
 }
 
 void loop() {
+  const uint32_t loop_started_us = micros();
+
   server.handleClient();
   maintainBootRecovery();
   maintainWifi();
@@ -4619,5 +4674,6 @@ void loop() {
     ESP.restart();
   }
 
+  recordLoopPerf(loop_started_us, micros());
   yield();
 }
