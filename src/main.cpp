@@ -42,7 +42,6 @@ constexpr uint32_t kBootRecoveryStableMs = 30000;
 constexpr uint32_t kBootRecoveryBootMarker = 0x4d594254;  // MYBT
 constexpr uint32_t kBootRecoveryStableMarker = kBootRecoveryMagic;
 constexpr uint32_t kBootRecoveryEmptyMarker = 0xffffffffUL;
-constexpr const char *kApPassword = "mymota-setup";
 constexpr uint8_t kPhyModeAuto = 0;
 constexpr uint8_t kPhyModeFailsafe = WIFI_PHY_MODE_11G;
 constexpr uint8_t kBootRecoveryLimit = 5;
@@ -2778,9 +2777,7 @@ void appendStatusBlock(String &page) {
   if (ap_started) {
     page += F("<span>Setup AP</span><div><code>");
     page += htmlEscape(WiFi.softAPSSID());
-    page += F("</code> <code>");
-    page += kApPassword;
-    page += F("</code> at <code>");
+    page += F("</code> <span class='pill ok'>open</span> at <code>");
     page += ipToString(WiFi.softAPIP());
     page += F("</code></div>");
   }
@@ -4053,7 +4050,7 @@ void startAp() {
   last_ap_attempt = now;
   const String ap_name = defaultHostname();
   WiFi.mode(WIFI_AP_STA);
-  ap_started = WiFi.softAP(ap_name.c_str(), kApPassword);
+  ap_started = WiFi.softAP(ap_name.c_str());
 }
 
 void applyPhyMode(uint8_t phy_mode) {
