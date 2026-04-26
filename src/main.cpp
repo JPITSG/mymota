@@ -36,7 +36,8 @@ constexpr uint16_t kConfigVersionV6 = 6;
 constexpr uint16_t kConfigVersionV7 = 7;
 constexpr uint16_t kConfigVersionV8 = 8;
 constexpr uint16_t kConfigVersionV9 = 9;
-constexpr uint16_t kConfigVersion = 10;
+constexpr uint16_t kConfigVersionV10 = 10;
+constexpr uint16_t kConfigVersion = 11;
 constexpr size_t kEepromSize = 4096;
 constexpr size_t kFlashSectorSize = 4096;
 constexpr uint8_t kEnergyJournalSectorCount = 2;
@@ -102,6 +103,14 @@ constexpr uint8_t kButtonActionNone = 0;
 constexpr uint8_t kButtonActionRelayToggle = 1;
 constexpr uint8_t kButtonActionMqtt = 2;
 constexpr uint8_t kButtonActionWebhook = 3;
+constexpr uint8_t kInputKindButton = 0;
+constexpr uint8_t kInputKindSwitch = 1;
+constexpr uint8_t kInputModeButton = 0;
+constexpr uint8_t kInputModeSwitch = 1;
+constexpr uint8_t kInputModeUnset = 255;
+constexpr uint8_t kInputOnLevelLow = 0;
+constexpr uint8_t kInputOnLevelHigh = 1;
+constexpr uint8_t kInputOnLevelUnset = 255;
 constexpr size_t kButtonActionTargetMaxLen = 128;
 constexpr size_t kButtonActionPayloadMaxLen = 128;
 constexpr uint8_t kMqttButtonQueueDepth = 4;
@@ -129,23 +138,30 @@ constexpr uint16_t kTplKey1 = 32;
 constexpr uint16_t kTplKey1Np = 64;
 constexpr uint16_t kTplKey1Inv = 96;
 constexpr uint16_t kTplKey1InvNp = 128;
+constexpr uint16_t kTplSwt1 = 160;
+constexpr uint16_t kTplSwt1Np = 192;
 constexpr uint16_t kTplRel1 = 224;
 constexpr uint16_t kTplRel1Inv = 256;
 constexpr uint16_t kTplLed1 = 288;
 constexpr uint16_t kTplLed1Inv = 320;
 constexpr uint16_t kTplLedLnk = 544;
 constexpr uint16_t kTplLedLnkInv = 576;
+constexpr uint16_t kTplI2cScl = 608;
+constexpr uint16_t kTplI2cSda = 640;
 constexpr uint16_t kTplNrgSel = 2592;
 constexpr uint16_t kTplNrgSelInv = 2624;
 constexpr uint16_t kTplNrgCf1 = 2656;
 constexpr uint16_t kTplHlwCf = 2688;
 constexpr uint16_t kTplHjlCf = 2720;
+constexpr uint16_t kTplAde7953Irq = 3456;
 constexpr uint16_t kTplAdcTemp = 4736;
 
 const char kTemplateShellyPlugSJson[] PROGMEM =
   "{\"NAME\":\"Shelly Plug S\",\"GPIO\":[320,1,576,1,1,2720,0,0,2624,32,2656,224,1,4736],\"FLAG\":0,\"BASE\":45}";
 const char kTemplateNousA1TJson[] PROGMEM =
   "{\"NAME\":\"NOUS A1T\",\"GPIO\":[32,0,0,0,2720,2656,0,0,2624,320,224,0,0,0],\"FLAG\":0,\"BASE\":18}";
+const char kTemplateShelly25Json[] PROGMEM =
+  "{\"NAME\":\"Shelly 2.5\",\"GPIO\":[320,0,0,0,224,193,0,0,640,192,608,225,3456,4736],\"FLAG\":0,\"BASE\":18}";
 
 constexpr uint32_t kHlwPowerCal = 12530;
 constexpr uint32_t kHlwVoltageCal = 1950;
@@ -361,6 +377,38 @@ struct StoredConfigV9 {
   uint32_t crc;
 };
 
+struct StoredConfigV10 {
+  uint32_t magic;
+  uint16_t version;
+  uint16_t size;
+  char ssid[33];
+  char password[65];
+  char hostname[33];
+  uint8_t phy_mode;
+  uint8_t template_enabled;
+  uint16_t template_base;
+  uint32_t template_flag;
+  char template_name[33];
+  uint16_t template_gpio[kTemplateSlotCount];
+  uint16_t mqtt_port;
+  uint16_t mqtt_keepalive;
+  char mqtt_host[kMqttHostMaxLen + 1];
+  char mqtt_topic[kMqttTopicMaxLen + 1];
+  float energy_total_offset_kwh;
+  uint8_t led_attach[kMaxLedOutputs];
+  uint16_t button_hold_ms;
+  uint8_t button_press_action[kMaxButtons];
+  uint8_t button_hold_action[kMaxButtons];
+  uint16_t energy_mqtt_interval;
+  uint16_t energy_mqtt_change_percent_x10;
+  char button_press_target[kMaxButtons][kButtonActionTargetMaxLen + 1];
+  char button_press_payload[kMaxButtons][kButtonActionPayloadMaxLen + 1];
+  char button_hold_target[kMaxButtons][kButtonActionTargetMaxLen + 1];
+  char button_hold_payload[kMaxButtons][kButtonActionPayloadMaxLen + 1];
+  uint16_t button_debounce_ms;
+  uint32_t crc;
+};
+
 struct StoredConfig {
   uint32_t magic;
   uint16_t version;
@@ -390,6 +438,10 @@ struct StoredConfig {
   char button_hold_target[kMaxButtons][kButtonActionTargetMaxLen + 1];
   char button_hold_payload[kMaxButtons][kButtonActionPayloadMaxLen + 1];
   uint16_t button_debounce_ms;
+  uint8_t input_mode[kMaxButtons];
+  uint8_t input_relay[kMaxButtons];
+  uint8_t input_on_level[kMaxButtons];
+  uint8_t reserved[1];
   uint32_t crc;
 };
 
@@ -422,11 +474,16 @@ struct RuntimeTemplate {
   uint32_t flag;
   PinAssignment relays[kMaxRelays];
   PinAssignment buttons[kMaxButtons];
+  uint8_t input_kind[kMaxButtons];
   PinAssignment leds[kMaxLeds];
   PinAssignment link_led;
   uint8_t relay_count;
   uint8_t button_count;
   uint8_t led_count;
+  uint8_t i2c_scl_pin;
+  uint8_t i2c_sda_pin;
+  uint8_t ade7953_irq_pin;
+  uint8_t ade7953_model;
   uint8_t energy_cf_pin;
   uint8_t energy_cf1_pin;
   uint8_t energy_sel_pin;
@@ -676,6 +733,15 @@ void setDefaultButtonActionTexts() {
   }
 }
 
+void setDefaultInputConfig() {
+  for (uint8_t i = 0; i < kMaxButtons; i++) {
+    config.input_mode[i] = kInputModeUnset;
+    config.input_relay[i] = i;
+    config.input_on_level[i] = kInputOnLevelUnset;
+  }
+  memset(config.reserved, 0, sizeof(config.reserved));
+}
+
 void setDefaultButtonConfig() {
   config.button_hold_ms = kButtonHoldDefaultMs;
   config.button_debounce_ms = kButtonDebounceDefaultMs;
@@ -684,6 +750,7 @@ void setDefaultButtonConfig() {
     config.button_hold_action[i] = kButtonActionNone;
   }
   setDefaultButtonActionTexts();
+  setDefaultInputConfig();
 }
 
 bool isLedAttachmentEncoding(uint8_t value) {
@@ -710,6 +777,14 @@ bool isButtonActionEncoding(uint8_t value) {
          value == kButtonActionRelayToggle ||
          value == kButtonActionMqtt ||
          value == kButtonActionWebhook;
+}
+
+bool isInputModeEncoding(uint8_t value) {
+  return value == kInputModeUnset || value == kInputModeButton || value == kInputModeSwitch;
+}
+
+bool isInputOnLevelEncoding(uint8_t value) {
+  return value == kInputOnLevelUnset || value == kInputOnLevelLow || value == kInputOnLevelHigh;
 }
 
 void setDefaultConfig() {
@@ -1132,6 +1207,15 @@ void normalizeConfigStrings() {
     if (!isButtonActionEncoding(config.button_hold_action[i])) {
       config.button_hold_action[i] = kButtonActionNone;
     }
+    if (!isInputModeEncoding(config.input_mode[i])) {
+      config.input_mode[i] = kInputModeUnset;
+    }
+    if (config.input_relay[i] >= kMaxRelays) {
+      config.input_relay[i] = i;
+    }
+    if (!isInputOnLevelEncoding(config.input_on_level[i])) {
+      config.input_on_level[i] = kInputOnLevelUnset;
+    }
     if (config.button_press_target[i][0] == '\0') {
       strlcpy(config.button_press_target[i], kDefaultButtonMqttTopic, sizeof(config.button_press_target[i]));
     }
@@ -1145,6 +1229,7 @@ void normalizeConfigStrings() {
       strlcpy(config.button_hold_payload[i], kDefaultButtonMqttHoldPayload, sizeof(config.button_hold_payload[i]));
     }
   }
+  memset(config.reserved, 0, sizeof(config.reserved));
   if (!config.template_enabled) {
     clearTemplateConfig();
   } else {
@@ -1188,7 +1273,10 @@ bool saveButtonConfig(uint16_t hold_ms, uint16_t debounce_ms,
                       const char press_targets[][kButtonActionTargetMaxLen + 1],
                       const char press_payloads[][kButtonActionPayloadMaxLen + 1],
                       const char hold_targets[][kButtonActionTargetMaxLen + 1],
-                      const char hold_payloads[][kButtonActionPayloadMaxLen + 1]);
+                      const char hold_payloads[][kButtonActionPayloadMaxLen + 1],
+                      const uint8_t *input_modes,
+                      const uint8_t *input_relays,
+                      const uint8_t *input_on_levels);
 
 bool loadConfig() {
   EEPROM.begin(kEepromSize);
@@ -1213,6 +1301,26 @@ bool loadConfig() {
     }
     normalizeConfigStrings();
     config_ok = config.ssid[0] != '\0';
+    return config_ok;
+  }
+
+  if (header.version == kConfigVersionV10 && header.size == sizeof(StoredConfigV10)) {
+    StoredConfigV10 *old_config = new StoredConfigV10;
+    if (!old_config) {
+      setDefaultConfig();
+      return false;
+    }
+    EEPROM.get(0, *old_config);
+    if (old_config->crc != configCrc(*old_config)) {
+      delete old_config;
+      setDefaultConfig();
+      return false;
+    }
+    memset(&config, 0, sizeof(config));
+    memcpy(&config, old_config, offsetof(StoredConfigV10, crc));
+    setDefaultInputConfig();
+    delete old_config;
+    commitConfig();
     return config_ok;
   }
 
@@ -1260,6 +1368,7 @@ bool loadConfig() {
     memcpy(config.button_hold_target, old_config->button_hold_target, sizeof(config.button_hold_target));
     memcpy(config.button_hold_payload, old_config->button_hold_payload, sizeof(config.button_hold_payload));
     config.button_debounce_ms = kButtonDebounceDefaultMs;
+    setDefaultInputConfig();
     delete old_config;
     commitConfig();
     return config_ok;
@@ -1300,6 +1409,7 @@ bool loadConfig() {
     config.energy_mqtt_interval = old_config.energy_mqtt_interval;
     config.energy_mqtt_change_percent_x10 = old_config.energy_mqtt_change_percent_x10;
     setDefaultButtonActionTexts();
+    setDefaultInputConfig();
     commitConfig();
     return config_ok;
   }
@@ -1337,6 +1447,7 @@ bool loadConfig() {
     memcpy(config.button_press_action, old_config.button_press_action, sizeof(config.button_press_action));
     memcpy(config.button_hold_action, old_config.button_hold_action, sizeof(config.button_hold_action));
     setDefaultEnergyMqttConfig();
+    setDefaultInputConfig();
     commitConfig();
     return config_ok;
   }
@@ -1584,7 +1695,10 @@ bool saveButtonConfig(uint16_t hold_ms, uint16_t debounce_ms,
                       const char press_targets[][kButtonActionTargetMaxLen + 1],
                       const char press_payloads[][kButtonActionPayloadMaxLen + 1],
                       const char hold_targets[][kButtonActionTargetMaxLen + 1],
-                      const char hold_payloads[][kButtonActionPayloadMaxLen + 1]) {
+                      const char hold_payloads[][kButtonActionPayloadMaxLen + 1],
+                      const uint8_t *input_modes,
+                      const uint8_t *input_relays,
+                      const uint8_t *input_on_levels) {
   config.button_hold_ms = hold_ms;
   config.button_debounce_ms = debounce_ms;
   memcpy(config.button_press_action, press_actions, sizeof(config.button_press_action));
@@ -1593,6 +1707,9 @@ bool saveButtonConfig(uint16_t hold_ms, uint16_t debounce_ms,
   memcpy(config.button_press_payload, press_payloads, sizeof(config.button_press_payload));
   memcpy(config.button_hold_target, hold_targets, sizeof(config.button_hold_target));
   memcpy(config.button_hold_payload, hold_payloads, sizeof(config.button_hold_payload));
+  memcpy(config.input_mode, input_modes, sizeof(config.input_mode));
+  memcpy(config.input_relay, input_relays, sizeof(config.input_relay));
+  memcpy(config.input_on_level, input_on_levels, sizeof(config.input_on_level));
   return commitConfig();
 }
 
@@ -1775,6 +1892,63 @@ bool readAssignedPressed(const PinAssignment &assignment) {
   return assignment.inverted ? high : !high;
 }
 
+bool isSwitchInput(uint8_t input) {
+  return input < kMaxButtons && runtime_template.input_kind[input] == kInputKindSwitch;
+}
+
+uint8_t defaultInputMode(uint8_t input) {
+  return isSwitchInput(input) ? kInputModeSwitch : kInputModeButton;
+}
+
+uint8_t effectiveInputMode(uint8_t input) {
+  if (input >= kMaxButtons) return kInputModeButton;
+  if (config.input_mode[input] == kInputModeButton || config.input_mode[input] == kInputModeSwitch) {
+    return config.input_mode[input];
+  }
+  return defaultInputMode(input);
+}
+
+uint8_t defaultInputOnLevel(uint8_t input) {
+  if (input >= kMaxButtons || !hasPin(runtime_template.buttons[input])) return kInputOnLevelLow;
+  if (isSwitchInput(input)) return kInputOnLevelHigh;
+  return runtime_template.buttons[input].inverted ? kInputOnLevelHigh : kInputOnLevelLow;
+}
+
+uint8_t effectiveInputOnLevel(uint8_t input) {
+  if (input >= kMaxButtons) return kInputOnLevelLow;
+  if (config.input_on_level[input] == kInputOnLevelLow || config.input_on_level[input] == kInputOnLevelHigh) {
+    return config.input_on_level[input];
+  }
+  return defaultInputOnLevel(input);
+}
+
+bool readInputActive(uint8_t input) {
+  if (input >= kMaxButtons || !digitalPinSupported(runtime_template.buttons[input].pin)) return false;
+  const bool high = digitalRead(runtime_template.buttons[input].pin) == HIGH;
+  return high == (effectiveInputOnLevel(input) == kInputOnLevelHigh);
+}
+
+String inputKindName(uint8_t input) {
+  return isSwitchInput(input) ? F("switch") : F("button");
+}
+
+String inputModeName(uint8_t input) {
+  return effectiveInputMode(input) == kInputModeSwitch ? F("switch follow") : F("button actions");
+}
+
+String inputDisplayName(uint8_t input) {
+  String name = isSwitchInput(input) ? F("Switch ") : F("Button ");
+  name += String(input + 1);
+  return name;
+}
+
+String inputStateName(uint8_t input, bool active) {
+  if (effectiveInputMode(input) == kInputModeSwitch) {
+    return active ? F("on") : F("off");
+  }
+  return active ? F("pressed") : F("released");
+}
+
 const PinAssignment *ledOutputAssignment(uint8_t led) {
   if (led < kMaxLeds) return &runtime_template.leds[led];
   if (led == kMaxLeds) return &runtime_template.link_led;
@@ -1800,7 +1974,7 @@ String ledAttachmentName(uint8_t value) {
     return String(F("relay")) + String(index + 1);
   }
   if (ledAttachmentButtonIndex(value, index)) {
-    return String(F("button")) + String(index + 1);
+    return String(F("input")) + String(index + 1);
   }
   return F("none");
 }
@@ -1862,6 +2036,16 @@ bool buttonRelayTarget(uint8_t button, uint8_t &relay) {
   return false;
 }
 
+bool inputRelayTarget(uint8_t input, uint8_t &relay) {
+  if (input >= kMaxButtons) return false;
+  const uint8_t configured = config.input_relay[input];
+  if (configured < runtime_template.relay_count && hasPin(runtime_template.relays[configured])) {
+    relay = configured;
+    return true;
+  }
+  return buttonRelayTarget(input, relay);
+}
+
 bool buttonActionAvailable(uint8_t button, uint8_t action) {
   if (action == kButtonActionNone) return true;
   if (action == kButtonActionRelayToggle) {
@@ -1919,6 +2103,22 @@ void parseTemplateFunction(uint8_t pin, uint16_t code) {
       base == kTplKey1Inv || base == kTplKey1InvNp,
       base == kTplKey1Np || base == kTplKey1InvNp
     };
+    runtime_template.input_kind[index] = kInputKindButton;
+    if (runtime_template.button_count <= index) runtime_template.button_count = index + 1;
+    return;
+  }
+
+  if (base == kTplSwt1 || base == kTplSwt1Np) {
+    if (index >= kMaxButtons) {
+      addUnsupportedTemplatePin(pin, code);
+      return;
+    }
+    runtime_template.buttons[index] = {
+      pin,
+      false,
+      base == kTplSwt1Np
+    };
+    runtime_template.input_kind[index] = kInputKindSwitch;
     if (runtime_template.button_count <= index) runtime_template.button_count = index + 1;
     return;
   }
@@ -1948,6 +2148,16 @@ void parseTemplateFunction(uint8_t pin, uint16_t code) {
     return;
   }
 
+  if (code == kTplI2cScl) {
+    runtime_template.i2c_scl_pin = pin;
+    return;
+  }
+
+  if (code == kTplI2cSda) {
+    runtime_template.i2c_sda_pin = pin;
+    return;
+  }
+
   if (code == kTplNrgSel || code == kTplNrgSelInv) {
     runtime_template.energy_sel_pin = pin;
     runtime_template.energy_sel_inverted = code == kTplNrgSelInv;
@@ -1973,6 +2183,13 @@ void parseTemplateFunction(uint8_t pin, uint16_t code) {
     return;
   }
 
+  if (base == kTplAde7953Irq) {
+    runtime_template.ade7953_irq_pin = pin;
+    runtime_template.ade7953_model = index;
+    addUnsupportedTemplatePin(pin, code);
+    return;
+  }
+
   addUnsupportedTemplatePin(pin, code);
 }
 
@@ -1995,6 +2212,9 @@ void decodeTemplateConfig() {
   for (uint8_t i = 0; i < kMaxButtons; i++) resetPinAssignment(runtime_template.buttons[i]);
   for (uint8_t i = 0; i < kMaxLeds; i++) resetPinAssignment(runtime_template.leds[i]);
   resetPinAssignment(runtime_template.link_led);
+  runtime_template.i2c_scl_pin = kInvalidPin;
+  runtime_template.i2c_sda_pin = kInvalidPin;
+  runtime_template.ade7953_irq_pin = kInvalidPin;
   runtime_template.energy_cf_pin = kInvalidPin;
   runtime_template.energy_cf1_pin = kInvalidPin;
   runtime_template.energy_sel_pin = kInvalidPin;
@@ -2959,7 +3179,7 @@ void maintainButtons() {
   const uint32_t now = millis();
   for (uint8_t i = 0; i < runtime_template.button_count; i++) {
     if (!hasPin(runtime_template.buttons[i])) continue;
-    const bool raw = readAssignedPressed(runtime_template.buttons[i]);
+    const bool raw = readInputActive(i);
     if (raw != button_state[i].raw_pressed) {
       button_state[i].raw_pressed = raw;
       button_state[i].changed_at = now;
@@ -2967,22 +3187,31 @@ void maintainButtons() {
     if ((now - button_state[i].changed_at) >= config.button_debounce_ms && raw != button_state[i].stable_pressed) {
       button_state[i].stable_pressed = raw;
       bool led_handled = false;
-      if (raw) {
-        button_state[i].pressed_at = now;
-        button_state[i].hold_emitted = false;
-        if (config.button_hold_action[i] == kButtonActionNone) {
-          led_handled = runButtonAction(i, config.button_press_action[i], false);
-          button_state[i].hold_emitted = true;
+      if (effectiveInputMode(i) == kInputModeSwitch) {
+        uint8_t relay = 0;
+        if (inputRelayTarget(i, relay)) {
+          setRelay(relay, raw);
         }
+        button_state[i].hold_emitted = false;
       } else {
-        if (!button_state[i].hold_emitted) {
-          led_handled = runButtonAction(i, config.button_press_action[i], false);
+        if (raw) {
+          button_state[i].pressed_at = now;
+          button_state[i].hold_emitted = false;
+          if (config.button_hold_action[i] == kButtonActionNone) {
+            led_handled = runButtonAction(i, config.button_press_action[i], false);
+            button_state[i].hold_emitted = true;
+          }
+        } else {
+          if (!button_state[i].hold_emitted) {
+            led_handled = runButtonAction(i, config.button_press_action[i], false);
+          }
+          button_state[i].hold_emitted = false;
         }
-        button_state[i].hold_emitted = false;
       }
       if (!led_handled) updateDeviceLeds(true);
     }
-    if (button_state[i].stable_pressed &&
+    if (effectiveInputMode(i) == kInputModeButton &&
+        button_state[i].stable_pressed &&
         !button_state[i].hold_emitted &&
         now - button_state[i].pressed_at >= config.button_hold_ms) {
       button_state[i].hold_emitted = true;
@@ -3096,8 +3325,14 @@ void setupDevicePins() {
   for (uint8_t i = 0; i < kMaxButtons; i++) {
     if (!hasPin(runtime_template.buttons[i])) continue;
     pinMode(runtime_template.buttons[i].pin, runtime_template.buttons[i].no_pullup ? INPUT : INPUT_PULLUP);
-    const bool pressed = readAssignedPressed(runtime_template.buttons[i]);
-    button_state[i] = {pressed, pressed, false, millis(), millis()};
+    const bool active = readInputActive(i);
+    button_state[i] = {active, active, false, millis(), millis()};
+    if (effectiveInputMode(i) == kInputModeSwitch) {
+      uint8_t relay = 0;
+      if (inputRelayTarget(i, relay)) {
+        setRelay(relay, active);
+      }
+    }
   }
 
   setupEnergyMonitor();
@@ -3128,7 +3363,7 @@ void appendHeader(String &page, const __FlashStringHelper *title, bool show_spin
   page += F(".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;box-shadow:0 1px 2px rgba(0,0,0,.04)}.wide{grid-column:1/-1}");
   page += F(".panel h2{font-size:17px;margin:0 0 12px}.kv{display:grid;grid-template-columns:minmax(110px,42%) 1fr;gap:8px 12px}.kv span,.hint{color:var(--muted)}.kv div{min-width:0}");
   page += F("code{background:#eef2f6;border:1px solid #dce3ea;border-radius:4px;padding:1px 4px;word-break:break-word}.pill{display:inline-block;border-radius:999px;padding:2px 8px;background:#eef2f6;color:#364152}.pill.ok{background:var(--ok);color:#fff}.pill.bad{background:var(--bad);color:#fff}.panel h2 .pill{font-size:13px;font-weight:400;vertical-align:1px}.ok{color:var(--ok)}.bad{color:var(--bad)}.muted{color:var(--muted)}");
-  page += F(".note{background:#eef2f6;border:1px solid #dce3ea;border-radius:6px;padding:10px;margin:10px 0}.note p{margin:0 0 7px}.tokens{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px}.tokens div{display:flex;flex-direction:column;gap:3px}.button-block{border-top:1px solid var(--line);margin-top:12px;padding-top:12px}.action-extra{display:none}.action-extra.show{display:block}.payload-row.hidden{display:none}");
+  page += F(".note{background:#eef2f6;border:1px solid #dce3ea;border-radius:6px;padding:10px;margin:10px 0}.note p{margin:0 0 7px}.tokens{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px}.tokens div{display:flex;flex-direction:column;gap:3px}.button-block{border-top:1px solid var(--line);margin-top:12px;padding-top:12px}.action-extra,.mode-extra{display:none}.action-extra.show,.mode-extra.show{display:block}.payload-row.hidden{display:none}");
   page += F("form{margin:0}.row{margin:10px 0}label{display:block;font-weight:600;color:#344054}input,button,select,textarea{font:inherit}input,select,textarea{width:100%;margin-top:4px;padding:9px;border:1px solid #b9c4d0;border-radius:6px;background:#fff}textarea{min-height:92px;resize:vertical}");
   page += F("button,.btn{display:inline-block;margin:4px 4px 0 0;padding:8px 12px;border:1px solid var(--accent);border-radius:6px;background:var(--accent);color:#fff;text-decoration:none;cursor:pointer}.secondary{background:#fff;color:var(--accent2);border-color:#9eb7cf}.danger{background:#fff;color:var(--bad);border-color:#d4aaa7}.inline{display:inline}.actions{display:flex;flex-wrap:wrap;gap:6px}.inline button{margin:0 4px 0 0}.list{margin:0;padding-left:18px}@media(max-width:520px){.kv{grid-template-columns:1fr}.brand{font-size:24px}}</style></head><body>");
   page += F("<header class='top'><div class='topin'><div><div class='brand'>my<span>Mota</span></div><div class='sub'>ESP8266/ESP8285 firmware</div></div><div class='sub meta'><span>");
@@ -3157,14 +3392,15 @@ void appendFooter(String &page, bool live_poll = true, bool reboot_wait = false)
   page += F("p('live-mqtt',d.mqtt.enabled?(d.mqtt.connected?'connected':'disconnected'):'not configured',d.mqtt.enabled?(d.mqtt.connected?'pill ok':'pill bad'):'pill');");
   page += F("if(d.mqtt){t('live-mqtt-pending',d.mqtt.pending);t('live-mqtt-result',d.mqtt.last_connect_result);t('live-mqtt-connect-ms',d.mqtt.last_connect_ms+' ms');t('live-mqtt-attempt',d.mqtt.last_attempt_ms_ago==null?'n/a':d.mqtt.last_attempt_ms_ago+' ms ago');}");
   page += F("if(d.power){for(var i=0;i<d.power.length;i++){if(d.power[i]!==null)p('live-relay-'+i,d.power[i]?'on':'off',d.power[i]?'pill ok':'pill bad');}}");
-  page += F("if(d.buttons){for(var b=0;b<d.buttons.length;b++){if(d.buttons[b])p('live-button-'+b,d.buttons[b].pressed?'pressed':'released',d.buttons[b].pressed?'pill ok':'pill bad');}}");
+  page += F("if(d.buttons){for(var b=0;b<d.buttons.length;b++){if(d.buttons[b])p('live-button-'+b,d.buttons[b].state||(d.buttons[b].pressed?'pressed':'released'),d.buttons[b].pressed?'pill ok':'pill bad');}}");
   page += F("if(d.leds){for(var l=0;l<d.leds.length;l++){if(d.leds[l])p('live-led-'+l,d.leds[l].on?'on':'off',d.leds[l].on?'pill ok':'pill bad');}}");
   page += F("if(d.energy){t('live-energy-power',fmt(d.energy.power,1,' W'));t('live-energy-voltage',fmt(d.energy.voltage,1,' V'));t('live-energy-current',fmt(d.energy.current,3,' A'));t('live-energy-total',fmt(d.energy.total_kwh,4,' kWh'));t('live-energy-offset',fmt(d.energy.offset_kwh,4,' kWh'));}");
   page += F("t('live-temp',d.temperature_c==null?'n/a':Number(d.temperature_c).toFixed(1)+' C');t('live-adc-raw',d.adc_raw==null?'n/a':d.adc_raw);");
   page += F("}).catch(function(){});}");
   page += F("function ba(s){var k=s.getAttribute('data-key'),v=s.value,b=document.getElementById('extra-'+k);if(!b)return;var t=b.querySelector('.target-input'),p=b.querySelector('.payload-input'),pr=b.querySelector('.payload-row'),tl=b.querySelector('.target-label'),h=b.querySelector('.action-hint');b.className=(v=='2'||v=='3')?'action-extra show':'action-extra';if(v=='2'){if(t&&(!t.value||t.value.indexOf('http://')==0))t.value=t.getAttribute('data-default-topic');if(p&&!p.value)p.value=p.getAttribute('data-default-payload');if(tl)tl.textContent='MQTT topic';if(pr)pr.className='payload-row';if(h)h.textContent='Publishes this topic and payload through the configured MQTT broker.';}else if(v=='3'){if(tl)tl.textContent='Webhook URL';if(pr)pr.className='payload-row hidden';if(h)h.textContent='Executes an HTTP GET request; only http:// URLs are supported.';}}");
+  page += F("function im(s){var k=s.getAttribute('data-input'),v=s.value,b=document.getElementById('input-button-'+k),w=document.getElementById('input-switch-'+k);if(b)b.className=v=='0'?'mode-extra show':'mode-extra';if(w)w.className=v=='1'?'mode-extra show':'mode-extra';}");
   page += F("function tp(s){var o=s.options[s.selectedIndex],t=document.getElementById('template-json');if(o&&t&&o.getAttribute('data-json')){t.value=o.getAttribute('data-json');s.selectedIndex=0;}}");
-  page += F("function bi(){var a=document.querySelectorAll('.button-action');for(var i=0;i<a.length;i++){a[i].onchange=function(){ba(this)};ba(a[i]);}}bi();");
+  page += F("function bi(){var a=document.querySelectorAll('.button-action');for(var i=0;i<a.length;i++){a[i].onchange=function(){ba(this)};ba(a[i]);}var m=document.querySelectorAll('.input-mode');for(var j=0;j<m.length;j++){m[j].onchange=function(){im(this)};im(m[j]);}}bi();");
   if (live_poll) {
     page += F("setInterval(live,1000);setInterval(ck,1000);live();");
   }
@@ -3315,11 +3551,18 @@ void appendTemplateStatus(String &page) {
     page += String(runtime_template.relay_count);
     page += F("</code> relays <code>");
     page += String(runtime_template.button_count);
-    page += F("</code> buttons <code>");
-	    page += String(runtime_template.led_count);
-	    page += F("</code> LEDs</div>");
-	    if (energy.present) {
-	      page += F("<span>Energy</span><div><code>");
+    page += F("</code> inputs <code>");
+    page += String(runtime_template.led_count);
+    page += F("</code> LEDs</div>");
+    if (runtime_template.i2c_scl_pin != kInvalidPin || runtime_template.i2c_sda_pin != kInvalidPin) {
+      page += F("<span>I2C</span><div>SCL <code>");
+      page += pinName(runtime_template.i2c_scl_pin);
+      page += F("</code>, SDA <code>");
+      page += pinName(runtime_template.i2c_sda_pin);
+      page += F("</code></div>");
+    }
+    if (energy.present) {
+      page += F("<span>Energy</span><div><code>");
       if (energy.hjl) {
         page += F("HJL/BL0937");
       } else {
@@ -3465,7 +3708,7 @@ void appendLedSettings(String &page) {
     }
     for (uint8_t button = 0; button < runtime_template.button_count; button++) {
       if (!hasPin(runtime_template.buttons[button])) continue;
-      appendLedAttachmentOption(page, kLedAttachButtonBase + button, String(F("Button ")) + String(button + 1), selected);
+      appendLedAttachmentOption(page, kLedAttachButtonBase + button, String(F("Input ")) + String(button + 1), selected);
     }
     page += F("</select></label></div>");
   }
@@ -3481,6 +3724,30 @@ void appendButtonActionOption(String &page, uint8_t value, const String &label, 
   }
   page += F(">");
   page += htmlEscape(label);
+  page += F("</option>");
+}
+
+void appendInputModeOption(String &page, uint8_t value, const String &label, uint8_t selected) {
+  page += F("<option value='");
+  page += String(value);
+  page += F("'");
+  if (selected == value) {
+    page += F(" selected");
+  }
+  page += F(">");
+  page += htmlEscape(label);
+  page += F("</option>");
+}
+
+void appendInputRelayOption(String &page, uint8_t value, uint8_t selected) {
+  page += F("<option value='");
+  page += String(value);
+  page += F("'");
+  if (selected == value) {
+    page += F(" selected");
+  }
+  page += F(">Relay ");
+  page += String(value + 1);
   page += F("</option>");
 }
 
@@ -3531,7 +3798,7 @@ void appendButtonActionExtra(String &page, uint8_t button, const char *name, boo
 void appendButtonSettings(String &page) {
   if (!runtime_template.enabled || !hasConfigurableButtons()) return;
 
-  page += F("<section class='panel'><h2>Buttons</h2><form method='post' action='/buttons'>");
+  page += F("<section class='panel'><h2>Inputs</h2><form method='post' action='/buttons'>");
   page += F("<div class='row'><label>Hold time ms<br><input name='hold_ms' type='number' min='");
   page += String(kButtonHoldMinMs);
   page += F("' max='");
@@ -3546,7 +3813,7 @@ void appendButtonSettings(String &page) {
   page += String(config.button_debounce_ms);
   page += F("'></label></div>");
   page += F("<div class='note'><p><strong>Action placeholders</strong></p><div class='tokens'>");
-  page += F("<div><code>{BUTTONID}</code><span class='hint'>button number, starting at 1</span></div>");
+  page += F("<div><code>{BUTTONID}</code><span class='hint'>input number, starting at 1</span></div>");
   page += F("<div><code>{TYPE}</code><span class='hint'>TOGGLE on press, HOLD on hold</span></div>");
   page += F("<div><code>{TOPIC}</code><span class='hint'>current MQTT topic</span></div>");
   page += F("<div><code>{RELAYX_STATE}</code><span class='hint'>relay state, for example {RELAY1_STATE}</span></div>");
@@ -3554,21 +3821,63 @@ void appendButtonSettings(String &page) {
 
   for (uint8_t i = 0; i < runtime_template.button_count; i++) {
     if (!hasPin(runtime_template.buttons[i])) continue;
-    page += F("<div class='button-block'><strong>Button ");
-    page += String(i + 1);
+    const uint8_t mode = effectiveInputMode(i);
+    const uint8_t on_level = effectiveInputOnLevel(i);
+    uint8_t target_relay = 0;
+    inputRelayTarget(i, target_relay);
+    page += F("<div class='button-block'><strong>");
+    page += htmlEscape(inputDisplayName(i));
     page += F("</strong> <span class='hint'>");
     page += pinName(runtime_template.buttons[i].pin);
+    page += F(" ");
+    page += htmlEscape(inputKindName(i));
     page += F("</span> ");
     if (button_state[i].stable_pressed) {
       page += F("<span id='live-button-");
       page += String(i);
-      page += F("' class='pill ok'>pressed</span>");
+      page += F("' class='pill ok'>");
+      page += htmlEscape(inputStateName(i, true));
+      page += F("</span>");
     } else {
       page += F("<span id='live-button-");
       page += String(i);
-      page += F("' class='pill bad'>released</span>");
+      page += F("' class='pill bad'>");
+      page += htmlEscape(inputStateName(i, false));
+      page += F("</span>");
     }
-    page += F("<div class='row'><label>Press<br>");
+    page += F("<div class='row'><label>Kind<br><select class='input-mode' data-input='");
+    page += String(i);
+    page += F("' name='mode");
+    page += String(i);
+    page += F("'>");
+    appendInputModeOption(page, kInputModeButton, F("Button actions"), mode);
+    appendInputModeOption(page, kInputModeSwitch, F("Switch follows relay"), mode);
+    page += F("</select></label></div>");
+
+    page += F("<div id='input-switch-");
+    page += String(i);
+    page += F("' class='mode-extra");
+    if (mode == kInputModeSwitch) page += F(" show");
+    page += F("'><div class='row'><label>Target relay<br><select name='relay");
+    page += String(i);
+    page += F("'>");
+    for (uint8_t relay = 0; relay < runtime_template.relay_count; relay++) {
+      if (!hasPin(runtime_template.relays[relay])) continue;
+      appendInputRelayOption(page, relay, target_relay);
+    }
+    page += F("</select></label></div><div class='row'><label>Reverse<br><select name='reverse");
+    page += String(i);
+    page += F("'><option value='0'");
+    if (on_level == kInputOnLevelHigh) page += F(" selected");
+    page += F(">No, GPIO high is ON</option><option value='1'");
+    if (on_level == kInputOnLevelLow) page += F(" selected");
+    page += F(">Yes, GPIO low is ON</option></select></label></div></div>");
+
+    page += F("<div id='input-button-");
+    page += String(i);
+    page += F("' class='mode-extra");
+    if (mode == kInputModeButton) page += F(" show");
+    page += F("'><div class='row'><label>Press<br>");
     appendButtonActionSelect(page, i, "press", config.button_press_action[i]);
     page += F("</label>");
     appendButtonActionExtra(page, i, "press", false);
@@ -3576,9 +3885,9 @@ void appendButtonSettings(String &page) {
     appendButtonActionSelect(page, i, "hold", config.button_hold_action[i]);
     page += F("</label>");
     appendButtonActionExtra(page, i, "hold", true);
-    page += F("</div></div>");
+    page += F("</div></div></div>");
   }
-  page += F("<button type='submit'>Save buttons</button></form></section>");
+  page += F("<button type='submit'>Save inputs</button></form></section>");
 }
 
 void appendTemplateForm(String &page) {
@@ -3588,7 +3897,9 @@ void appendTemplateForm(String &page) {
   page += htmlEscape(String(FPSTR(kTemplateShellyPlugSJson)));
   page += F("'>Shelly Plug S</option><option data-json='");
   page += htmlEscape(String(FPSTR(kTemplateNousA1TJson)));
-  page += F("'>NOUS A1T 16A</option></select></label></div>");
+  page += F("'>NOUS A1T 16A</option><option data-json='");
+  page += htmlEscape(String(FPSTR(kTemplateShelly25Json)));
+  page += F("'>Shelly 2.5</option></select></label></div>");
   page += F("<div class='row'><label>Tasmota ESP8266 template JSON<br><textarea id='template-json' name='template' rows='5' maxlength='");
   page += String(kTemplateJsonMaxLen);
   page += F("'>");
@@ -3674,7 +3985,7 @@ void handleRoot() {
   page += F("<section class='panel'><h2>Firmware</h2><form method='post' action='/update' enctype='multipart/form-data'>");
   page += F("<input type='file' name='firmware' accept='.bin,.bin.gz' required><br><button type='submit'>Upload firmware</button></form>");
   page += F("<p><a class='btn secondary' href='/reboot'>Reboot</a></p>");
-  page += F("<form method='post' action='/factory-reset' onsubmit=\"return confirm('Factory reset will delete Wi-Fi, template, MQTT, button, LED, and energy settings. Continue?')\"><button class='danger' type='submit'>Factory reset</button></form></section>");
+  page += F("<form method='post' action='/factory-reset' onsubmit=\"return confirm('Factory reset will delete Wi-Fi, template, MQTT, input, LED, and energy settings. Continue?')\"><button class='danger' type='submit'>Factory reset</button></form></section>");
   flushStreamChunk(page);
 
   appendTemplateForm(page);
@@ -4015,30 +4326,79 @@ bool readButtonEventText(uint8_t button, const char *prefix, bool hold, uint8_t 
 
 void handleButtonSave() {
   if (!hasConfigurableButtons()) {
-    server.send(400, F("text/plain"), F("No configurable buttons are available"));
+    server.send(400, F("text/plain"), F("No configurable inputs are available"));
     return;
   }
 
   uint16_t hold_ms = kButtonHoldDefaultMs;
   if (!parseUint16Input(server.arg("hold_ms"), kButtonHoldMinMs, kButtonHoldMaxMs, hold_ms)) {
-    server.send(400, F("text/plain"), F("Invalid button hold time"));
+    server.send(400, F("text/plain"), F("Invalid input hold time"));
     return;
   }
 
   uint16_t debounce_ms = kButtonDebounceDefaultMs;
   if (!parseUint16Input(server.arg("debounce_ms"), kButtonDebounceMinMs, kButtonDebounceMaxMs, debounce_ms)) {
-    server.send(400, F("text/plain"), F("Invalid button debounce time"));
+    server.send(400, F("text/plain"), F("Invalid input debounce time"));
     return;
   }
 
   StoredConfig *candidate = new StoredConfig(config);
   if (!candidate) {
-    server.send(500, F("text/plain"), F("Could not allocate button settings"));
+    server.send(500, F("text/plain"), F("Could not allocate input settings"));
     return;
   }
 
   for (uint8_t i = 0; i < runtime_template.button_count; i++) {
     if (!hasPin(runtime_template.buttons[i])) continue;
+
+    String mode_arg = F("mode");
+    mode_arg += String(i);
+    if (!server.hasArg(mode_arg)) {
+      delete candidate;
+      server.send(400, F("text/plain"), F("Missing input mode"));
+      return;
+    }
+    uint16_t mode_value = 0;
+    if (!parseUint16Input(server.arg(mode_arg), 0, 1, mode_value)) {
+      delete candidate;
+      server.send(400, F("text/plain"), F("Invalid input mode"));
+      return;
+    }
+    const uint8_t input_mode = static_cast<uint8_t>(mode_value);
+    candidate->input_mode[i] = input_mode;
+
+    if (input_mode == kInputModeSwitch) {
+      String relay_arg = F("relay");
+      relay_arg += String(i);
+      String reverse_arg = F("reverse");
+      reverse_arg += String(i);
+      if (!server.hasArg(relay_arg) || !server.hasArg(reverse_arg)) {
+        delete candidate;
+        server.send(400, F("text/plain"), F("Missing switch setting"));
+        return;
+      }
+
+      uint16_t relay_value = 0;
+      uint16_t reverse_value = 0;
+      if (!parseUint16Input(server.arg(relay_arg), 0, kMaxRelays - 1, relay_value) ||
+          !parseUint16Input(server.arg(reverse_arg), 0, 1, reverse_value)) {
+        delete candidate;
+        server.send(400, F("text/plain"), F("Invalid switch setting"));
+        return;
+      }
+      const uint8_t relay = static_cast<uint8_t>(relay_value);
+      if (relay >= runtime_template.relay_count || !hasPin(runtime_template.relays[relay])) {
+        delete candidate;
+        server.send(400, F("text/plain"), F("Invalid switch relay"));
+        return;
+      }
+      candidate->input_relay[i] = relay;
+      candidate->input_on_level[i] = reverse_value ? kInputOnLevelLow : kInputOnLevelHigh;
+      continue;
+    }
+
+    candidate->input_relay[i] = i;
+    candidate->input_on_level[i] = kInputOnLevelUnset;
 
     String press_arg = F("press");
     press_arg += String(i);
@@ -4046,7 +4406,7 @@ void handleButtonSave() {
     hold_arg += String(i);
     if (!server.hasArg(press_arg) || !server.hasArg(hold_arg)) {
       delete candidate;
-      server.send(400, F("text/plain"), F("Missing button setting"));
+      server.send(400, F("text/plain"), F("Missing button action setting"));
       return;
     }
 
@@ -4055,7 +4415,7 @@ void handleButtonSave() {
     if (!parseUint16Input(server.arg(press_arg), 0, 255, press_value) ||
         !parseUint16Input(server.arg(hold_arg), 0, 255, hold_value)) {
       delete candidate;
-      server.send(400, F("text/plain"), F("Invalid button setting"));
+      server.send(400, F("text/plain"), F("Invalid button action setting"));
       return;
     }
 
@@ -4087,18 +4447,21 @@ void handleButtonSave() {
                                       candidate->button_press_target,
                                       candidate->button_press_payload,
                                       candidate->button_hold_target,
-                                      candidate->button_hold_payload);
+                                      candidate->button_hold_payload,
+                                      candidate->input_mode,
+                                      candidate->input_relay,
+                                      candidate->input_on_level);
   delete candidate;
   if (!saved) {
-    server.send(500, F("text/plain"), F("Could not save button settings"));
+    server.send(500, F("text/plain"), F("Could not save input settings"));
     return;
   }
   updateDeviceLeds(true);
 
   String page;
   page.reserve(700);
-  appendHeader(page, F("myMota Buttons"));
-  page += F("<p class='ok'>Button settings saved.</p>");
+  appendHeader(page, F("myMota Inputs"));
+  page += F("<p class='ok'>Input settings saved.</p>");
   page += F("<p><a href='/'>Back</a></p>");
   appendFooter(page);
   sendHtml(page);
@@ -4353,6 +4716,22 @@ void handleHealth() {
     } else {
       out += F("{\"pressed\":");
       out += (button_state[i].stable_pressed ? F("true") : F("false"));
+      out += F(",\"state\":\"");
+      out += inputStateName(i, button_state[i].stable_pressed);
+      out += F("\",\"kind\":\"");
+      out += inputKindName(i);
+      out += F("\",\"mode\":\"");
+      out += inputModeName(i);
+      out += F("\",\"on_level\":\"");
+      out += effectiveInputOnLevel(i) == kInputOnLevelHigh ? F("high") : F("low");
+      out += F("\"");
+      if (effectiveInputMode(i) == kInputModeSwitch) {
+        uint8_t relay = 0;
+        if (inputRelayTarget(i, relay)) {
+          out += F(",\"target_relay\":");
+          out += relay + 1;
+        }
+      }
       out += F(",\"press_action\":\"");
       out += buttonActionName(config.button_press_action[i]);
       out += F("\",\"hold_action\":\"");
