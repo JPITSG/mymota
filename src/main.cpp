@@ -79,7 +79,11 @@ constexpr uint8_t kButtonActionMqtt = 2;
 constexpr uint8_t kButtonActionWebhook = 3;
 constexpr size_t kButtonActionTargetMaxLen = 128;
 constexpr size_t kButtonActionPayloadMaxLen = 128;
-constexpr uint32_t kWebhookTimeoutMs = 2000;
+constexpr uint32_t kWebhookConnectTimeoutMs = 500;
+constexpr uint32_t kWebhookFlushTimeoutMs = 50;
+constexpr uint32_t kWebhookResponseTimeoutMs = 100;
+constexpr uint32_t kWebhookStopTimeoutMs = 25;
+constexpr uint8_t kWebhookEmptyReadLimit = 2;
 constexpr const char *kDefaultButtonMqttTopic = "stat/{TOPIC}/RESULT";
 constexpr const char *kDefaultButtonMqttPressPayload = "{\"Switch{BUTTONID}\":{\"Action\":\"{TYPE}\"}}";
 constexpr const char *kDefaultButtonMqttHoldPayload = "{\"Switch{BUTTONID}\":{\"Action\":\"{TYPE}\"}}";
@@ -2199,25 +2203,38 @@ bool runWebhookAction(uint8_t button, bool hold) {
   if (!parseHttpUrl(url, host, port, path)) return false;
 
   WiFiClient client;
-  client.setTimeout(kWebhookTimeoutMs);
+  client.setTimeout(kWebhookConnectTimeoutMs);
   if (!client.connect(host.c_str(), port)) return false;
 
-  client.print(F("GET "));
-  client.print(path);
-  client.print(F(" HTTP/1.1\r\nHost: "));
-  client.print(host);
-  client.print(F("\r\nConnection: close\r\nUser-Agent: myMota/"));
-  client.print(F(MYMOTA_VERSION));
-  client.print(F("\r\n\r\n"));
+  String request;
+  request.reserve(path.length() + host.length() + 90);
+  request += F("GET ");
+  request += path;
+  request += F(" HTTP/1.1\r\nHost: ");
+  request += host;
+  request += F("\r\nConnection: close\r\nUser-Agent: myMota/");
+  request += F(MYMOTA_VERSION);
+  request += F("\r\n\r\n");
+  if (client.print(request) != request.length()) {
+    client.stop(kWebhookStopTimeoutMs);
+    return false;
+  }
+  client.flush(kWebhookFlushTimeoutMs);
 
   const uint32_t started = millis();
-  while (client.connected() && millis() - started < kWebhookTimeoutMs) {
-    while (client.available()) {
-      client.read();
+  uint8_t empty_reads = 0;
+  while (client.connected() &&
+         millis() - started < kWebhookResponseTimeoutMs &&
+         empty_reads < kWebhookEmptyReadLimit) {
+    const int value = client.read();
+    if (value >= 0) {
+      empty_reads = 0;
+    } else {
+      empty_reads++;
+      delay(1);
     }
-    delay(1);
   }
-  client.stop();
+  client.stop(kWebhookStopTimeoutMs);
   return true;
 }
 
