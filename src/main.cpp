@@ -1509,7 +1509,18 @@ void appendHeader(String &page, const __FlashStringHelper *title) {
 }
 
 void appendFooter(String &page) {
-  page += F("</main></body></html>");
+  page += F("<script>function t(i,v){var e=document.getElementById(i);if(e)e.textContent=v;}");
+  page += F("function p(i,v,c){var e=document.getElementById(i);if(e){e.textContent=v;e.className=c;}}");
+  page += F("function fmt(v,d,u){return v==null?'n/a':Number(v).toFixed(d)+(u||'');}");
+  page += F("function live(){fetch('/health',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){");
+  page += F("t('live-heap',d.heap+' bytes');t('live-uptime',d.uptime+'s');t('live-active-phy',d.active_phy);");
+  page += F("t('live-recovery',d.recovery.fast_boot_count+'/'+d.recovery.limit);");
+  page += F("p('live-wifi',d.wifi?'connected':'not connected',d.wifi?'pill ok':'pill bad');t('live-ssid',d.wifi_ssid||'n/a');t('live-ip',d.ip||'n/a');t('live-rssi',d.rssi==null?'n/a':d.rssi+' dBm');");
+  page += F("p('live-mqtt',d.mqtt.enabled?(d.mqtt.connected?'connected':'not connected'):'not configured',d.mqtt.enabled&&d.mqtt.connected?'pill ok':'pill');");
+  page += F("if(d.power){for(var i=0;i<d.power.length;i++){if(d.power[i]!==null)p('live-relay-'+i,d.power[i]?'on':'off',d.power[i]?'pill ok':'pill');}}");
+  page += F("if(d.energy){t('live-energy-power',fmt(d.energy.power,1,' W'));t('live-energy-voltage',fmt(d.energy.voltage,1,' V'));t('live-energy-current',fmt(d.energy.current,3,' A'));t('live-energy-total',fmt(d.energy.total_kwh,4,' kWh'));}");
+  page += F("t('live-temp',d.temperature_c==null?'n/a':Number(d.temperature_c).toFixed(1)+' C');t('live-adc-raw',d.adc_raw==null?'n/a':d.adc_raw);");
+  page += F("}).catch(function(){});}setInterval(live,1000);live();</script></main></body></html>");
 }
 
 void sendHtml(String &page) {
@@ -1527,15 +1538,15 @@ void appendStatusBlock(String &page) {
   page += chipIdHex();
   page += F("</code></div><span>Hostname</span><div><code>");
   page += htmlEscape(config.hostname);
-  page += F("</code></div><span>Heap</span><div><code>");
+  page += F("</code></div><span>Heap</span><div><code id='live-heap'>");
   page += String(ESP.getFreeHeap());
-  page += F("</code> bytes</div><span>Uptime</span><div><code>");
+  page += F(" bytes</code></div><span>Uptime</span><div><code id='live-uptime'>");
   page += String(millis() / 1000);
-  page += F("</code>s</div><span>PHY mode</span><div><code>");
+  page += F("s</code></div><span>PHY mode</span><div><code>");
   page += phyModeName(config.phy_mode);
-  page += F("</code> configured <code>");
+  page += F("</code> configured <code id='live-active-phy'>");
   page += phyModeName(WiFi.getPhyMode());
-  page += F("</code> active</div><span>Recovery guard</span><div><code>");
+  page += F("</code> active</div><span>Recovery guard</span><div><code id='live-recovery'>");
   page += String(boot_recovery_count);
   page += F("/");
   page += String(kBootRecoveryLimit);
@@ -1548,15 +1559,16 @@ void appendStatusBlock(String &page) {
   page += F("</div>");
 
   if (WiFi.status() == WL_CONNECTED) {
-    page += F("<span>Wi-Fi</span><div><span class='pill ok'>connected</span> <code>");
+    page += F("<span>Wi-Fi</span><div><span id='live-wifi' class='pill ok'>connected</span> <code id='live-ssid'>");
     page += htmlEscape(WiFi.SSID());
-    page += F("</code></div><span>IP</span><div><code>");
+    page += F("</code></div><span>IP</span><div><code id='live-ip'>");
     page += ipToString(WiFi.localIP());
-    page += F("</code></div><span>RSSI</span><div><code>");
+    page += F("</code></div><span>RSSI</span><div><code id='live-rssi'>");
     page += String(WiFi.RSSI());
-    page += F("</code> dBm</div>");
+    page += F(" dBm</code></div>");
   } else {
-    page += F("<span>Wi-Fi</span><div><span class='pill bad'>not connected</span></div>");
+    page += F("<span>Wi-Fi</span><div><span id='live-wifi' class='pill bad'>not connected</span> <code id='live-ssid'>n/a</code></div>");
+    page += F("<span>IP</span><div><code id='live-ip'>n/a</code></div><span>RSSI</span><div><code id='live-rssi'>n/a</code></div>");
   }
 
   if (ap_started) {
@@ -1605,14 +1617,14 @@ void appendTemplateStatus(String &page) {
       page += F("</code></div>");
     }
     if (runtime_template.adc_temp) {
-      page += F("<span>ADC temperature</span><div><code>");
+      page += F("<span>ADC temperature</span><div><code id='live-temp'>");
       if (isnan(adc_temperature_c)) {
         page += F("n/a");
       } else {
         page += String(adc_temperature_c, 1);
         page += F(" C");
       }
-      page += F("</code> raw <code>");
+      page += F("</code> raw <code id='live-adc-raw'>");
       page += String(adc_raw);
       page += F("</code></div>");
     }
@@ -1643,24 +1655,28 @@ void appendDeviceControls(String &page) {
     page += pinName(runtime_template.relays[i].pin);
     page += F("</code> ");
     if (relay_state[i]) {
-      page += F("<span class='pill ok'>on</span>");
+      page += F("<span id='live-relay-");
+      page += String(i);
+      page += F("' class='pill ok'>on</span>");
     } else {
-      page += F("<span class='pill'>off</span>");
+      page += F("<span id='live-relay-");
+      page += String(i);
+      page += F("' class='pill'>off</span>");
     }
     page += F("<form class='inline' method='post' action='/power'><input type='hidden' name='relay' value='");
     page += String(i + 1);
     page += F("'><span class='actions'><button name='state' value='toggle'>Toggle</button><button name='state' value='on'>On</button><button class='secondary' name='state' value='off'>Off</button></span></form></div>");
   }
   if (energy.present) {
-    page += F("<div class='kv'><span>Power</span><div><code>");
+    page += F("<div class='kv'><span>Power</span><div><code id='live-energy-power'>");
     page += String(energy.power, 1);
-    page += F("</code> W</div><span>Voltage</span><div><code>");
+    page += F(" W</code></div><span>Voltage</span><div><code id='live-energy-voltage'>");
     page += String(energy.voltage, 1);
-    page += F("</code> V</div><span>Current</span><div><code>");
+    page += F(" V</code></div><span>Current</span><div><code id='live-energy-current'>");
     page += String(energy.current, 3);
-    page += F("</code> A</div><span>Total</span><div><code>");
+    page += F(" A</code></div><span>Total</span><div><code id='live-energy-total'>");
     page += String(energy.total_kwh, 4);
-    page += F("</code> kWh</div></div>");
+    page += F(" kWh</code></div></div>");
   }
   page += F("</section>");
 }
@@ -1668,7 +1684,7 @@ void appendDeviceControls(String &page) {
 void appendMqttStatus(String &page) {
   page += F("<section class='panel'><h2>MQTT</h2><div class='kv'>");
   if (config.mqtt_host[0] == '\0') {
-    page += F("<span>Broker</span><div><span class='pill'>not configured</span></div>");
+    page += F("<span>Broker</span><div><span id='live-mqtt' class='pill'>not configured</span></div>");
   } else {
     page += F("<span>Broker</span><div><code>");
     page += htmlEscape(config.mqtt_host);
@@ -1676,9 +1692,9 @@ void appendMqttStatus(String &page) {
     page += String(config.mqtt_port);
     page += F("</code> ");
     if (mqtt_client.connected()) {
-      page += F("<span class='pill ok'>connected</span>");
+      page += F("<span id='live-mqtt' class='pill ok'>connected</span>");
     } else {
-      page += F("<span class='pill'>not connected</span>");
+      page += F("<span id='live-mqtt' class='pill'>not connected</span>");
     }
     page += F("</div>");
   }
@@ -2026,7 +2042,7 @@ void handleReboot() {
 
 void handleHealth() {
   String out;
-  out.reserve(1250);
+  out.reserve(1450);
   out += F("{\"name\":\"myMota\",\"version\":\"");
   out += F(MYMOTA_VERSION);
   out += F("\",\"target\":\"");
@@ -2039,6 +2055,16 @@ void handleHealth() {
   out += millis() / 1000;
   out += F(",\"wifi\":");
   out += ((WiFi.status() == WL_CONNECTED) ? F("true") : F("false"));
+  out += F(",\"wifi_ssid\":\"");
+  out += (WiFi.status() == WL_CONNECTED ? jsonEscape(WiFi.SSID().c_str()) : String());
+  out += F("\",\"ip\":\"");
+  out += (WiFi.status() == WL_CONNECTED ? ipToString(WiFi.localIP()) : String());
+  out += F("\",\"rssi\":");
+  if (WiFi.status() == WL_CONNECTED) {
+    out += WiFi.RSSI();
+  } else {
+    out += F("null");
+  }
   out += F(",\"configured_phy_mode\":");
   out += config.phy_mode;
   out += F(",\"configured_phy\":\"");
@@ -2090,10 +2116,11 @@ void handleHealth() {
   out += F("},\"power\":[");
   bool first = true;
   for (uint8_t i = 0; i < runtime_template.relay_count; i++) {
-    if (!hasPin(runtime_template.relays[i])) continue;
     if (!first) out += ',';
     first = false;
-    if (relay_state[i]) {
+    if (!hasPin(runtime_template.relays[i])) {
+      out += F("null");
+    } else if (relay_state[i]) {
       out += F("true");
     } else {
       out += F("false");
@@ -2120,7 +2147,14 @@ void handleHealth() {
   } else {
     out += F("null");
   }
+  out += F(",\"adc_raw\":");
+  if (runtime_template.adc_temp) {
+    out += adc_raw;
+  } else {
+    out += F("null");
+  }
   out += F("}");
+  server.sendHeader(F("Cache-Control"), F("no-store"));
   server.send(200, F("application/json"), out);
 }
 
