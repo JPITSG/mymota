@@ -3858,6 +3858,8 @@ void appendFooter(String &page, bool live_poll = true, bool reboot_wait = false)
   page += F("function im(s){var k=s.getAttribute('data-input'),v=s.value,b=document.getElementById('input-button-'+k),w=document.getElementById('input-switch-'+k);if(b)b.className=v=='0'?'mode-extra show':'mode-extra';if(w)w.className=v=='1'?'mode-extra show':'mode-extra';}");
   page += F("function tp(s){var o=s.options[s.selectedIndex],t=document.getElementById('template-json');if(o&&t&&o.getAttribute('data-json')){t.value=o.getAttribute('data-json');s.selectedIndex=0;}}");
   page += F("function bi(){var a=document.querySelectorAll('.button-action');for(var i=0;i<a.length;i++){a[i].onchange=function(){ba(this)};ba(a[i]);}var m=document.querySelectorAll('.input-mode');for(var j=0;j<m.length;j++){m[j].onchange=function(){im(this)};im(m[j]);}}bi();");
+  page += F("document.addEventListener('click',function(e){var b=e.target;while(b&&b.tagName!='BUTTON'&&b.tagName!='INPUT')b=b.parentNode;if(b&&b.form)b.form._s=b;},true);");
+  page += F("document.addEventListener('submit',function(e){var f=e.target;if(!f||f.getAttribute('data-inline')!='1')return;e.preventDefault();var fd=new FormData(f),b=e.submitter||f._s;if(b&&b.name)fd.append(b.name,b.value);fd.append('_inline','1');fetch(f.getAttribute('action')||location.pathname,{method:(f.method||'POST').toUpperCase(),body:fd,cache:'no-store'}).then(function(r){if(!r.ok)return r.text().then(function(x){throw Error(x||r.statusText)});live();}).catch(function(x){alert(x.message||x);});},true);");
   if (live_poll) {
     page += F("setInterval(live,1000);setInterval(ck,1000);live();");
   }
@@ -4091,7 +4093,7 @@ void appendDeviceControls(String &page) {
       page += String(i);
       page += F("' class='pill bad'>off</span>");
     }
-    page += F("<form class='inline' method='post' action='/power'><input type='hidden' name='relay' value='");
+    page += F("<form class='inline' data-inline='1' method='post' action='/power'><input type='hidden' name='relay' value='");
     page += String(i + 1);
     page += F("'><span class='actions'><button name='state' value='toggle'>Toggle</button><button name='state' value='on'>On</button><button class='secondary' name='state' value='off'>Off</button></span></form></div>");
   }
@@ -4124,7 +4126,7 @@ void appendDeviceControls(String &page) {
       }
       page += F("</div>");
     }
-    page += F("<form method='post' action='/energy'><div class='row'><label>Total kWh offset<br><input name='total_offset_kwh' type='number' min='");
+    page += F("<form data-inline='1' method='post' action='/energy'><div class='row'><label>Total kWh offset<br><input name='total_offset_kwh' type='number' min='");
     page += String(kEnergyTotalOffsetMinKwh, 0);
     page += F("' max='");
     page += String(kEnergyTotalOffsetMaxKwh, 0);
@@ -4158,7 +4160,7 @@ void appendLedAttachmentOption(String &page, uint8_t value, const String &label,
 void appendLedSettings(String &page) {
   if (!runtime_template.enabled || !hasConfigurableLedOutputs()) return;
 
-  page += F("<section class='panel'><h2>LEDs</h2><form method='post' action='/leds'>");
+  page += F("<section class='panel'><h2>LEDs</h2><form data-inline='1' method='post' action='/leds'>");
   for (uint8_t i = 0; i < kMaxLedOutputs; i++) {
     const PinAssignment *assignment = ledOutputAssignment(i);
     if (!assignment || !hasLedOutput(i)) continue;
@@ -4289,7 +4291,7 @@ void appendButtonActionExtra(String &page, uint8_t button, const char *name, boo
 void appendButtonSettings(String &page) {
   if (!runtime_template.enabled || !hasConfigurableButtons()) return;
 
-  page += F("<section class='panel'><h2>Inputs</h2><form method='post' action='/buttons'>");
+  page += F("<section class='panel'><h2>Inputs</h2><form data-inline='1' method='post' action='/buttons'>");
   page += F("<div class='row'><label>Hold time ms<br><input name='hold_ms' type='number' min='");
   page += String(kButtonHoldMinMs);
   page += F("' max='");
@@ -4400,7 +4402,7 @@ void appendTemplateForm(String &page) {
 }
 
 void appendMqttForm(String &page) {
-  page += F("<section class='panel'><h2>MQTT Settings</h2><form method='post' action='/mqtt'>");
+  page += F("<section class='panel'><h2>MQTT Settings</h2><form data-inline='1' method='post' action='/mqtt'>");
   page += F("<div class='row'><label>Host<br><input name='host' maxlength='");
   page += String(kMqttHostMaxLen);
   page += F("' value='");
