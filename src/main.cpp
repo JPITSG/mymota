@@ -37,7 +37,8 @@ constexpr uint16_t kConfigVersionV7 = 7;
 constexpr uint16_t kConfigVersionV8 = 8;
 constexpr uint16_t kConfigVersionV9 = 9;
 constexpr uint16_t kConfigVersionV10 = 10;
-constexpr uint16_t kConfigVersion = 11;
+constexpr uint16_t kConfigVersionV11 = 11;
+constexpr uint16_t kConfigVersion = 12;
 constexpr size_t kEepromSize = 4096;
 constexpr size_t kFlashSectorSize = 4096;
 constexpr uint8_t kEnergyJournalSectorCount = 2;
@@ -103,6 +104,7 @@ constexpr uint8_t kButtonActionNone = 0;
 constexpr uint8_t kButtonActionRelayToggle = 1;
 constexpr uint8_t kButtonActionMqtt = 2;
 constexpr uint8_t kButtonActionWebhook = 3;
+constexpr uint8_t kButtonRelayUnset = 255;
 constexpr uint8_t kInputKindButton = 0;
 constexpr uint8_t kInputKindSwitch = 1;
 constexpr uint8_t kInputModeButton = 0;
@@ -409,6 +411,42 @@ struct StoredConfigV10 {
   uint32_t crc;
 };
 
+struct StoredConfigV11 {
+  uint32_t magic;
+  uint16_t version;
+  uint16_t size;
+  char ssid[33];
+  char password[65];
+  char hostname[33];
+  uint8_t phy_mode;
+  uint8_t template_enabled;
+  uint16_t template_base;
+  uint32_t template_flag;
+  char template_name[33];
+  uint16_t template_gpio[kTemplateSlotCount];
+  uint16_t mqtt_port;
+  uint16_t mqtt_keepalive;
+  char mqtt_host[kMqttHostMaxLen + 1];
+  char mqtt_topic[kMqttTopicMaxLen + 1];
+  float energy_total_offset_kwh;
+  uint8_t led_attach[kMaxLedOutputs];
+  uint16_t button_hold_ms;
+  uint8_t button_press_action[kMaxButtons];
+  uint8_t button_hold_action[kMaxButtons];
+  uint16_t energy_mqtt_interval;
+  uint16_t energy_mqtt_change_percent_x10;
+  char button_press_target[kMaxButtons][kButtonActionTargetMaxLen + 1];
+  char button_press_payload[kMaxButtons][kButtonActionPayloadMaxLen + 1];
+  char button_hold_target[kMaxButtons][kButtonActionTargetMaxLen + 1];
+  char button_hold_payload[kMaxButtons][kButtonActionPayloadMaxLen + 1];
+  uint16_t button_debounce_ms;
+  uint8_t input_mode[kMaxButtons];
+  uint8_t input_relay[kMaxButtons];
+  uint8_t input_on_level[kMaxButtons];
+  uint8_t reserved[1];
+  uint32_t crc;
+};
+
 struct StoredConfig {
   uint32_t magic;
   uint16_t version;
@@ -442,6 +480,8 @@ struct StoredConfig {
   uint8_t input_relay[kMaxButtons];
   uint8_t input_on_level[kMaxButtons];
   uint8_t reserved[1];
+  uint8_t button_press_relay[kMaxButtons];
+  uint8_t button_hold_relay[kMaxButtons];
   uint32_t crc;
 };
 
@@ -607,6 +647,8 @@ uint32_t perf_last_loop_max_us = 0;
 
 bool hasPin(const PinAssignment &assignment);
 bool mqttEnergyReportingEnabled();
+bool relayAvailable(uint8_t relay);
+bool parseUint16Input(const String &input, uint16_t min_value, uint16_t max_value, uint16_t &out);
 
 void recordLoopPerf(uint32_t started_us, uint32_t ended_us) {
   const uint32_t now_ms = millis();
@@ -733,6 +775,13 @@ void setDefaultButtonActionTexts() {
   }
 }
 
+void setDefaultButtonRelayConfig() {
+  for (uint8_t i = 0; i < kMaxButtons; i++) {
+    config.button_press_relay[i] = kButtonRelayUnset;
+    config.button_hold_relay[i] = kButtonRelayUnset;
+  }
+}
+
 void setDefaultInputConfig() {
   for (uint8_t i = 0; i < kMaxButtons; i++) {
     config.input_mode[i] = kInputModeUnset;
@@ -750,6 +799,7 @@ void setDefaultButtonConfig() {
     config.button_hold_action[i] = kButtonActionNone;
   }
   setDefaultButtonActionTexts();
+  setDefaultButtonRelayConfig();
   setDefaultInputConfig();
 }
 
@@ -1207,6 +1257,12 @@ void normalizeConfigStrings() {
     if (!isButtonActionEncoding(config.button_hold_action[i])) {
       config.button_hold_action[i] = kButtonActionNone;
     }
+    if (config.button_press_relay[i] != kButtonRelayUnset && config.button_press_relay[i] >= kMaxRelays) {
+      config.button_press_relay[i] = kButtonRelayUnset;
+    }
+    if (config.button_hold_relay[i] != kButtonRelayUnset && config.button_hold_relay[i] >= kMaxRelays) {
+      config.button_hold_relay[i] = kButtonRelayUnset;
+    }
     if (!isInputModeEncoding(config.input_mode[i])) {
       config.input_mode[i] = kInputModeUnset;
     }
@@ -1276,7 +1332,9 @@ bool saveButtonConfig(uint16_t hold_ms, uint16_t debounce_ms,
                       const char hold_payloads[][kButtonActionPayloadMaxLen + 1],
                       const uint8_t *input_modes,
                       const uint8_t *input_relays,
-                      const uint8_t *input_on_levels);
+                      const uint8_t *input_on_levels,
+                      const uint8_t *press_relays,
+                      const uint8_t *hold_relays);
 
 bool loadConfig() {
   EEPROM.begin(kEepromSize);
@@ -1304,6 +1362,26 @@ bool loadConfig() {
     return config_ok;
   }
 
+  if (header.version == kConfigVersionV11 && header.size == sizeof(StoredConfigV11)) {
+    StoredConfigV11 *old_config = new StoredConfigV11;
+    if (!old_config) {
+      setDefaultConfig();
+      return false;
+    }
+    EEPROM.get(0, *old_config);
+    if (old_config->crc != configCrc(*old_config)) {
+      delete old_config;
+      setDefaultConfig();
+      return false;
+    }
+    memset(&config, 0, sizeof(config));
+    memcpy(&config, old_config, offsetof(StoredConfigV11, crc));
+    setDefaultButtonRelayConfig();
+    delete old_config;
+    commitConfig();
+    return config_ok;
+  }
+
   if (header.version == kConfigVersionV10 && header.size == sizeof(StoredConfigV10)) {
     StoredConfigV10 *old_config = new StoredConfigV10;
     if (!old_config) {
@@ -1318,6 +1396,7 @@ bool loadConfig() {
     }
     memset(&config, 0, sizeof(config));
     memcpy(&config, old_config, offsetof(StoredConfigV10, crc));
+    setDefaultButtonRelayConfig();
     setDefaultInputConfig();
     delete old_config;
     commitConfig();
@@ -1368,6 +1447,7 @@ bool loadConfig() {
     memcpy(config.button_hold_target, old_config->button_hold_target, sizeof(config.button_hold_target));
     memcpy(config.button_hold_payload, old_config->button_hold_payload, sizeof(config.button_hold_payload));
     config.button_debounce_ms = kButtonDebounceDefaultMs;
+    setDefaultButtonRelayConfig();
     setDefaultInputConfig();
     delete old_config;
     commitConfig();
@@ -1409,6 +1489,7 @@ bool loadConfig() {
     config.energy_mqtt_interval = old_config.energy_mqtt_interval;
     config.energy_mqtt_change_percent_x10 = old_config.energy_mqtt_change_percent_x10;
     setDefaultButtonActionTexts();
+    setDefaultButtonRelayConfig();
     setDefaultInputConfig();
     commitConfig();
     return config_ok;
@@ -1447,6 +1528,7 @@ bool loadConfig() {
     memcpy(config.button_press_action, old_config.button_press_action, sizeof(config.button_press_action));
     memcpy(config.button_hold_action, old_config.button_hold_action, sizeof(config.button_hold_action));
     setDefaultEnergyMqttConfig();
+    setDefaultButtonRelayConfig();
     setDefaultInputConfig();
     commitConfig();
     return config_ok;
@@ -1698,7 +1780,9 @@ bool saveButtonConfig(uint16_t hold_ms, uint16_t debounce_ms,
                       const char hold_payloads[][kButtonActionPayloadMaxLen + 1],
                       const uint8_t *input_modes,
                       const uint8_t *input_relays,
-                      const uint8_t *input_on_levels) {
+                      const uint8_t *input_on_levels,
+                      const uint8_t *press_relays,
+                      const uint8_t *hold_relays) {
   config.button_hold_ms = hold_ms;
   config.button_debounce_ms = debounce_ms;
   memcpy(config.button_press_action, press_actions, sizeof(config.button_press_action));
@@ -1710,6 +1794,8 @@ bool saveButtonConfig(uint16_t hold_ms, uint16_t debounce_ms,
   memcpy(config.input_mode, input_modes, sizeof(config.input_mode));
   memcpy(config.input_relay, input_relays, sizeof(config.input_relay));
   memcpy(config.input_on_level, input_on_levels, sizeof(config.input_on_level));
+  memcpy(config.button_press_relay, press_relays, sizeof(config.button_press_relay));
+  memcpy(config.button_hold_relay, hold_relays, sizeof(config.button_hold_relay));
   return commitConfig();
 }
 
@@ -1822,6 +1908,45 @@ bool isValidWebhookUrlTemplate(const String &url) {
   const int path_start = url.indexOf('/', host_start);
   const String host_port = path_start < 0 ? url.substring(host_start) : url.substring(host_start, path_start);
   return host_port.length() > 0 && host_port.indexOf(' ') < 0;
+}
+
+bool readButtonRelayTargetInput(uint8_t button, const char *prefix, uint8_t action,
+                                uint8_t relays[], String &error) {
+  if (button >= kMaxButtons) return false;
+
+  String relay_arg = prefix;
+  relay_arg += F("_relay");
+  relay_arg += String(button);
+
+  if (action != kButtonActionRelayToggle) {
+    if (server.hasArg(relay_arg)) {
+      uint16_t relay_value = 0;
+      if (parseUint16Input(server.arg(relay_arg), 0, kMaxRelays - 1, relay_value)) {
+        relays[button] = static_cast<uint8_t>(relay_value);
+      }
+    }
+    return true;
+  }
+
+  if (!server.hasArg(relay_arg)) {
+    error = F("Missing relay target");
+    return false;
+  }
+
+  uint16_t relay_value = 0;
+  if (!parseUint16Input(server.arg(relay_arg), 0, kMaxRelays - 1, relay_value)) {
+    error = F("Invalid relay target");
+    return false;
+  }
+
+  const uint8_t relay = static_cast<uint8_t>(relay_value);
+  if (!relayAvailable(relay)) {
+    error = F("Invalid relay target");
+    return false;
+  }
+
+  relays[button] = relay;
+  return true;
 }
 
 String htmlEscape(const String &input) {
@@ -2018,7 +2143,11 @@ String buttonActionName(uint8_t action) {
   return F("nothing");
 }
 
-bool buttonRelayTarget(uint8_t button, uint8_t &relay) {
+bool relayAvailable(uint8_t relay) {
+  return relay < runtime_template.relay_count && hasPin(runtime_template.relays[relay]);
+}
+
+bool defaultButtonRelayTarget(uint8_t button, uint8_t &relay) {
   if (button < runtime_template.relay_count && hasPin(runtime_template.relays[button])) {
     relay = button;
     return true;
@@ -2036,21 +2165,35 @@ bool buttonRelayTarget(uint8_t button, uint8_t &relay) {
   return false;
 }
 
-bool inputRelayTarget(uint8_t input, uint8_t &relay) {
-  if (input >= kMaxButtons) return false;
-  const uint8_t configured = config.input_relay[input];
-  if (configured < runtime_template.relay_count && hasPin(runtime_template.relays[configured])) {
+uint8_t configuredButtonRelayTarget(uint8_t button, bool hold) {
+  if (button >= kMaxButtons) return kButtonRelayUnset;
+  return hold ? config.button_hold_relay[button] : config.button_press_relay[button];
+}
+
+bool buttonRelayTarget(uint8_t button, bool hold, uint8_t &relay) {
+  const uint8_t configured = configuredButtonRelayTarget(button, hold);
+  if (relayAvailable(configured)) {
     relay = configured;
     return true;
   }
-  return buttonRelayTarget(input, relay);
+  return defaultButtonRelayTarget(button, relay);
+}
+
+bool inputRelayTarget(uint8_t input, uint8_t &relay) {
+  if (input >= kMaxButtons) return false;
+  const uint8_t configured = config.input_relay[input];
+  if (relayAvailable(configured)) {
+    relay = configured;
+    return true;
+  }
+  return defaultButtonRelayTarget(input, relay);
 }
 
 bool buttonActionAvailable(uint8_t button, uint8_t action) {
   if (action == kButtonActionNone) return true;
   if (action == kButtonActionRelayToggle) {
     uint8_t relay = 0;
-    return buttonRelayTarget(button, relay);
+    return defaultButtonRelayTarget(button, relay);
   }
   if (action == kButtonActionMqtt || action == kButtonActionWebhook) return true;
   return false;
@@ -3123,7 +3266,7 @@ bool runWebhookAction(uint8_t button, bool hold) {
 bool runButtonAction(uint8_t button, uint8_t action, bool hold) {
   if (action == kButtonActionRelayToggle) {
     uint8_t relay = 0;
-    if (buttonRelayTarget(button, relay)) {
+    if (buttonRelayTarget(button, hold, relay)) {
       toggleRelay(relay);
       return true;
     }
@@ -3363,7 +3506,7 @@ void appendHeader(String &page, const __FlashStringHelper *title, bool show_spin
   page += F(".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;box-shadow:0 1px 2px rgba(0,0,0,.04)}.wide{grid-column:1/-1}");
   page += F(".panel h2{font-size:17px;margin:0 0 12px}.kv{display:grid;grid-template-columns:minmax(110px,42%) 1fr;gap:8px 12px}.kv span,.hint{color:var(--muted)}.kv div{min-width:0}");
   page += F("code{background:#eef2f6;border:1px solid #dce3ea;border-radius:4px;padding:1px 4px;word-break:break-word}.pill{display:inline-block;border-radius:999px;padding:2px 8px;background:#eef2f6;color:#364152}.pill.ok{background:var(--ok);color:#fff}.pill.bad{background:var(--bad);color:#fff}.panel h2 .pill{font-size:13px;font-weight:400;vertical-align:1px}.ok{color:var(--ok)}.bad{color:var(--bad)}.muted{color:var(--muted)}");
-  page += F(".note{background:#eef2f6;border:1px solid #dce3ea;border-radius:6px;padding:10px;margin:10px 0}.note p{margin:0 0 7px}.tokens{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px}.tokens div{display:flex;flex-direction:column;gap:3px}.button-block{border-top:1px solid var(--line);margin-top:12px;padding-top:12px}.action-extra,.mode-extra{display:none}.action-extra.show,.mode-extra.show{display:block}.payload-row.hidden{display:none}");
+  page += F(".note{background:#eef2f6;border:1px solid #dce3ea;border-radius:6px;padding:10px;margin:10px 0}.note p{margin:0 0 7px}.tokens{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px}.tokens div{display:flex;flex-direction:column;gap:3px}.button-block{border-top:1px solid var(--line);margin-top:12px;padding-top:12px}.action-extra,.mode-extra{display:none}.action-extra.show,.mode-extra.show{display:block}.hidden{display:none}");
   page += F("form{margin:0}.row{margin:10px 0}label{display:block;font-weight:600;color:#344054}input,button,select,textarea{font:inherit}input,select,textarea{width:100%;margin-top:4px;padding:9px;border:1px solid #b9c4d0;border-radius:6px;background:#fff}textarea{min-height:92px;resize:vertical}");
   page += F("button,.btn{display:inline-block;margin:4px 4px 0 0;padding:8px 12px;border:1px solid var(--accent);border-radius:6px;background:var(--accent);color:#fff;text-decoration:none;cursor:pointer}.secondary{background:#fff;color:var(--accent2);border-color:#9eb7cf}.danger{background:#fff;color:var(--bad);border-color:#d4aaa7}.inline{display:inline}.actions{display:flex;flex-wrap:wrap;gap:6px}.inline button{margin:0 4px 0 0}.list{margin:0;padding-left:18px}@media(max-width:520px){.kv{grid-template-columns:1fr}.brand{font-size:24px}}</style></head><body>");
   page += F("<header class='top'><div class='topin'><div><div class='brand'>my<span>Mota</span></div><div class='sub'>ESP8266/ESP8285 firmware</div></div><div class='sub meta'><span>");
@@ -3397,7 +3540,7 @@ void appendFooter(String &page, bool live_poll = true, bool reboot_wait = false)
   page += F("if(d.energy){t('live-energy-power',fmt(d.energy.power,1,' W'));t('live-energy-voltage',fmt(d.energy.voltage,1,' V'));t('live-energy-current',fmt(d.energy.current,3,' A'));t('live-energy-total',fmt(d.energy.total_kwh,4,' kWh'));t('live-energy-offset',fmt(d.energy.offset_kwh,4,' kWh'));}");
   page += F("t('live-temp',d.temperature_c==null?'n/a':Number(d.temperature_c).toFixed(1)+' C');t('live-adc-raw',d.adc_raw==null?'n/a':d.adc_raw);");
   page += F("}).catch(function(){});}");
-  page += F("function ba(s){var k=s.getAttribute('data-key'),v=s.value,b=document.getElementById('extra-'+k);if(!b)return;var t=b.querySelector('.target-input'),p=b.querySelector('.payload-input'),pr=b.querySelector('.payload-row'),tl=b.querySelector('.target-label'),h=b.querySelector('.action-hint');b.className=(v=='2'||v=='3')?'action-extra show':'action-extra';if(v=='2'){if(t&&(!t.value||t.value.indexOf('http://')==0))t.value=t.getAttribute('data-default-topic');if(p&&!p.value)p.value=p.getAttribute('data-default-payload');if(tl)tl.textContent='MQTT topic';if(pr)pr.className='payload-row';if(h)h.textContent='Publishes this topic and payload through the configured MQTT broker.';}else if(v=='3'){if(tl)tl.textContent='Webhook URL';if(pr)pr.className='payload-row hidden';if(h)h.textContent='Executes an HTTP GET request; only http:// URLs are supported.';}}");
+  page += F("function ba(s){var k=s.getAttribute('data-key'),v=s.value,b=document.getElementById('extra-'+k);if(!b)return;var t=b.querySelector('.target-input'),p=b.querySelector('.payload-input'),rr=b.querySelector('.relay-row'),tr=b.querySelector('.target-row'),pr=b.querySelector('.payload-row'),tl=b.querySelector('.target-label'),h=b.querySelector('.action-hint');b.className=(v=='1'||v=='2'||v=='3')?'action-extra show':'action-extra';if(rr)rr.className=v=='1'?'row relay-row':'row relay-row hidden';if(tr)tr.className=(v=='2'||v=='3')?'row target-row':'row target-row hidden';if(pr)pr.className=(v=='2')?'row payload-row':'row payload-row hidden';if(v=='1'){if(h)h.textContent='Toggles the selected relay.';}else if(v=='2'){if(t&&(!t.value||t.value.indexOf('http://')==0))t.value=t.getAttribute('data-default-topic');if(p&&!p.value)p.value=p.getAttribute('data-default-payload');if(tl)tl.textContent='MQTT topic';if(h)h.textContent='Publishes this topic and payload through the configured MQTT broker.';}else if(v=='3'){if(tl)tl.textContent='Webhook URL';if(h)h.textContent='Executes an HTTP GET request; only http:// URLs are supported.';}}");
   page += F("function im(s){var k=s.getAttribute('data-input'),v=s.value,b=document.getElementById('input-button-'+k),w=document.getElementById('input-switch-'+k);if(b)b.className=v=='0'?'mode-extra show':'mode-extra';if(w)w.className=v=='1'?'mode-extra show':'mode-extra';}");
   page += F("function tp(s){var o=s.options[s.selectedIndex],t=document.getElementById('template-json');if(o&&t&&o.getAttribute('data-json')){t.value=o.getAttribute('data-json');s.selectedIndex=0;}}");
   page += F("function bi(){var a=document.querySelectorAll('.button-action');for(var i=0;i<a.length;i++){a[i].onchange=function(){ba(this)};ba(a[i]);}var m=document.querySelectorAll('.input-mode');for(var j=0;j<m.length;j++){m[j].onchange=function(){im(this)};im(m[j]);}}bi();");
@@ -3769,10 +3912,21 @@ void appendButtonActionSelect(String &page, uint8_t button, const char *name, ui
 }
 
 void appendButtonActionExtra(String &page, uint8_t button, const char *name, bool hold) {
+  uint8_t selected_relay = 0;
+  buttonRelayTarget(button, hold, selected_relay);
   page += F("<div id='extra-");
   page += name;
   page += String(button);
-  page += F("' class='action-extra'><div class='row'><label><span class='target-label'>MQTT topic</span><br><input class='target-input' name='");
+  page += F("' class='action-extra'><div class='row relay-row'><label>Target relay<br><select name='");
+  page += name;
+  page += F("_relay");
+  page += String(button);
+  page += F("'>");
+  for (uint8_t relay = 0; relay < runtime_template.relay_count; relay++) {
+    if (!hasPin(runtime_template.relays[relay])) continue;
+    appendInputRelayOption(page, relay, selected_relay);
+  }
+  page += F("</select></label></div><div class='row target-row'><label><span class='target-label'>MQTT topic</span><br><input class='target-input' name='");
   page += name;
   page += F("_target");
   page += String(button);
@@ -4433,7 +4587,9 @@ void handleButtonSave() {
     candidate->button_hold_action[i] = hold_action;
 
     String error;
-    if (!readButtonEventText(i, "press", false, press_action, candidate->button_press_target, candidate->button_press_payload, error) ||
+    if (!readButtonRelayTargetInput(i, "press", press_action, candidate->button_press_relay, error) ||
+        !readButtonRelayTargetInput(i, "hold", hold_action, candidate->button_hold_relay, error) ||
+        !readButtonEventText(i, "press", false, press_action, candidate->button_press_target, candidate->button_press_payload, error) ||
         !readButtonEventText(i, "hold", true, hold_action, candidate->button_hold_target, candidate->button_hold_payload, error)) {
       delete candidate;
       server.send(400, F("text/plain"), error);
@@ -4450,7 +4606,9 @@ void handleButtonSave() {
                                       candidate->button_hold_payload,
                                       candidate->input_mode,
                                       candidate->input_relay,
-                                      candidate->input_on_level);
+                                      candidate->input_on_level,
+                                      candidate->button_press_relay,
+                                      candidate->button_hold_relay);
   delete candidate;
   if (!saved) {
     server.send(500, F("text/plain"), F("Could not save input settings"));
@@ -4734,9 +4892,25 @@ void handleHealth() {
       }
       out += F(",\"press_action\":\"");
       out += buttonActionName(config.button_press_action[i]);
-      out += F("\",\"hold_action\":\"");
+      out += F("\"");
+      if (config.button_press_action[i] == kButtonActionRelayToggle) {
+        uint8_t relay = 0;
+        if (buttonRelayTarget(i, false, relay)) {
+          out += F(",\"press_relay\":");
+          out += relay + 1;
+        }
+      }
+      out += F(",\"hold_action\":\"");
       out += buttonActionName(config.button_hold_action[i]);
-      out += F("\"}");
+      out += F("\"");
+      if (config.button_hold_action[i] == kButtonActionRelayToggle) {
+        uint8_t relay = 0;
+        if (buttonRelayTarget(i, true, relay)) {
+          out += F(",\"hold_relay\":");
+          out += relay + 1;
+        }
+      }
+      out += F("}");
     }
   }
   out += F("]");
