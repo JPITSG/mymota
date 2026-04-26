@@ -57,8 +57,15 @@ constexpr uint32_t kMqttReconnectMs = 5000;
 constexpr uint32_t kMqttConnectTimeoutMs = 650;
 constexpr uint32_t kMqttConnackTimeoutMs = 250;
 constexpr uint32_t kMqttIoTimeoutMs = 250;
+constexpr uint32_t kMqttInboundReadTimeoutMs = 20;
+constexpr uint32_t kMqttBrokerSilenceTimeoutMs = static_cast<uint32_t>(kMqttProtocolKeepaliveSec) * 2000UL;
+constexpr uint32_t kMqttConnackMaxRemainingLength = 2;
+constexpr uint8_t kMqttInboundPacketLimit = 4;
 constexpr uint16_t kMqttEnergyIntervalMax = 65535U;
 constexpr float kMqttEnergyChangeMaxPercent = 1000.0f;
+constexpr uint8_t kMqttPacketConnack = 0x20;
+constexpr uint8_t kMqttPacketPingreq = 0xc0;
+constexpr uint8_t kMqttPacketPingresp = 0xd0;
 constexpr uint8_t kInvalidPin = 0xff;
 constexpr uint8_t kAdc0Pin = 17;
 constexpr uint8_t kMaxRelays = 8;
@@ -423,7 +430,9 @@ bool config_ok = false;
 bool ap_started = false;
 bool update_started = false;
 bool update_ok = false;
+bool update_mqtt_paused = false;
 uint8_t update_error = UPDATE_ERROR_OK;
+uint32_t update_max_size = 0;
 uint32_t restart_at = 0;
 bool restart_pending = false;
 uint32_t disconnected_since = 0;
@@ -432,6 +441,8 @@ uint32_t last_led_update = 0;
 uint32_t last_adc_update = 0;
 uint32_t next_mqtt_reconnect = 0;
 uint32_t last_mqtt_io = 0;
+uint32_t last_mqtt_rx = 0;
+uint32_t last_mqtt_ping = 0;
 uint32_t last_mqtt_state_publish = 0;
 uint32_t last_mqtt_energy_publish = 0;
 uint32_t last_mqtt_connect_attempt = 0;
@@ -439,6 +450,7 @@ uint32_t last_mqtt_connect_duration = 0;
 float last_mqtt_energy_power = NAN;
 uint16_t mqtt_pending_relay_mask = 0;
 uint8_t last_mqtt_connect_result = kMqttConnectIdle;
+bool mqtt_ping_pending = false;
 uint32_t boot_id = 0;
 uint8_t boot_recovery_count = 0;
 bool boot_recovery_armed = false;
@@ -1161,6 +1173,8 @@ bool saveMqttConfig(const char *host, uint16_t port, const char *topic, uint16_t
   mqtt_client.stop();
   next_mqtt_reconnect = 0;
   last_mqtt_io = 0;
+  last_mqtt_rx = 0;
+  last_mqtt_ping = 0;
   last_mqtt_state_publish = 0;
   last_mqtt_energy_publish = 0;
   last_mqtt_connect_attempt = 0;
@@ -1168,6 +1182,7 @@ bool saveMqttConfig(const char *host, uint16_t port, const char *topic, uint16_t
   last_mqtt_connect_result = kMqttConnectIdle;
   last_mqtt_energy_power = NAN;
   mqtt_pending_relay_mask = 0;
+  mqtt_ping_pending = false;
   return commitConfig();
 }
 
@@ -1902,7 +1917,22 @@ bool mqttReadByteUntil(uint8_t &value, uint32_t deadline_ms) {
   const int read_value = mqtt_client.read();
   if (read_value < 0) return false;
   value = static_cast<uint8_t>(read_value);
+  last_mqtt_rx = millis();
   return true;
+}
+
+bool mqttReadRemainingLengthUntil(uint32_t &length, uint32_t max_length, uint32_t deadline_ms) {
+  length = 0;
+  uint32_t multiplier = 1;
+  for (uint8_t i = 0; i < 4; i++) {
+    uint8_t encoded = 0;
+    if (!mqttReadByteUntil(encoded, deadline_ms)) return false;
+    length += static_cast<uint32_t>(encoded & 0x7fU) * multiplier;
+    if (length > max_length) return true;
+    if ((encoded & 0x80U) == 0) return true;
+    multiplier *= 128U;
+  }
+  return false;
 }
 
 bool mqttWriteByte(uint8_t value) {
@@ -1935,6 +1965,10 @@ String mqttClientId() {
 
 void mqttStop() {
   mqtt_client.stop();
+  last_mqtt_io = 0;
+  last_mqtt_rx = 0;
+  last_mqtt_ping = 0;
+  mqtt_ping_pending = false;
 }
 
 bool mqttConnect() {
@@ -1968,24 +2002,48 @@ bool mqttConnect() {
   last_mqtt_io = millis();
 
   uint8_t packet_type = 0;
-  uint8_t remaining = 0;
+  uint32_t remaining = 0;
   uint8_t flags = 0;
   uint8_t return_code = 0;
   const uint32_t connack_deadline = millis() + kMqttConnackTimeoutMs;
-  ok = mqttReadByteUntil(packet_type, connack_deadline) &&
-       mqttReadByteUntil(remaining, connack_deadline) &&
-       mqttReadByteUntil(flags, connack_deadline) &&
+  ok = mqttReadByteUntil(packet_type, connack_deadline);
+  if (!ok) {
+    mqttStop();
+    recordMqttConnectResult(kMqttConnectConnackTimeout, started);
+    return false;
+  }
+  if (packet_type != kMqttPacketConnack) {
+    mqttStop();
+    recordMqttConnectResult(kMqttConnectConnackRejected, started);
+    return false;
+  }
+  ok = mqttReadRemainingLengthUntil(remaining, kMqttConnackMaxRemainingLength, connack_deadline);
+  if (!ok) {
+    mqttStop();
+    recordMqttConnectResult(kMqttConnectConnackTimeout, started);
+    return false;
+  }
+  if (remaining != 0x02) {
+    mqttStop();
+    recordMqttConnectResult(kMqttConnectConnackRejected, started);
+    return false;
+  }
+  ok = mqttReadByteUntil(flags, connack_deadline) &&
        mqttReadByteUntil(return_code, connack_deadline);
   if (!ok) {
     mqttStop();
     recordMqttConnectResult(kMqttConnectConnackTimeout, started);
     return false;
   }
-  if (!ok || packet_type != 0x20 || remaining != 0x02 || return_code != 0x00) {
+  if (flags != 0x00 || return_code != 0x00) {
     mqttStop();
     recordMqttConnectResult(kMqttConnectConnackRejected, started);
     return false;
   }
+  last_mqtt_io = millis();
+  last_mqtt_rx = last_mqtt_io;
+  last_mqtt_ping = 0;
+  mqtt_ping_pending = false;
   recordMqttConnectResult(kMqttConnectOk, started);
   return true;
 }
@@ -2144,7 +2202,39 @@ void maintainMqttEnergyReports(uint32_t now) {
   }
 }
 
+bool mqttProcessInboundPacket() {
+  uint8_t packet_type = 0;
+  uint32_t remaining = 0;
+  const uint32_t deadline = millis() + kMqttInboundReadTimeoutMs;
+
+  if (!mqttReadByteUntil(packet_type, deadline)) return false;
+  if (packet_type != kMqttPacketPingresp) return false;
+  if (!mqttReadRemainingLengthUntil(remaining, 0, deadline)) return false;
+  if (remaining != 0) return false;
+
+  last_mqtt_ping = 0;
+  mqtt_ping_pending = false;
+  return true;
+}
+
+bool mqttProcessInbound() {
+  uint8_t packet_count = 0;
+  while (mqtt_client.available() && packet_count < kMqttInboundPacketLimit) {
+    if (!mqttProcessInboundPacket()) {
+      mqttStop();
+      return false;
+    }
+    packet_count++;
+  }
+  return true;
+}
+
 void maintainMqtt() {
+  if (update_mqtt_paused) {
+    mqttStop();
+    return;
+  }
+
   if (!mqttConfigured() || WiFi.status() != WL_CONNECTED) {
     mqttStop();
     last_mqtt_energy_publish = 0;
@@ -2154,14 +2244,20 @@ void maintainMqtt() {
 
   if (!mqttEnsureConnected()) return;
 
-  while (mqtt_client.available()) {
-    mqtt_client.read();
-  }
+  if (!mqttProcessInbound()) return;
 
   const uint32_t now = millis();
+  if ((last_mqtt_rx && now - last_mqtt_rx >= kMqttBrokerSilenceTimeoutMs) ||
+      (mqtt_ping_pending && last_mqtt_ping && now - last_mqtt_ping >= kMqttBrokerSilenceTimeoutMs)) {
+    mqttStop();
+    return;
+  }
+
   if (now - last_mqtt_io >= (static_cast<uint32_t>(kMqttProtocolKeepaliveSec) * 1000UL)) {
-    if (mqttWriteByte(0xc0) && mqttWriteByte(0x00)) {
+    if (mqttWriteByte(kMqttPacketPingreq) && mqttWriteByte(0x00)) {
       last_mqtt_io = now;
+      last_mqtt_ping = now;
+      mqtt_ping_pending = true;
     } else {
       mqttStop();
       return;
@@ -3840,7 +3936,10 @@ void handleUpdateUpload() {
   if (upload.status == UPLOAD_FILE_START) {
     update_started = false;
     update_ok = false;
+    update_mqtt_paused = true;
     update_error = UPDATE_ERROR_OK;
+    update_max_size = 0;
+    mqttStop();
     WiFiUDP::stopAll();
     if (upload.filename.length() == 0) {
       update_error = UPDATE_ERROR_SIZE;
@@ -3848,7 +3947,7 @@ void handleUpdateUpload() {
     return;
   }
 
-  if (update_error != UPDATE_ERROR_OK) {
+  if (upload.status == UPLOAD_FILE_WRITE && update_error != UPDATE_ERROR_OK) {
     return;
   }
 
@@ -3878,11 +3977,23 @@ void handleUpdateUpload() {
         return;
       }
       const uint32_t max_sketch_space = (free_sketch_space - 0x1000) & 0xFFFFF000;
+      update_max_size = max_sketch_space;
       if (!Update.begin(max_sketch_space)) {
         update_error = Update.getError();
         return;
       }
       update_started = true;
+    }
+
+    if (update_max_size == 0 ||
+        upload.totalSize > update_max_size ||
+        upload.currentSize > update_max_size - upload.totalSize) {
+      if (update_started) {
+        Update.end();
+        update_started = false;
+      }
+      update_error = UPDATE_ERROR_SPACE;
+      return;
     }
 
     if (Update.hasError()) {
@@ -3897,12 +4008,23 @@ void handleUpdateUpload() {
   }
 
   if (upload.status == UPLOAD_FILE_END) {
-    if (!update_started) {
+    if (update_error != UPDATE_ERROR_OK) {
+      if (update_started) {
+        Update.end();
+        update_started = false;
+      }
+      update_mqtt_paused = false;
+    } else if (!update_started) {
       update_error = UPDATE_ERROR_SIZE;
+      update_mqtt_paused = false;
     } else if (Update.end(true)) {
       update_ok = true;
+      update_started = false;
+      update_mqtt_paused = true;
     } else {
       update_error = Update.getError();
+      update_started = false;
+      update_mqtt_paused = false;
     }
     return;
   }
@@ -3911,6 +4033,10 @@ void handleUpdateUpload() {
     if (update_started) {
       Update.end();
     }
+    update_started = false;
+    update_ok = false;
+    update_mqtt_paused = false;
+    update_max_size = 0;
     update_error = UPDATE_ERROR_STREAM;
   }
 }
