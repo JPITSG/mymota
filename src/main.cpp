@@ -142,6 +142,11 @@ constexpr uint16_t kTplHlwCf = 2688;
 constexpr uint16_t kTplHjlCf = 2720;
 constexpr uint16_t kTplAdcTemp = 4736;
 
+const char kTemplateShellyPlugSJson[] PROGMEM =
+  "{\"NAME\":\"Shelly Plug S\",\"GPIO\":[320,1,576,1,1,2720,0,0,2624,32,2656,224,1,4736],\"FLAG\":0,\"BASE\":45}";
+const char kTemplateNousA1TJson[] PROGMEM =
+  "{\"NAME\":\"NOUS A1T\",\"GPIO\":[32,0,0,0,2720,2656,0,0,2624,320,224,0,0,0],\"FLAG\":0,\"BASE\":18}";
+
 constexpr uint32_t kHlwPowerCal = 12530;
 constexpr uint32_t kHlwVoltageCal = 1950;
 constexpr uint32_t kHlwCurrentCal = 3500;
@@ -3157,6 +3162,7 @@ void appendFooter(String &page, bool live_poll = true, bool reboot_wait = false)
   page += F("t('live-temp',d.temperature_c==null?'n/a':Number(d.temperature_c).toFixed(1)+' C');t('live-adc-raw',d.adc_raw==null?'n/a':d.adc_raw);");
   page += F("}).catch(function(){});}");
   page += F("function ba(s){var k=s.getAttribute('data-key'),v=s.value,b=document.getElementById('extra-'+k);if(!b)return;var t=b.querySelector('.target-input'),p=b.querySelector('.payload-input'),pr=b.querySelector('.payload-row'),tl=b.querySelector('.target-label'),h=b.querySelector('.action-hint');b.className=(v=='2'||v=='3')?'action-extra show':'action-extra';if(v=='2'){if(t&&(!t.value||t.value.indexOf('http://')==0))t.value=t.getAttribute('data-default-topic');if(p&&!p.value)p.value=p.getAttribute('data-default-payload');if(tl)tl.textContent='MQTT topic';if(pr)pr.className='payload-row';if(h)h.textContent='Publishes this topic and payload through the configured MQTT broker.';}else if(v=='3'){if(tl)tl.textContent='Webhook URL';if(pr)pr.className='payload-row hidden';if(h)h.textContent='Executes an HTTP GET request; only http:// URLs are supported.';}}");
+  page += F("function tp(s){var o=s.options[s.selectedIndex],t=document.getElementById('template-json');if(o&&t&&o.getAttribute('data-json')){t.value=o.getAttribute('data-json');s.selectedIndex=0;}}");
   page += F("function bi(){var a=document.querySelectorAll('.button-action');for(var i=0;i<a.length;i++){a[i].onchange=function(){ba(this)};ba(a[i]);}}bi();");
   if (live_poll) {
     page += F("setInterval(live,1000);setInterval(ck,1000);live();");
@@ -3565,7 +3571,13 @@ void appendMqttStatus(String &page) {
 
 void appendTemplateForm(String &page) {
   page += F("<section class='panel wide'><h2>Template</h2><form method='post' action='/template'>");
-  page += F("<div class='row'><label>Tasmota ESP8266 template JSON<br><textarea name='template' rows='5' maxlength='");
+  page += F("<div class='row'><label>Known template<br><select onchange='tp(this)'><option value=''>Select a template</option>");
+  page += F("<option data-json='");
+  page += htmlEscape(String(FPSTR(kTemplateShellyPlugSJson)));
+  page += F("'>Shelly Plug S</option><option data-json='");
+  page += htmlEscape(String(FPSTR(kTemplateNousA1TJson)));
+  page += F("'>NOUS A1T 16A</option></select></label></div>");
+  page += F("<div class='row'><label>Tasmota ESP8266 template JSON<br><textarea id='template-json' name='template' rows='5' maxlength='");
   page += String(kTemplateJsonMaxLen);
   page += F("'>");
   page += htmlEscape(currentTemplateJson());
