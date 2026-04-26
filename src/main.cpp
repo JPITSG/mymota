@@ -3155,6 +3155,7 @@ void appendFooter(String &page, bool live_poll = true, bool reboot_wait = false)
   page += F("t('live-recovery',d.recovery.fast_boot_count+'/'+d.recovery.limit);");
   page += F("p('live-wifi',d.wifi?'connected':'disconnected',d.wifi?'pill ok':'pill bad');t('live-ssid',d.wifi_ssid||'n/a');t('live-ip',d.ip||'n/a');t('live-rssi',d.rssi==null?'n/a':d.rssi+' dBm');");
   page += F("p('live-mqtt',d.mqtt.enabled?(d.mqtt.connected?'connected':'disconnected'):'not configured',d.mqtt.enabled?(d.mqtt.connected?'pill ok':'pill bad'):'pill');");
+  page += F("if(d.mqtt){t('live-mqtt-pending',d.mqtt.pending);t('live-mqtt-result',d.mqtt.last_connect_result);t('live-mqtt-connect-ms',d.mqtt.last_connect_ms+' ms');t('live-mqtt-attempt',d.mqtt.last_attempt_ms_ago==null?'n/a':d.mqtt.last_attempt_ms_ago+' ms ago');}");
   page += F("if(d.power){for(var i=0;i<d.power.length;i++){if(d.power[i]!==null)p('live-relay-'+i,d.power[i]?'on':'off',d.power[i]?'pill ok':'pill bad');}}");
   page += F("if(d.buttons){for(var b=0;b<d.buttons.length;b++){if(d.buttons[b])p('live-button-'+b,d.buttons[b].pressed?'pressed':'released',d.buttons[b].pressed?'pill ok':'pill bad');}}");
   page += F("if(d.leds){for(var l=0;l<d.leds.length;l++){if(d.leds[l])p('live-led-'+l,d.leds[l].on?'on':'off',d.leds[l].on?'pill ok':'pill bad');}}");
@@ -3254,6 +3255,48 @@ void appendStatusBlock(String &page) {
     page += ipToString(WiFi.softAPIP());
     page += F("</code></div>");
   }
+
+  page += F("<span>MQTT</span><div>");
+  if (config.mqtt_host[0] == '\0') {
+    page += F("<span id='live-mqtt' class='pill'>not configured</span>");
+  } else if (mqtt_client.connected()) {
+    page += F("<span id='live-mqtt' class='pill ok'>connected</span>");
+  } else {
+    page += F("<span id='live-mqtt' class='pill bad'>disconnected</span>");
+  }
+  page += F("</div><span>MQTT broker</span><div>");
+  if (config.mqtt_host[0] == '\0') {
+    page += F("<span class='muted'>not configured</span>");
+  } else {
+    page += F("<code>");
+    page += htmlEscape(config.mqtt_host);
+    page += F(":");
+    page += String(config.mqtt_port);
+    page += F("</code>");
+  }
+  page += F("</div><span>MQTT topic</span><div><code>");
+  page += htmlEscape(config.mqtt_topic);
+  page += F("</code></div><span>MQTT keepalive</span><div><code>");
+  if (config.mqtt_keepalive == 0) {
+    page += F("disabled");
+  } else {
+    page += String(config.mqtt_keepalive);
+    page += F("s");
+  }
+  page += F("</code></div><span>MQTT pending</span><div><code id='live-mqtt-pending'>");
+  page += String(mqtt_pending_relay_mask);
+  page += F("</code></div><span>MQTT last connect</span><div><code id='live-mqtt-result'>");
+  page += mqttConnectResultName(last_mqtt_connect_result);
+  page += F("</code> in <code id='live-mqtt-connect-ms'>");
+  page += String(last_mqtt_connect_duration);
+  page += F(" ms</code></div><span>MQTT last attempt</span><div><code id='live-mqtt-attempt'>");
+  if (last_mqtt_connect_attempt == 0) {
+    page += F("n/a");
+  } else {
+    page += String(millis() - last_mqtt_connect_attempt);
+    page += F(" ms ago");
+  }
+  page += F("</code></div>");
   page += F("</div></section>");
 }
 
@@ -3538,37 +3581,6 @@ void appendButtonSettings(String &page) {
   page += F("<button type='submit'>Save buttons</button></form></section>");
 }
 
-void appendMqttStatus(String &page) {
-  page += F("<section class='panel'><h2>MQTT ");
-  if (config.mqtt_host[0] == '\0') {
-    page += F("<span id='live-mqtt' class='pill'>not configured</span>");
-  } else if (mqtt_client.connected()) {
-    page += F("<span id='live-mqtt' class='pill ok'>connected</span>");
-  } else {
-    page += F("<span id='live-mqtt' class='pill bad'>disconnected</span>");
-  }
-  page += F("</h2><div class='kv'>");
-  if (config.mqtt_host[0] == '\0') {
-    page += F("<span>Broker</span><div><span class='muted'>not configured</span></div>");
-  } else {
-    page += F("<span>Broker</span><div><code>");
-    page += htmlEscape(config.mqtt_host);
-    page += F(":");
-    page += String(config.mqtt_port);
-    page += F("</code></div>");
-  }
-  page += F("<span>Topic</span><div><code>");
-  page += htmlEscape(config.mqtt_topic);
-  page += F("</code></div><span>State keepalive</span><div><code>");
-  if (config.mqtt_keepalive == 0) {
-    page += F("disabled");
-  } else {
-    page += String(config.mqtt_keepalive);
-    page += F("s");
-  }
-  page += F("</code></div></div></section>");
-}
-
 void appendTemplateForm(String &page) {
   page += F("<section class='panel wide'><h2>Template</h2><form method='post' action='/template'>");
   page += F("<div class='row'><label>Known template<br><select onchange='tp(this)'><option value=''>Select a template</option>");
@@ -3642,8 +3654,6 @@ void handleRoot() {
   flushStreamChunk(page);
   appendLedSettings(page);
   flushStreamChunk(page);
-  appendMqttStatus(page);
-  flushStreamChunk(page);
   page += F("<section class='panel'><h2>Wi-Fi</h2><form method='post' action='/wifi'>");
   page += F("<div class='row'><label>SSID<br><input name='ssid' maxlength='32' required value='");
   page += htmlEscape(config.ssid);
@@ -3658,15 +3668,17 @@ void handleRoot() {
   page += F("<p><a class='btn secondary' href='/scan'>Scan networks</a></p></section>");
   flushStreamChunk(page);
 
-  appendTemplateForm(page);
-  flushStreamChunk(page);
   appendMqttForm(page);
   flushStreamChunk(page);
 
   page += F("<section class='panel'><h2>Firmware</h2><form method='post' action='/update' enctype='multipart/form-data'>");
   page += F("<input type='file' name='firmware' accept='.bin,.bin.gz' required><br><button type='submit'>Upload firmware</button></form>");
   page += F("<p><a class='btn secondary' href='/reboot'>Reboot</a></p>");
-  page += F("<form method='post' action='/factory-reset' onsubmit=\"return confirm('Factory reset will delete Wi-Fi, template, MQTT, button, LED, and energy settings. Continue?')\"><button class='danger' type='submit'>Factory reset</button></form></section></div>");
+  page += F("<form method='post' action='/factory-reset' onsubmit=\"return confirm('Factory reset will delete Wi-Fi, template, MQTT, button, LED, and energy settings. Continue?')\"><button class='danger' type='submit'>Factory reset</button></form></section>");
+  flushStreamChunk(page);
+
+  appendTemplateForm(page);
+  page += F("</div>");
   flushStreamChunk(page);
   appendFooter(page);
   endStreamedResponse(page);
