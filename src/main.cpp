@@ -5,6 +5,7 @@
 #include <ESP8266WiFi.h>
 #include <Updater.h>
 #include <WiFiUdp.h>
+#include <Wire.h>
 #include <math.h>
 #include <stddef.h>
 
@@ -168,6 +169,34 @@ const char kTemplateNousA1TJson[] PROGMEM =
 const char kTemplateShelly25Json[] PROGMEM =
   "{\"NAME\":\"Shelly 2.5\",\"GPIO\":[320,0,0,0,224,193,0,0,640,192,608,225,3456,4736],\"FLAG\":0,\"BASE\":18}";
 
+enum Ade7953Register : uint16_t {
+  kAde7953DisNoLoad = 0x001,
+  kAde7953Config = 0x102,
+  kAde7953PhcalA = 0x108,
+  kAde7953PhcalB = 0x109,
+  kAde7953Reserved120 = 0x120,
+  kAde7953Unlock120 = 0x0fe,
+  kAde7953AccMode = 0x301,
+  kAde7953ApNoLoad = 0x303,
+  kAde7953VarNoLoad = 0x304,
+  kAde7953IrmsA = 0x31a,
+  kAde7953IrmsB = 0x31b,
+  kAde7953Vrms = 0x31c,
+  kAde7953AEnergyA = 0x31e,
+  kAde7953AEnergyB = 0x31f,
+  kAde7953ApEnergyA = 0x322,
+  kAde7953ApEnergyB = 0x323,
+  kAde7953AIGain = 0x380,
+  kAde7953AVGain = 0x381,
+  kAde7953AWGain = 0x382,
+  kAde7953AVarGain = 0x383,
+  kAde7953AVAGain = 0x384,
+  kAde7953BIGain = 0x38c,
+  kAde7953BWGain = 0x38e,
+  kAde7953BVarGain = 0x38f,
+  kAde7953BVAGain = 0x390
+};
+
 constexpr uint32_t kHlwPowerCal = 12530;
 constexpr uint32_t kHlwVoltageCal = 1950;
 constexpr uint32_t kHlwCurrentCal = 3500;
@@ -179,6 +208,21 @@ constexpr uint32_t kHjlVoltageRatio = 822;
 constexpr uint32_t kHjlCurrentRatio = 3300;
 constexpr uint32_t kEnergyNoPulseTimeoutUs = 10000000UL;
 constexpr uint8_t kEnergyCf1SampleCount = 10;
+constexpr uint8_t kEnergyDriverNone = 0;
+constexpr uint8_t kEnergyDriverPulse = 1;
+constexpr uint8_t kEnergyDriverAde7953 = 2;
+constexpr uint8_t kEnergyMaxChannels = 2;
+constexpr uint8_t kAde7953Address = 0x38;
+constexpr uint8_t kAde7953ModelShelly25 = 0;
+constexpr uint32_t kAde7953UpdateMs = 1000;
+constexpr uint32_t kAde7953StaleMs = 5000;
+constexpr uint8_t kAde7953SkipInitialReads = 1;
+constexpr uint32_t kAde7953PowerCal = 1540;
+constexpr uint32_t kAde7953VoltageCal = 26000;
+constexpr uint32_t kAde7953CurrentCal = 10000;
+constexpr uint32_t kAde7953GainDefault = 4194304;
+constexpr uint32_t kAde7953NoLoadThreshold = 29196;
+constexpr float kAde7953PowerCorrection = 23.41494f;
 constexpr float kAnalogT0Kelvin = 298.15f;
 constexpr float kAnalogNtcBridgeResistance = 32000.0f;
 constexpr float kAnalogNtcResistance = 10000.0f;
@@ -538,8 +582,20 @@ struct RuntimeTemplate {
   uint16_t unsupported_code[8];
 };
 
+struct EnergyChannelState {
+  float voltage;
+  float current;
+  float power;
+  uint32_t voltage_raw;
+  uint32_t current_raw;
+  uint32_t active_power_raw;
+  uint32_t apparent_power_raw;
+};
+
 struct EnergyState {
   bool present;
+  uint8_t driver;
+  uint8_t channel_count;
   bool hjl;
   uint8_t cf_pin;
   uint8_t cf1_pin;
@@ -564,7 +620,14 @@ struct EnergyState {
   uint32_t current_ratio;
   uint32_t last_update_ms;
   uint32_t last_integrate_ms;
+  uint32_t last_success_ms;
   uint8_t power_retry;
+  uint8_t ade7953_model;
+  uint8_t ade7953_skip_reads;
+  uint16_t i2c_error_count;
+  uint32_t ade7953_acc_mode;
+  uint32_t ade7953_sample_ms;
+  EnergyChannelState channel[kEnergyMaxChannels];
   float voltage;
   float current;
   float power;
@@ -2332,7 +2395,9 @@ void parseTemplateFunction(uint8_t pin, uint16_t code) {
   if (base == kTplAde7953Irq) {
     runtime_template.ade7953_irq_pin = pin;
     runtime_template.ade7953_model = index;
-    addUnsupportedTemplatePin(pin, code);
+    if (index != kAde7953ModelShelly25) {
+      addUnsupportedTemplatePin(pin, code);
+    }
     return;
   }
 
@@ -2341,14 +2406,16 @@ void parseTemplateFunction(uint8_t pin, uint16_t code) {
 
 void detachEnergyInterrupts() {
   if (!energy.present) return;
-  if (interruptPinSupported(runtime_template.energy_cf_pin)) {
+  if (energy.driver == kEnergyDriverPulse && interruptPinSupported(runtime_template.energy_cf_pin)) {
     detachInterrupt(digitalPinToInterrupt(runtime_template.energy_cf_pin));
   }
-  if (runtime_template.energy_cf1_pin != runtime_template.energy_cf_pin &&
+  if (energy.driver == kEnergyDriverPulse &&
+      runtime_template.energy_cf1_pin != runtime_template.energy_cf_pin &&
       interruptPinSupported(runtime_template.energy_cf1_pin)) {
     detachInterrupt(digitalPinToInterrupt(runtime_template.energy_cf1_pin));
   }
   energy.present = false;
+  energy.driver = kEnergyDriverNone;
 }
 
 void decodeTemplateConfig() {
@@ -2987,7 +3054,7 @@ bool mqttPublishEnergyStatus() {
 
   const String topic = mqttEnergyTopic();
   String payload;
-  payload.reserve(150);
+  payload.reserve(260);
   payload += F("{\"StatusSNS\":{\"ENERGY\":{\"Total\":");
   payload += String(reportedEnergyTotalKwh(), 4);
   payload += F(",\"Power\":");
@@ -2996,6 +3063,18 @@ bool mqttPublishEnergyStatus() {
   payload += String(energy.voltage, 1);
   payload += F(",\"Current\":");
   payload += String(energy.current, 3);
+  if (energy.channel_count > 1) {
+    for (uint8_t i = 0; i < energy.channel_count && i < kEnergyMaxChannels; i++) {
+      payload += F(",\"Power");
+      payload += String(i + 1);
+      payload += F("\":");
+      payload += String(energy.channel[i].power, 2);
+      payload += F(",\"Current");
+      payload += String(i + 1);
+      payload += F("\":");
+      payload += String(energy.channel[i].current, 3);
+    }
+  }
   payload += F("}}}");
 
   const bool ok = mqttPublish(topic.c_str(), payload.c_str());
@@ -3156,6 +3235,195 @@ void writeEnergySelector(bool select_ui_flag) {
   digitalWrite(energy.sel_pin, select_ui_flag ? HIGH : LOW);
 }
 
+const __FlashStringHelper *energyDriverName() {
+  if (energy.driver == kEnergyDriverAde7953) return F("ADE7953");
+  if (energy.driver == kEnergyDriverPulse) return energy.hjl ? F("HJL/BL0937") : F("HLW8012");
+  return F("none");
+}
+
+uint32_t absSigned32(uint32_t value) {
+  if (value & 0x80000000UL) return (~value) + 1;
+  return value;
+}
+
+void updateEnergyAggregateFromChannels() {
+  float power = 0.0f;
+  float current = 0.0f;
+  float voltage = 0.0f;
+  uint8_t voltage_count = 0;
+  for (uint8_t i = 0; i < energy.channel_count && i < kEnergyMaxChannels; i++) {
+    power += energy.channel[i].power;
+    current += energy.channel[i].current;
+    if (energy.channel[i].voltage > 0.0f) {
+      voltage += energy.channel[i].voltage;
+      voltage_count++;
+    }
+  }
+  energy.power = power;
+  energy.current = current;
+  energy.voltage = voltage_count ? voltage / static_cast<float>(voltage_count) : 0.0f;
+}
+
+uint8_t ade7953RegSize(uint16_t reg) {
+  switch ((reg >> 8) & 0x0f) {
+    case 0x03: return 4;
+    case 0x02: return 3;
+    case 0x01: return 2;
+    case 0x00:
+    case 0x07:
+    case 0x08:
+      return 1;
+  }
+  return 0;
+}
+
+bool ade7953Write(uint16_t reg, uint32_t value) {
+  uint8_t size = ade7953RegSize(reg);
+  if (!size) return false;
+  Wire.beginTransmission(kAde7953Address);
+  Wire.write(static_cast<uint8_t>((reg >> 8) & 0xff));
+  Wire.write(static_cast<uint8_t>(reg & 0xff));
+  while (size--) {
+    Wire.write(static_cast<uint8_t>((value >> (8 * size)) & 0xff));
+  }
+  const bool ok = Wire.endTransmission() == 0;
+  delayMicroseconds(5);
+  if (!ok) energy.i2c_error_count++;
+  return ok;
+}
+
+bool ade7953Read(uint16_t reg, uint32_t &value) {
+  const uint8_t size = ade7953RegSize(reg);
+  if (!size) return false;
+  Wire.beginTransmission(kAde7953Address);
+  Wire.write(static_cast<uint8_t>((reg >> 8) & 0xff));
+  Wire.write(static_cast<uint8_t>(reg & 0xff));
+  if (Wire.endTransmission(false) != 0) {
+    energy.i2c_error_count++;
+    return false;
+  }
+  if (Wire.requestFrom(kAde7953Address, size) != size) {
+    energy.i2c_error_count++;
+    return false;
+  }
+  value = 0;
+  for (uint8_t i = 0; i < size; i++) {
+    value = (value << 8) | Wire.read();
+  }
+  return true;
+}
+
+bool ade7953SetCalibration(uint8_t channel) {
+  if (channel == 0) {
+    return ade7953Write(kAde7953AVGain, kAde7953GainDefault) &&
+           ade7953Write(kAde7953AIGain, kAde7953GainDefault) &&
+           ade7953Write(kAde7953AWGain, kAde7953GainDefault) &&
+           ade7953Write(kAde7953AVAGain, kAde7953GainDefault) &&
+           ade7953Write(kAde7953AVarGain, kAde7953GainDefault) &&
+           ade7953Write(kAde7953PhcalA, 0);
+  }
+  return ade7953Write(kAde7953BIGain, kAde7953GainDefault) &&
+         ade7953Write(kAde7953BWGain, kAde7953GainDefault) &&
+         ade7953Write(kAde7953BVAGain, kAde7953GainDefault) &&
+         ade7953Write(kAde7953BVarGain, kAde7953GainDefault) &&
+         ade7953Write(kAde7953PhcalB, 0);
+}
+
+bool ade7953InitRegisters() {
+  return ade7953Write(kAde7953Config, 0x0004) &&
+         ade7953Write(kAde7953Unlock120, 0x00ad) &&
+         ade7953Write(kAde7953Reserved120, 0x0030) &&
+         ade7953Write(kAde7953DisNoLoad, 0x07) &&
+         ade7953Write(kAde7953ApNoLoad, kAde7953NoLoadThreshold) &&
+         ade7953Write(kAde7953VarNoLoad, kAde7953NoLoadThreshold) &&
+         ade7953Write(kAde7953DisNoLoad, 0x00) &&
+         ade7953SetCalibration(0) &&
+         ade7953SetCalibration(1);
+}
+
+bool ade7953Probe() {
+  Wire.beginTransmission(kAde7953Address);
+  return Wire.endTransmission() == 0;
+}
+
+bool setupAde7953EnergyMonitor() {
+  if (runtime_template.ade7953_irq_pin == kInvalidPin ||
+      runtime_template.ade7953_model != kAde7953ModelShelly25 ||
+      !digitalPinSupported(runtime_template.i2c_scl_pin) ||
+      !digitalPinSupported(runtime_template.i2c_sda_pin)) {
+    return false;
+  }
+
+  if (digitalPinSupported(runtime_template.ade7953_irq_pin)) {
+    pinMode(runtime_template.ade7953_irq_pin, INPUT);
+  }
+
+  Wire.begin(runtime_template.i2c_sda_pin, runtime_template.i2c_scl_pin);
+  Wire.setClock(100000);
+  Wire.setClockStretchLimit(1500);
+  delay(100);
+  if (!ade7953Probe()) {
+    energy.i2c_error_count++;
+    return false;
+  }
+  if (!ade7953InitRegisters()) {
+    return false;
+  }
+
+  energy.present = true;
+  energy.driver = kEnergyDriverAde7953;
+  energy.channel_count = 2;
+  energy.ade7953_model = runtime_template.ade7953_model;
+  energy.ade7953_skip_reads = kAde7953SkipInitialReads;
+  energy.last_success_ms = millis();
+  return true;
+}
+
+bool ade7953ReadHardwareChannel(uint8_t hardware_channel, EnergyChannelState &channel) {
+  uint32_t value = 0;
+  const uint16_t irms_reg = hardware_channel == 0 ? kAde7953IrmsA : kAde7953IrmsB;
+  const uint16_t energy_reg = hardware_channel == 0 ? kAde7953AEnergyA : kAde7953AEnergyB;
+  const uint16_t apparent_reg = hardware_channel == 0 ? kAde7953ApEnergyA : kAde7953ApEnergyB;
+
+  if (!ade7953Read(irms_reg, value)) return false;
+  channel.current_raw = value;
+  if (!ade7953Read(energy_reg, value)) return false;
+  channel.active_power_raw = absSigned32(value);
+  if (!ade7953Read(apparent_reg, value)) return false;
+  channel.apparent_power_raw = absSigned32(value);
+  if (!ade7953Read(kAde7953Vrms, value)) return false;
+  channel.voltage_raw = value;
+
+  channel.voltage = static_cast<float>(channel.voltage_raw) / static_cast<float>(kAde7953VoltageCal);
+  channel.current = channel.active_power_raw ? static_cast<float>(channel.current_raw) / (static_cast<float>(kAde7953CurrentCal) * 10.0f) : 0.0f;
+  const float sample_correction = energy.ade7953_sample_ms ? static_cast<float>(energy.ade7953_sample_ms) / 1000.0f : 1.0f;
+  channel.power = static_cast<float>(channel.active_power_raw) /
+                  (((static_cast<float>(kAde7953PowerCal) / 10.0f) / kAde7953PowerCorrection) * sample_correction);
+  return true;
+}
+
+bool readAde7953Energy() {
+  uint32_t value = 0;
+  if (!ade7953Read(kAde7953AccMode, value)) return false;
+  energy.ade7953_acc_mode = value;
+
+  EnergyChannelState next[kEnergyMaxChannels]{};
+  if (!ade7953ReadHardwareChannel(1, next[0])) return false;  // Shelly 2.5 relay 1 is ADE7953 channel B
+  if (!ade7953ReadHardwareChannel(0, next[1])) return false;  // Shelly 2.5 relay 2 is ADE7953 channel A
+
+  if (energy.ade7953_skip_reads) {
+    energy.ade7953_skip_reads--;
+    return true;
+  }
+
+  for (uint8_t i = 0; i < kEnergyMaxChannels; i++) {
+    energy.channel[i] = next[i];
+  }
+  updateEnergyAggregateFromChannels();
+  energy.last_success_ms = millis();
+  return true;
+}
+
 void setupEnergyMonitor() {
   memset(&energy, 0, sizeof(energy));
   energy.cf_pin = runtime_template.energy_cf_pin;
@@ -3172,8 +3440,16 @@ void setupEnergyMonitor() {
   energy.total_kwh = ukwhToKwh(energy_journal_saved_ukwh);
   energy.last_update_ms = millis();
   energy.last_integrate_ms = millis();
+  energy.last_success_ms = energy.last_update_ms;
 
+  if (setupAde7953EnergyMonitor()) {
+    return;
+  }
+
+  energy.present = interruptPinSupported(energy.cf_pin);
   if (!energy.present) return;
+  energy.driver = kEnergyDriverPulse;
+  energy.channel_count = 1;
 
   if (digitalPinSupported(energy.sel_pin)) {
     pinMode(energy.sel_pin, OUTPUT);
@@ -3197,7 +3473,7 @@ void setRelay(uint8_t relay, bool on) {
   writeAssignedPin(runtime_template.relays[relay], on);
   if (changed) {
     scheduleMqttRelayPublish(relay);
-    if (energy.present && relay == 0 && was_on && !on) {
+    if (energy.present && was_on && !on) {
       energy_persist_requested = true;
     }
     updateDeviceLeds(true);
@@ -3385,6 +3661,27 @@ void maintainButtons() {
 void maintainEnergy() {
   if (!energy.present) return;
   const uint32_t now = millis();
+  if (energy.driver == kEnergyDriverAde7953) {
+    if (now - energy.last_update_ms >= kAde7953UpdateMs) {
+      energy.ade7953_sample_ms = now - energy.last_update_ms;
+      energy.last_update_ms = now;
+      if (!readAde7953Energy() && now - energy.last_success_ms >= kAde7953StaleMs) {
+        for (uint8_t i = 0; i < energy.channel_count && i < kEnergyMaxChannels; i++) {
+          energy.channel[i].current = 0.0f;
+          energy.channel[i].power = 0.0f;
+        }
+        updateEnergyAggregateFromChannels();
+      }
+    }
+    if (now - energy.last_integrate_ms >= kEnergyIntegrateMs) {
+      const uint32_t elapsed = now - energy.last_integrate_ms;
+      energy.last_integrate_ms = now;
+      energy.total_kwh += (energy.power * static_cast<float>(elapsed)) / 3600000000.0f;
+    }
+    persistEnergyTotal(false);
+    return;
+  }
+
   if (now - energy.last_update_ms >= kEnergyUpdateMs) {
     energy.last_update_ms = now;
     const uint32_t now_us = micros();
@@ -3554,7 +3851,7 @@ void appendFooter(String &page, bool live_poll = true, bool reboot_wait = false)
   page += F("if(d.power){for(var i=0;i<d.power.length;i++){if(d.power[i]!==null)p('live-relay-'+i,d.power[i]?'on':'off',d.power[i]?'pill ok':'pill bad');}}");
   page += F("if(d.buttons){for(var b=0;b<d.buttons.length;b++){if(d.buttons[b])p('live-button-'+b,d.buttons[b].state||(d.buttons[b].pressed?'pressed':'released'),d.buttons[b].pressed?'pill ok':'pill bad');}}");
   page += F("if(d.leds){for(var l=0;l<d.leds.length;l++){if(d.leds[l])p('live-led-'+l,d.leds[l].on?'on':'off',d.leds[l].on?'pill ok':'pill bad');}}");
-  page += F("if(d.energy){t('live-energy-power',fmt(d.energy.power,1,' W'));t('live-energy-voltage',fmt(d.energy.voltage,1,' V'));t('live-energy-current',fmt(d.energy.current,3,' A'));t('live-energy-total',fmt(d.energy.total_kwh,4,' kWh'));t('live-energy-offset',fmt(d.energy.offset_kwh,4,' kWh'));}");
+  page += F("if(d.energy){t('live-energy-power',fmt(d.energy.power,1,' W'));t('live-energy-voltage',fmt(d.energy.voltage,1,' V'));t('live-energy-current',fmt(d.energy.current,3,' A'));t('live-energy-total',fmt(d.energy.total_kwh,4,' kWh'));t('live-energy-offset',fmt(d.energy.offset_kwh,4,' kWh'));if(d.energy.channels){for(var e=0;e<d.energy.channels.length;e++){t('live-energy-ch'+e+'-power',fmt(d.energy.channels[e].power,1,' W'));t('live-energy-ch'+e+'-current',fmt(d.energy.channels[e].current,3,' A'));}}}");
   page += F("t('live-temp',d.temperature_c==null?'n/a':Number(d.temperature_c).toFixed(1)+' C');t('live-adc-raw',d.adc_raw==null?'n/a':d.adc_raw);");
   page += F("}).catch(function(){});}");
   page += F("function ba(s){var k=s.getAttribute('data-key'),v=s.value,b=document.getElementById('extra-'+k);if(!b)return;var t=b.querySelector('.target-input'),p=b.querySelector('.payload-input'),rr=b.querySelector('.relay-row'),tr=b.querySelector('.target-row'),pr=b.querySelector('.payload-row'),tl=b.querySelector('.target-label'),h=b.querySelector('.action-hint');b.className=(v=='1'||v=='2'||v=='3')?'action-extra show':'action-extra';if(rr)rr.className=v=='1'?'row relay-row':'row relay-row hidden';if(tr)tr.className=(v=='2'||v=='3')?'row target-row':'row target-row hidden';if(pr)pr.className=(v=='2')?'row payload-row':'row payload-row hidden';if(v=='1'){if(h)h.textContent='Toggles the selected relay.';}else if(v=='2'){if(t&&(!t.value||t.value.indexOf('http://')==0))t.value=t.getAttribute('data-default-topic');if(p&&!p.value)p.value=p.getAttribute('data-default-payload');if(tl)tl.textContent='MQTT topic';if(h)h.textContent='Publishes this topic and payload through the configured MQTT broker.';}else if(v=='3'){if(tl)tl.textContent='Webhook URL';if(h)h.textContent='Executes an HTTP GET request; only http:// URLs are supported.';}}");
@@ -3723,18 +4020,24 @@ void appendTemplateStatus(String &page) {
     }
     if (energy.present) {
       page += F("<span>Energy</span><div><code>");
-      if (energy.hjl) {
-        page += F("HJL/BL0937");
+      page += energyDriverName();
+      page += F("</code>");
+      if (energy.driver == kEnergyDriverAde7953) {
+        page += F(" I2C <code>0x38</code>, IRQ/model <code>");
+        page += pinName(runtime_template.ade7953_irq_pin);
+        page += F("</code>, channels <code>");
+        page += String(energy.channel_count);
+        page += F("</code>");
       } else {
-        page += F("HLW8012");
+        page += F(" CF <code>");
+        page += pinName(energy.cf_pin);
+        page += F("</code>, CF1 <code>");
+        page += pinName(energy.cf1_pin);
+        page += F("</code>, SEL <code>");
+        page += pinName(energy.sel_pin);
+        page += F("</code>");
       }
-      page += F("</code> CF <code>");
-      page += pinName(energy.cf_pin);
-      page += F("</code>, CF1 <code>");
-      page += pinName(energy.cf1_pin);
-      page += F("</code>, SEL <code>");
-      page += pinName(energy.sel_pin);
-      page += F("</code></div>");
+      page += F("</div>");
     }
     if (runtime_template.adc_temp) {
       page += F("<span>ADC temperature</span><div><code id='live-temp'>");
@@ -3804,6 +4107,23 @@ void appendDeviceControls(String &page) {
     page += F(" kWh</code></div><span>Total offset</span><div><code id='live-energy-offset'>");
     page += String(config.energy_total_offset_kwh, 4);
     page += F(" kWh</code></div></div>");
+    if (energy.channel_count > 1) {
+      page += F("<div class='kv'>");
+      for (uint8_t i = 0; i < energy.channel_count && i < kEnergyMaxChannels; i++) {
+        page += F("<span>Channel ");
+        page += String(i + 1);
+        page += F("</span><div><code id='live-energy-ch");
+        page += String(i);
+        page += F("-power'>");
+        page += String(energy.channel[i].power, 1);
+        page += F(" W</code> <code id='live-energy-ch");
+        page += String(i);
+        page += F("-current'>");
+        page += String(energy.channel[i].current, 3);
+        page += F(" A</code></div>");
+      }
+      page += F("</div>");
+    }
     page += F("<form method='post' action='/energy'><div class='row'><label>Total kWh offset<br><input name='total_offset_kwh' type='number' min='");
     page += String(kEnergyTotalOffsetMinKwh, 0);
     page += F("' max='");
@@ -4952,7 +5272,9 @@ void handleHealth() {
   flushStreamChunk(out);
   out += F(",\"energy\":");
   if (energy.present) {
-    out += F("{\"voltage\":");
+    out += F("{\"driver\":\"");
+    out += energy.driver == kEnergyDriverAde7953 ? F("ade7953") : (energy.hjl ? F("hjl_bl0937") : F("hlw8012"));
+    out += F("\",\"voltage\":");
     out += String(energy.voltage, 1);
     out += F(",\"current\":");
     out += String(energy.current, 3);
@@ -4968,20 +5290,62 @@ void handleHealth() {
     out += config.energy_mqtt_interval;
     out += F(",\"report_change_percent\":");
     out += String(energyMqttChangePercent(), 1);
-    out += F(",\"debug\":{\"cf_us\":");
-    out += energy.cf_power_pulse_length;
-    out += F(",\"cf1_last_us\":");
-    out += energy.cf1_pulse_length;
-    out += F(",\"cf1_voltage_us\":");
-    out += energy.cf1_voltage_pulse_length;
-    out += F(",\"cf1_current_us\":");
-    out += energy.cf1_current_pulse_length;
-    out += F(",\"cf1_timer\":");
-    out += energy.cf1_timer;
-    out += F(",\"selector\":");
-    out += (energy.select_ui_flag ? F("true") : F("false"));
-    out += F(",\"voltage_flag\":");
-    out += (energy.ui_flag ? F("true") : F("false"));
+    if (energy.channel_count > 1) {
+      out += F(",\"channels\":[");
+      for (uint8_t i = 0; i < energy.channel_count && i < kEnergyMaxChannels; i++) {
+        if (i) out += F(",");
+        out += F("{\"voltage\":");
+        out += String(energy.channel[i].voltage, 1);
+        out += F(",\"current\":");
+        out += String(energy.channel[i].current, 3);
+        out += F(",\"power\":");
+        out += String(energy.channel[i].power, 1);
+        out += F("}");
+      }
+      out += F("]");
+    }
+    out += F(",\"debug\":{");
+    if (energy.driver == kEnergyDriverAde7953) {
+      out += F("\"i2c_errors\":");
+      out += energy.i2c_error_count;
+      out += F(",\"last_success_ms_ago\":");
+      out += millis() - energy.last_success_ms;
+      out += F(",\"acc_mode\":");
+      out += energy.ade7953_acc_mode;
+      out += F(",\"skip_reads\":");
+      out += energy.ade7953_skip_reads;
+      out += F(",\"sample_ms\":");
+      out += energy.ade7953_sample_ms;
+      out += F(",\"raw\":[");
+      for (uint8_t i = 0; i < energy.channel_count && i < kEnergyMaxChannels; i++) {
+        if (i) out += F(",");
+        out += F("{\"vrms\":");
+        out += energy.channel[i].voltage_raw;
+        out += F(",\"irms\":");
+        out += energy.channel[i].current_raw;
+        out += F(",\"active\":");
+        out += energy.channel[i].active_power_raw;
+        out += F(",\"apparent\":");
+        out += energy.channel[i].apparent_power_raw;
+        out += F("}");
+      }
+      out += F("]");
+    } else {
+      out += F("\"cf_us\":");
+      out += energy.cf_power_pulse_length;
+      out += F(",\"cf1_last_us\":");
+      out += energy.cf1_pulse_length;
+      out += F(",\"cf1_voltage_us\":");
+      out += energy.cf1_voltage_pulse_length;
+      out += F(",\"cf1_current_us\":");
+      out += energy.cf1_current_pulse_length;
+      out += F(",\"cf1_timer\":");
+      out += energy.cf1_timer;
+      out += F(",\"selector\":");
+      out += (energy.select_ui_flag ? F("true") : F("false"));
+      out += F(",\"voltage_flag\":");
+      out += (energy.ui_flag ? F("true") : F("false"));
+    }
     out += F("}");
     out += F("}");
   } else {
