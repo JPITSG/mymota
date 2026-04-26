@@ -895,9 +895,9 @@ void normalizeConfigStrings() {
 }
 
 bool storedConfigMatchesCurrentConfig() {
-  StoredConfig stored{};
-  EEPROM.get(0, stored);
-  return memcmp(&stored, &config, sizeof(config)) == 0;
+  const uint8_t *stored = EEPROM.getConstDataPtr();
+  if (!stored) return false;
+  return memcmp(stored, &config, sizeof(config)) == 0;
 }
 
 bool commitConfig(bool force_commit) {
@@ -954,44 +954,50 @@ bool loadConfig() {
   }
 
   if (header.version == kConfigVersionV9 && header.size == sizeof(StoredConfigV9)) {
-    StoredConfigV9 old_config{};
-    EEPROM.get(0, old_config);
-    if (old_config.crc != configCrc(old_config)) {
+    StoredConfigV9 *old_config = new StoredConfigV9;
+    if (!old_config) {
       setDefaultConfig();
       return false;
     }
-    old_config.ssid[sizeof(old_config.ssid) - 1] = '\0';
-    old_config.password[sizeof(old_config.password) - 1] = '\0';
-    old_config.hostname[sizeof(old_config.hostname) - 1] = '\0';
-    old_config.template_name[sizeof(old_config.template_name) - 1] = '\0';
-    old_config.mqtt_host[sizeof(old_config.mqtt_host) - 1] = '\0';
-    old_config.mqtt_topic[sizeof(old_config.mqtt_topic) - 1] = '\0';
+    EEPROM.get(0, *old_config);
+    if (old_config->crc != configCrc(*old_config)) {
+      delete old_config;
+      setDefaultConfig();
+      return false;
+    }
+    old_config->ssid[sizeof(old_config->ssid) - 1] = '\0';
+    old_config->password[sizeof(old_config->password) - 1] = '\0';
+    old_config->hostname[sizeof(old_config->hostname) - 1] = '\0';
+    old_config->template_name[sizeof(old_config->template_name) - 1] = '\0';
+    old_config->mqtt_host[sizeof(old_config->mqtt_host) - 1] = '\0';
+    old_config->mqtt_topic[sizeof(old_config->mqtt_topic) - 1] = '\0';
     memset(&config, 0, sizeof(config));
-    strlcpy(config.ssid, old_config.ssid, sizeof(config.ssid));
-    strlcpy(config.password, old_config.password, sizeof(config.password));
-    strlcpy(config.hostname, old_config.hostname, sizeof(config.hostname));
-    config.phy_mode = old_config.phy_mode;
-    config.template_enabled = old_config.template_enabled;
-    config.template_base = old_config.template_base;
-    config.template_flag = old_config.template_flag;
-    strlcpy(config.template_name, old_config.template_name, sizeof(config.template_name));
-    memcpy(config.template_gpio, old_config.template_gpio, sizeof(config.template_gpio));
-    config.mqtt_port = old_config.mqtt_port;
-    config.mqtt_keepalive = old_config.mqtt_keepalive;
-    strlcpy(config.mqtt_host, old_config.mqtt_host, sizeof(config.mqtt_host));
-    strlcpy(config.mqtt_topic, old_config.mqtt_topic, sizeof(config.mqtt_topic));
-    config.energy_total_offset_kwh = old_config.energy_total_offset_kwh;
-    memcpy(config.led_attach, old_config.led_attach, sizeof(config.led_attach));
-    config.button_hold_ms = old_config.button_hold_ms;
-    memcpy(config.button_press_action, old_config.button_press_action, sizeof(config.button_press_action));
-    memcpy(config.button_hold_action, old_config.button_hold_action, sizeof(config.button_hold_action));
-    config.energy_mqtt_interval = old_config.energy_mqtt_interval;
-    config.energy_mqtt_change_percent_x10 = old_config.energy_mqtt_change_percent_x10;
-    memcpy(config.button_press_target, old_config.button_press_target, sizeof(config.button_press_target));
-    memcpy(config.button_press_payload, old_config.button_press_payload, sizeof(config.button_press_payload));
-    memcpy(config.button_hold_target, old_config.button_hold_target, sizeof(config.button_hold_target));
-    memcpy(config.button_hold_payload, old_config.button_hold_payload, sizeof(config.button_hold_payload));
+    strlcpy(config.ssid, old_config->ssid, sizeof(config.ssid));
+    strlcpy(config.password, old_config->password, sizeof(config.password));
+    strlcpy(config.hostname, old_config->hostname, sizeof(config.hostname));
+    config.phy_mode = old_config->phy_mode;
+    config.template_enabled = old_config->template_enabled;
+    config.template_base = old_config->template_base;
+    config.template_flag = old_config->template_flag;
+    strlcpy(config.template_name, old_config->template_name, sizeof(config.template_name));
+    memcpy(config.template_gpio, old_config->template_gpio, sizeof(config.template_gpio));
+    config.mqtt_port = old_config->mqtt_port;
+    config.mqtt_keepalive = old_config->mqtt_keepalive;
+    strlcpy(config.mqtt_host, old_config->mqtt_host, sizeof(config.mqtt_host));
+    strlcpy(config.mqtt_topic, old_config->mqtt_topic, sizeof(config.mqtt_topic));
+    config.energy_total_offset_kwh = old_config->energy_total_offset_kwh;
+    memcpy(config.led_attach, old_config->led_attach, sizeof(config.led_attach));
+    config.button_hold_ms = old_config->button_hold_ms;
+    memcpy(config.button_press_action, old_config->button_press_action, sizeof(config.button_press_action));
+    memcpy(config.button_hold_action, old_config->button_hold_action, sizeof(config.button_hold_action));
+    config.energy_mqtt_interval = old_config->energy_mqtt_interval;
+    config.energy_mqtt_change_percent_x10 = old_config->energy_mqtt_change_percent_x10;
+    memcpy(config.button_press_target, old_config->button_press_target, sizeof(config.button_press_target));
+    memcpy(config.button_press_payload, old_config->button_press_payload, sizeof(config.button_press_payload));
+    memcpy(config.button_hold_target, old_config->button_hold_target, sizeof(config.button_hold_target));
+    memcpy(config.button_hold_payload, old_config->button_hold_payload, sizeof(config.button_hold_payload));
     config.button_debounce_ms = kButtonDebounceDefaultMs;
+    delete old_config;
     commitConfig();
     return config_ok;
   }
@@ -3816,7 +3822,7 @@ void handleCmnd() {
     return;
   }
 
-  const String &cmnd_str = server.arg("cmnd");
+  const String cmnd_str = server.arg("cmnd");
   const char *raw = cmnd_str.c_str();
   size_t total_len = cmnd_str.length();
 
