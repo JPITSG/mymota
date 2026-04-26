@@ -544,6 +544,7 @@ uint8_t perf_last_loop_load = 0;
 uint32_t perf_last_loop_max_us = 0;
 
 bool hasPin(const PinAssignment &assignment);
+bool mqttEnergyReportingEnabled();
 
 void recordLoopPerf(uint32_t started_us, uint32_t ended_us) {
   const uint32_t now_ms = millis();
@@ -2393,6 +2394,19 @@ void mqttStop() {
   mqtt_ping_pending = false;
 }
 
+void queueMqttConnectHeal() {
+  for (uint8_t i = 0; i < runtime_template.relay_count; i++) {
+    if (hasPin(runtime_template.relays[i])) {
+      mqtt_pending_relay_mask |= (1U << i);
+    }
+  }
+
+  if (mqttEnergyReportingEnabled()) {
+    last_mqtt_energy_publish = 0;
+    last_mqtt_energy_power = NAN;
+  }
+}
+
 bool mqttConnect() {
   if (!mqttConfigured() || WiFi.status() != WL_CONNECTED) return false;
 
@@ -2467,6 +2481,7 @@ bool mqttConnect() {
   last_mqtt_ping = 0;
   mqtt_ping_pending = false;
   recordMqttConnectResult(kMqttConnectOk, started);
+  queueMqttConnectHeal();
   return true;
 }
 
@@ -2699,6 +2714,7 @@ void maintainMqtt() {
     if (!mqttPublishRelayState(i)) return;
     mqtt_pending_relay_mask &= ~mask;
   }
+  now = millis();
 
   while (mqtt_button_queue_count > 0) {
     MqttButtonPending &slot = mqtt_button_queue[mqtt_button_queue_head];
@@ -2709,6 +2725,7 @@ void maintainMqtt() {
     if (!mqttPublish(slot.topic, slot.payload)) return;
     dropMqttButtonQueueHead();
   }
+  now = millis();
 
   if (config.mqtt_keepalive > 0 && runtime_template.relay_count > 0) {
     const uint32_t interval_ms = static_cast<uint32_t>(config.mqtt_keepalive) * 1000UL;
