@@ -27,7 +27,9 @@ constexpr uint16_t kConfigVersionV2 = 2;
 constexpr uint16_t kConfigVersionV3 = 3;
 constexpr uint16_t kConfigVersionV4 = 4;
 constexpr uint16_t kConfigVersionV5 = 5;
-constexpr uint16_t kConfigVersion = 6;
+constexpr uint16_t kConfigVersionV6 = 6;
+constexpr uint16_t kConfigVersionV7 = 7;
+constexpr uint16_t kConfigVersion = 8;
 constexpr size_t kEepromSize = 512;
 constexpr size_t kBootRecoveryOffset = 480;
 constexpr uint32_t kConnectTimeoutMs = 20000;
@@ -47,6 +49,8 @@ constexpr uint16_t kMqttKeepaliveMax = 65535U;
 constexpr uint16_t kMqttProtocolKeepaliveSec = 30;
 constexpr uint32_t kMqttReconnectMs = 5000;
 constexpr uint32_t kMqttReadTimeoutMs = 1000;
+constexpr uint16_t kMqttEnergyIntervalMax = 65535U;
+constexpr float kMqttEnergyChangeMaxPercent = 1000.0f;
 constexpr uint8_t kInvalidPin = 0xff;
 constexpr uint8_t kAdc0Pin = 17;
 constexpr uint8_t kMaxRelays = 8;
@@ -54,6 +58,9 @@ constexpr uint8_t kMaxButtons = 4;
 constexpr uint8_t kMaxLeds = 4;
 constexpr uint8_t kMaxLedOutputs = kMaxLeds + 1;
 constexpr uint32_t kButtonDebounceMs = 50;
+constexpr uint16_t kButtonHoldDefaultMs = 1000;
+constexpr uint16_t kButtonHoldMinMs = 1;
+constexpr uint16_t kButtonHoldMaxMs = 60000;
 constexpr uint32_t kLedUpdateMs = 250;
 constexpr uint32_t kAdcUpdateMs = 2000;
 constexpr uint32_t kEnergyUpdateMs = 200;
@@ -63,6 +70,8 @@ constexpr float kEnergyTotalOffsetMaxKwh = 1000000.0f;
 constexpr uint8_t kLedAttachNone = 0;
 constexpr uint8_t kLedAttachRelayBase = 1;
 constexpr uint8_t kLedAttachButtonBase = 33;
+constexpr uint8_t kButtonActionNone = 0;
+constexpr uint8_t kButtonActionRelayToggle = 1;
 
 constexpr uint16_t kTplNone = 0;
 constexpr uint16_t kTplUser = 1;
@@ -191,7 +200,7 @@ struct StoredConfigV5 {
   uint32_t crc;
 };
 
-struct StoredConfig {
+struct StoredConfigV6 {
   uint32_t magic;
   uint16_t version;
   uint16_t size;
@@ -211,6 +220,58 @@ struct StoredConfig {
   float energy_total_offset_kwh;
   uint8_t led_attach[kMaxLedOutputs];
   uint8_t reserved[9];
+  uint32_t crc;
+};
+
+struct StoredConfigV7 {
+  uint32_t magic;
+  uint16_t version;
+  uint16_t size;
+  char ssid[33];
+  char password[65];
+  char hostname[33];
+  uint8_t phy_mode;
+  uint8_t template_enabled;
+  uint16_t template_base;
+  uint32_t template_flag;
+  char template_name[33];
+  uint16_t template_gpio[kTemplateSlotCount];
+  uint16_t mqtt_port;
+  uint16_t mqtt_keepalive;
+  char mqtt_host[kMqttHostMaxLen + 1];
+  char mqtt_topic[kMqttTopicMaxLen + 1];
+  float energy_total_offset_kwh;
+  uint8_t led_attach[kMaxLedOutputs];
+  uint16_t button_hold_ms;
+  uint8_t button_press_action[kMaxButtons];
+  uint8_t button_hold_action[kMaxButtons];
+  uint32_t crc;
+};
+
+struct StoredConfig {
+  uint32_t magic;
+  uint16_t version;
+  uint16_t size;
+  char ssid[33];
+  char password[65];
+  char hostname[33];
+  uint8_t phy_mode;
+  uint8_t template_enabled;
+  uint16_t template_base;
+  uint32_t template_flag;
+  char template_name[33];
+  uint16_t template_gpio[kTemplateSlotCount];
+  uint16_t mqtt_port;
+  uint16_t mqtt_keepalive;
+  char mqtt_host[kMqttHostMaxLen + 1];
+  char mqtt_topic[kMqttTopicMaxLen + 1];
+  float energy_total_offset_kwh;
+  uint8_t led_attach[kMaxLedOutputs];
+  uint16_t button_hold_ms;
+  uint8_t button_press_action[kMaxButtons];
+  uint8_t button_hold_action[kMaxButtons];
+  uint16_t energy_mqtt_interval;
+  uint16_t energy_mqtt_change_percent_x10;
   uint32_t crc;
 };
 
@@ -235,8 +296,9 @@ struct PinAssignment {
 struct ButtonState {
   bool raw_pressed;
   bool stable_pressed;
-  bool emitted_pressed;
+  bool hold_emitted;
   uint32_t changed_at;
+  uint32_t pressed_at;
 };
 
 struct RuntimeTemplate {
@@ -268,8 +330,8 @@ struct EnergyState {
   uint8_t cf_pin;
   uint8_t cf1_pin;
   uint8_t sel_pin;
-  bool sel_inverted;
-  bool select_voltage;
+  bool select_ui_flag;
+  bool ui_flag;
   volatile bool load_off;
   volatile uint32_t cf_pulse_length;
   volatile uint32_t cf_pulse_last_time;
@@ -315,6 +377,8 @@ uint32_t last_adc_update = 0;
 uint32_t next_mqtt_reconnect = 0;
 uint32_t last_mqtt_io = 0;
 uint32_t last_mqtt_state_publish = 0;
+uint32_t last_mqtt_energy_publish = 0;
+float last_mqtt_energy_power = NAN;
 uint16_t mqtt_pending_relay_mask = 0;
 uint32_t boot_id = 0;
 uint8_t boot_recovery_count = 0;
@@ -375,6 +439,11 @@ void setDefaultMqttConfig() {
   strlcpy(config.mqtt_topic, defaultMqttTopic().c_str(), sizeof(config.mqtt_topic));
 }
 
+void setDefaultEnergyMqttConfig() {
+  config.energy_mqtt_interval = 0;
+  config.energy_mqtt_change_percent_x10 = 0;
+}
+
 uint8_t defaultLedAttachment(uint8_t led) {
   if (led < kMaxLeds && led < kMaxRelays) {
     return kLedAttachRelayBase + led;
@@ -385,6 +454,14 @@ uint8_t defaultLedAttachment(uint8_t led) {
 void setDefaultLedConfig() {
   for (uint8_t i = 0; i < kMaxLedOutputs; i++) {
     config.led_attach[i] = defaultLedAttachment(i);
+  }
+}
+
+void setDefaultButtonConfig() {
+  config.button_hold_ms = kButtonHoldDefaultMs;
+  for (uint8_t i = 0; i < kMaxButtons; i++) {
+    config.button_press_action[i] = kButtonActionRelayToggle;
+    config.button_hold_action[i] = kButtonActionNone;
   }
 }
 
@@ -407,6 +484,10 @@ bool ledAttachmentButtonIndex(uint8_t value, uint8_t &index) {
   return true;
 }
 
+bool isButtonActionEncoding(uint8_t value) {
+  return value == kButtonActionNone || value == kButtonActionRelayToggle;
+}
+
 void setDefaultConfig() {
   memset(&config, 0, sizeof(config));
   config.magic = kConfigMagic;
@@ -415,7 +496,9 @@ void setDefaultConfig() {
   config.phy_mode = kPhyModeAuto;
   strlcpy(config.hostname, defaultHostname().c_str(), sizeof(config.hostname));
   setDefaultMqttConfig();
+  setDefaultEnergyMqttConfig();
   setDefaultLedConfig();
+  setDefaultButtonConfig();
   config.crc = configCrc(config);
   config_ok = false;
 }
@@ -484,6 +567,7 @@ void clearTemplateConfig() {
   memset(config.template_name, 0, sizeof(config.template_name));
   memset(config.template_gpio, 0, sizeof(config.template_gpio));
   setDefaultLedConfig();
+  setDefaultButtonConfig();
 }
 
 void normalizeConfigStrings() {
@@ -508,9 +592,23 @@ void normalizeConfigStrings() {
       config.energy_total_offset_kwh > kEnergyTotalOffsetMaxKwh) {
     config.energy_total_offset_kwh = 0.0f;
   }
+  if (config.energy_mqtt_change_percent_x10 > static_cast<uint16_t>(kMqttEnergyChangeMaxPercent * 10.0f)) {
+    config.energy_mqtt_change_percent_x10 = 0;
+  }
   for (uint8_t i = 0; i < kMaxLedOutputs; i++) {
     if (!isLedAttachmentEncoding(config.led_attach[i])) {
       config.led_attach[i] = defaultLedAttachment(i);
+    }
+  }
+  if (config.button_hold_ms < kButtonHoldMinMs || config.button_hold_ms > kButtonHoldMaxMs) {
+    config.button_hold_ms = kButtonHoldDefaultMs;
+  }
+  for (uint8_t i = 0; i < kMaxButtons; i++) {
+    if (!isButtonActionEncoding(config.button_press_action[i])) {
+      config.button_press_action[i] = kButtonActionRelayToggle;
+    }
+    if (!isButtonActionEncoding(config.button_hold_action[i])) {
+      config.button_hold_action[i] = kButtonActionNone;
     }
   }
   if (!config.template_enabled) {
@@ -539,8 +637,9 @@ bool commitConfig() {
 
 bool saveWifiConfig(const char *ssid, const char *password, const char *hostname, uint8_t phy_mode);
 bool saveMqttConfig(const char *host, uint16_t port, const char *topic, uint16_t keepalive);
-bool saveEnergyConfig(float total_offset_kwh);
+bool saveEnergyConfig(float total_offset_kwh, uint16_t mqtt_interval, uint16_t mqtt_change_percent_x10);
 bool saveLedConfig(const uint8_t *attachments);
+bool saveButtonConfig(uint16_t hold_ms, const uint8_t *press_actions, const uint8_t *hold_actions);
 
 bool loadConfig() {
   EEPROM.begin(kEepromSize);
@@ -565,6 +664,78 @@ bool loadConfig() {
     }
     normalizeConfigStrings();
     config_ok = config.ssid[0] != '\0';
+    return config_ok;
+  }
+
+  if (header.version == kConfigVersionV7 && header.size == sizeof(StoredConfigV7)) {
+    StoredConfigV7 old_config{};
+    EEPROM.get(0, old_config);
+    if (old_config.crc != configCrc(old_config)) {
+      setDefaultConfig();
+      return false;
+    }
+    old_config.ssid[sizeof(old_config.ssid) - 1] = '\0';
+    old_config.password[sizeof(old_config.password) - 1] = '\0';
+    old_config.hostname[sizeof(old_config.hostname) - 1] = '\0';
+    old_config.template_name[sizeof(old_config.template_name) - 1] = '\0';
+    old_config.mqtt_host[sizeof(old_config.mqtt_host) - 1] = '\0';
+    old_config.mqtt_topic[sizeof(old_config.mqtt_topic) - 1] = '\0';
+    memset(&config, 0, sizeof(config));
+    strlcpy(config.ssid, old_config.ssid, sizeof(config.ssid));
+    strlcpy(config.password, old_config.password, sizeof(config.password));
+    strlcpy(config.hostname, old_config.hostname, sizeof(config.hostname));
+    config.phy_mode = old_config.phy_mode;
+    config.template_enabled = old_config.template_enabled;
+    config.template_base = old_config.template_base;
+    config.template_flag = old_config.template_flag;
+    strlcpy(config.template_name, old_config.template_name, sizeof(config.template_name));
+    memcpy(config.template_gpio, old_config.template_gpio, sizeof(config.template_gpio));
+    config.mqtt_port = old_config.mqtt_port;
+    config.mqtt_keepalive = old_config.mqtt_keepalive;
+    strlcpy(config.mqtt_host, old_config.mqtt_host, sizeof(config.mqtt_host));
+    strlcpy(config.mqtt_topic, old_config.mqtt_topic, sizeof(config.mqtt_topic));
+    config.energy_total_offset_kwh = old_config.energy_total_offset_kwh;
+    memcpy(config.led_attach, old_config.led_attach, sizeof(config.led_attach));
+    config.button_hold_ms = old_config.button_hold_ms;
+    memcpy(config.button_press_action, old_config.button_press_action, sizeof(config.button_press_action));
+    memcpy(config.button_hold_action, old_config.button_hold_action, sizeof(config.button_hold_action));
+    setDefaultEnergyMqttConfig();
+    commitConfig();
+    return config_ok;
+  }
+
+  if (header.version == kConfigVersionV6 && header.size == sizeof(StoredConfigV6)) {
+    StoredConfigV6 old_config{};
+    EEPROM.get(0, old_config);
+    if (old_config.crc != configCrc(old_config)) {
+      setDefaultConfig();
+      return false;
+    }
+    old_config.ssid[sizeof(old_config.ssid) - 1] = '\0';
+    old_config.password[sizeof(old_config.password) - 1] = '\0';
+    old_config.hostname[sizeof(old_config.hostname) - 1] = '\0';
+    old_config.template_name[sizeof(old_config.template_name) - 1] = '\0';
+    old_config.mqtt_host[sizeof(old_config.mqtt_host) - 1] = '\0';
+    old_config.mqtt_topic[sizeof(old_config.mqtt_topic) - 1] = '\0';
+    memset(&config, 0, sizeof(config));
+    strlcpy(config.ssid, old_config.ssid, sizeof(config.ssid));
+    strlcpy(config.password, old_config.password, sizeof(config.password));
+    strlcpy(config.hostname, old_config.hostname, sizeof(config.hostname));
+    config.phy_mode = old_config.phy_mode;
+    config.template_enabled = old_config.template_enabled;
+    config.template_base = old_config.template_base;
+    config.template_flag = old_config.template_flag;
+    strlcpy(config.template_name, old_config.template_name, sizeof(config.template_name));
+    memcpy(config.template_gpio, old_config.template_gpio, sizeof(config.template_gpio));
+    config.mqtt_port = old_config.mqtt_port;
+    config.mqtt_keepalive = old_config.mqtt_keepalive;
+    strlcpy(config.mqtt_host, old_config.mqtt_host, sizeof(config.mqtt_host));
+    strlcpy(config.mqtt_topic, old_config.mqtt_topic, sizeof(config.mqtt_topic));
+    config.energy_total_offset_kwh = old_config.energy_total_offset_kwh;
+    memcpy(config.led_attach, old_config.led_attach, sizeof(config.led_attach));
+    setDefaultEnergyMqttConfig();
+    setDefaultButtonConfig();
+    commitConfig();
     return config_ok;
   }
 
@@ -596,7 +767,9 @@ bool loadConfig() {
     strlcpy(config.mqtt_host, old_config.mqtt_host, sizeof(config.mqtt_host));
     strlcpy(config.mqtt_topic, old_config.mqtt_topic, sizeof(config.mqtt_topic));
     config.energy_total_offset_kwh = old_config.energy_total_offset_kwh;
+    setDefaultEnergyMqttConfig();
     setDefaultLedConfig();
+    setDefaultButtonConfig();
     commitConfig();
     return config_ok;
   }
@@ -629,7 +802,9 @@ bool loadConfig() {
     strlcpy(config.mqtt_host, old_config.mqtt_host, sizeof(config.mqtt_host));
     strlcpy(config.mqtt_topic, old_config.mqtt_topic, sizeof(config.mqtt_topic));
     config.energy_total_offset_kwh = 0.0f;
+    setDefaultEnergyMqttConfig();
     setDefaultLedConfig();
+    setDefaultButtonConfig();
     commitConfig();
     return config_ok;
   }
@@ -656,7 +831,9 @@ bool loadConfig() {
     strlcpy(config.template_name, old_config.template_name, sizeof(config.template_name));
     memcpy(config.template_gpio, old_config.template_gpio, sizeof(config.template_gpio));
     setDefaultMqttConfig();
+    setDefaultEnergyMqttConfig();
     setDefaultLedConfig();
+    setDefaultButtonConfig();
     commitConfig();
     return config_ok;
   }
@@ -678,7 +855,9 @@ bool loadConfig() {
     config.phy_mode = old_config.phy_mode;
     clearTemplateConfig();
     setDefaultMqttConfig();
+    setDefaultEnergyMqttConfig();
     setDefaultLedConfig();
+    setDefaultButtonConfig();
     commitConfig();
     return config_ok;
   }
@@ -703,7 +882,9 @@ bool loadConfig() {
     config.phy_mode = kPhyModeAuto;
     clearTemplateConfig();
     setDefaultMqttConfig();
+    setDefaultEnergyMqttConfig();
     setDefaultLedConfig();
+    setDefaultButtonConfig();
     commitConfig();
     return config_ok;
   }
@@ -733,12 +914,18 @@ bool saveMqttConfig(const char *host, uint16_t port, const char *topic, uint16_t
   next_mqtt_reconnect = 0;
   last_mqtt_io = 0;
   last_mqtt_state_publish = 0;
+  last_mqtt_energy_publish = 0;
+  last_mqtt_energy_power = NAN;
   mqtt_pending_relay_mask = 0;
   return commitConfig();
 }
 
-bool saveEnergyConfig(float total_offset_kwh) {
+bool saveEnergyConfig(float total_offset_kwh, uint16_t mqtt_interval, uint16_t mqtt_change_percent_x10) {
   config.energy_total_offset_kwh = total_offset_kwh;
+  config.energy_mqtt_interval = mqtt_interval;
+  config.energy_mqtt_change_percent_x10 = mqtt_change_percent_x10;
+  last_mqtt_energy_publish = 0;
+  last_mqtt_energy_power = NAN;
   return commitConfig();
 }
 
@@ -747,8 +934,19 @@ bool saveLedConfig(const uint8_t *attachments) {
   return commitConfig();
 }
 
+bool saveButtonConfig(uint16_t hold_ms, const uint8_t *press_actions, const uint8_t *hold_actions) {
+  config.button_hold_ms = hold_ms;
+  memcpy(config.button_press_action, press_actions, sizeof(config.button_press_action));
+  memcpy(config.button_hold_action, hold_actions, sizeof(config.button_hold_action));
+  return commitConfig();
+}
+
 float reportedEnergyTotalKwh() {
   return energy.total_kwh + config.energy_total_offset_kwh;
+}
+
+float energyMqttChangePercent() {
+  return static_cast<float>(config.energy_mqtt_change_percent_x10) / 10.0f;
 }
 
 String htmlEscape(const String &input) {
@@ -877,6 +1075,45 @@ bool ledOutputOn(uint8_t led) {
 bool hasConfigurableLedOutputs() {
   for (uint8_t i = 0; i < kMaxLedOutputs; i++) {
     if (hasLedOutput(i)) return true;
+  }
+  return false;
+}
+
+String buttonActionName(uint8_t action) {
+  if (action == kButtonActionRelayToggle) return F("relay toggle");
+  return F("nothing");
+}
+
+bool buttonRelayTarget(uint8_t button, uint8_t &relay) {
+  if (button < runtime_template.relay_count && hasPin(runtime_template.relays[button])) {
+    relay = button;
+    return true;
+  }
+  if (hasPin(runtime_template.relays[0])) {
+    relay = 0;
+    return true;
+  }
+  for (uint8_t i = 0; i < runtime_template.relay_count; i++) {
+    if (hasPin(runtime_template.relays[i])) {
+      relay = i;
+      return true;
+    }
+  }
+  return false;
+}
+
+bool buttonActionAvailable(uint8_t button, uint8_t action) {
+  if (action == kButtonActionNone) return true;
+  if (action == kButtonActionRelayToggle) {
+    uint8_t relay = 0;
+    return buttonRelayTarget(button, relay);
+  }
+  return false;
+}
+
+bool hasConfigurableButtons() {
+  for (uint8_t i = 0; i < runtime_template.button_count; i++) {
+    if (hasPin(runtime_template.buttons[i])) return true;
   }
   return false;
 }
@@ -1477,9 +1714,87 @@ bool mqttPublishAllRelayStates() {
   return ok;
 }
 
+String mqttEnergyTopic() {
+  String topic;
+  topic.reserve(kMqttTopicMaxLen + 16);
+  topic += F("stat/");
+  topic += config.mqtt_topic;
+  topic += F("/STATUS8");
+  return topic;
+}
+
+bool mqttEnergyReportingEnabled() {
+  return energy.present && (config.energy_mqtt_interval > 0 || config.energy_mqtt_change_percent_x10 > 0);
+}
+
+bool mqttEnergyReportReady() {
+  if (!interruptPinSupported(energy.cf1_pin)) return true;
+  return energy.cf1_voltage_pulse_length > 0 || millis() > 5000;
+}
+
+bool mqttEnergyPowerChangedEnough() {
+  if (config.energy_mqtt_change_percent_x10 == 0) return false;
+  if (isnan(last_mqtt_energy_power)) return true;
+
+  const float delta = fabs(energy.power - last_mqtt_energy_power);
+  const float baseline = fabs(last_mqtt_energy_power);
+  if (baseline < 0.001f) {
+    return delta > 0.0f;
+  }
+
+  return (delta * 1000.0f) >= (baseline * static_cast<float>(config.energy_mqtt_change_percent_x10));
+}
+
+bool mqttPublishEnergyStatus() {
+  if (!energy.present) return true;
+
+  const String topic = mqttEnergyTopic();
+  String payload;
+  payload.reserve(150);
+  payload += F("{\"StatusSNS\":{\"ENERGY\":{\"Total\":");
+  payload += String(reportedEnergyTotalKwh(), 4);
+  payload += F(",\"Power\":");
+  payload += String(energy.power, 2);
+  payload += F(",\"Voltage\":");
+  payload += String(energy.voltage, 1);
+  payload += F(",\"Current\":");
+  payload += String(energy.current, 3);
+  payload += F("}}}");
+
+  const bool ok = mqttPublish(topic.c_str(), payload.c_str());
+  if (ok) {
+    last_mqtt_energy_publish = millis();
+    last_mqtt_energy_power = energy.power;
+  }
+  return ok;
+}
+
+void maintainMqttEnergyReports(uint32_t now) {
+  if (!mqttEnergyReportingEnabled()) {
+    last_mqtt_energy_publish = 0;
+    last_mqtt_energy_power = NAN;
+    return;
+  }
+  if (!mqttEnergyReportReady()) return;
+
+  bool publish = last_mqtt_energy_publish == 0 || isnan(last_mqtt_energy_power);
+  if (!publish && config.energy_mqtt_interval > 0) {
+    const uint32_t interval_ms = static_cast<uint32_t>(config.energy_mqtt_interval) * 1000UL;
+    publish = now - last_mqtt_energy_publish >= interval_ms;
+  }
+  if (!publish) {
+    publish = mqttEnergyPowerChangedEnough();
+  }
+  if (publish) {
+    mqttPublishEnergyStatus();
+  }
+}
+
 void maintainMqtt() {
   if (!mqttConfigured() || WiFi.status() != WL_CONNECTED) {
     mqttStop();
+    last_mqtt_energy_publish = 0;
+    last_mqtt_energy_power = NAN;
     return;
   }
 
@@ -1512,6 +1827,8 @@ void maintainMqtt() {
       mqttPublishAllRelayStates();
     }
   }
+
+  maintainMqttEnergyReports(now);
 }
 
 void IRAM_ATTR energyCfInterrupt() {
@@ -1542,11 +1859,10 @@ void IRAM_ATTR energyCf1Interrupt() {
   }
 }
 
-void selectEnergyCf1Mode(bool voltage) {
-  energy.select_voltage = voltage;
+void writeEnergySelector(bool select_ui_flag) {
+  energy.select_ui_flag = select_ui_flag;
   if (!energy.present || !digitalPinSupported(energy.sel_pin)) return;
-  const bool level = voltage ? !energy.sel_inverted : energy.sel_inverted;
-  digitalWrite(energy.sel_pin, level ? HIGH : LOW);
+  digitalWrite(energy.sel_pin, select_ui_flag ? HIGH : LOW);
 }
 
 void setupEnergyMonitor() {
@@ -1554,23 +1870,22 @@ void setupEnergyMonitor() {
   energy.cf_pin = runtime_template.energy_cf_pin;
   energy.cf1_pin = runtime_template.energy_cf1_pin;
   energy.sel_pin = runtime_template.energy_sel_pin;
-  energy.sel_inverted = runtime_template.energy_sel_inverted;
   energy.hjl = runtime_template.energy_hjl;
   energy.present = interruptPinSupported(energy.cf_pin);
   energy.load_off = true;
   energy.power_ratio = energy.hjl ? kHjlPowerRatio : kHlwPowerRatio;
   energy.voltage_ratio = energy.hjl ? kHjlVoltageRatio : kHlwVoltageRatio;
   energy.current_ratio = energy.hjl ? kHjlCurrentRatio : kHlwCurrentRatio;
-  energy.select_voltage = true;
+  energy.select_ui_flag = false;
+  energy.ui_flag = !runtime_template.energy_sel_inverted;
   energy.last_update_ms = millis();
   energy.last_integrate_ms = millis();
 
   if (!energy.present) return;
 
   if (digitalPinSupported(energy.sel_pin)) {
-    selectEnergyCf1Mode(true);
     pinMode(energy.sel_pin, OUTPUT);
-    selectEnergyCf1Mode(true);
+    writeEnergySelector(energy.select_ui_flag);
   }
   if (interruptPinSupported(energy.cf1_pin)) {
     pinMode(energy.cf1_pin, INPUT_PULLUP);
@@ -1598,6 +1913,15 @@ void toggleRelay(uint8_t relay) {
   setRelay(relay, !relay_state[relay]);
 }
 
+void runButtonAction(uint8_t button, uint8_t action) {
+  if (action == kButtonActionRelayToggle) {
+    uint8_t relay = 0;
+    if (buttonRelayTarget(button, relay)) {
+      toggleRelay(relay);
+    }
+  }
+}
+
 void updateDeviceLeds(bool force = false) {
   const uint32_t now = millis();
   if (!force && now - last_led_update < kLedUpdateMs) return;
@@ -1611,11 +1935,22 @@ void updateDeviceLeds(bool force = false) {
 }
 
 float readAdcTemperatureC(uint16_t raw) {
-  if (raw == 0 || raw >= 1023) return NAN;
-  const float resistance = kAnalogNtcBridgeResistance * static_cast<float>(raw) / static_cast<float>(1023U - raw);
+  if (raw == 0) return NAN;
+  const float denominator = (1023.0f * 3.3f) - static_cast<float>(raw);
+  if (denominator <= 0.0f) return NAN;
+  const float resistance = kAnalogNtcBridgeResistance * static_cast<float>(raw) / denominator;
   if (resistance <= 0.0f) return NAN;
   const float kelvin = 1.0f / ((1.0f / kAnalogT0Kelvin) + (log(resistance / kAnalogNtcResistance) / kAnalogNtcBeta));
   return kelvin - 273.15f;
+}
+
+uint16_t readAdcRaw() {
+  uint32_t total = 0;
+  for (uint8_t i = 0; i < 4; i++) {
+    total += analogRead(A0);
+    delay(1);
+  }
+  return total / 4;
 }
 
 void maintainAdc() {
@@ -1623,7 +1958,7 @@ void maintainAdc() {
   const uint32_t now = millis();
   if (now - last_adc_update < kAdcUpdateMs) return;
   last_adc_update = now;
-  adc_raw = analogRead(A0);
+  adc_raw = readAdcRaw();
   adc_temperature_c = readAdcTemperatureC(adc_raw);
 }
 
@@ -1638,11 +1973,22 @@ void maintainButtons() {
     }
     if ((now - button_state[i].changed_at) >= kButtonDebounceMs && raw != button_state[i].stable_pressed) {
       button_state[i].stable_pressed = raw;
-      if (raw && !button_state[i].emitted_pressed) {
-        const uint8_t relay = (i < runtime_template.relay_count) ? i : 0;
-        toggleRelay(relay);
+      if (raw) {
+        button_state[i].pressed_at = now;
+        button_state[i].hold_emitted = false;
+      } else {
+        if (!button_state[i].hold_emitted) {
+          runButtonAction(i, config.button_press_action[i]);
+        }
+        button_state[i].hold_emitted = false;
       }
-      button_state[i].emitted_pressed = raw;
+      updateDeviceLeds(true);
+    }
+    if (button_state[i].stable_pressed &&
+        !button_state[i].hold_emitted &&
+        now - button_state[i].pressed_at >= config.button_hold_ms) {
+      button_state[i].hold_emitted = true;
+      runButtonAction(i, config.button_hold_action[i]);
       updateDeviceLeds(true);
     }
   }
@@ -1696,8 +2042,12 @@ void maintainEnergy() {
       interrupts();
 
       if (ready) {
+        const bool has_selector = digitalPinSupported(energy.sel_pin);
+        if (has_selector) {
+          writeEnergySelector(!energy.select_ui_flag);
+        }
         const uint32_t cf1_avg = cf1_count ? (cf1_sum / cf1_count) : 0;
-        if (energy.select_voltage) {
+        if (!has_selector || energy.select_ui_flag == energy.ui_flag) {
           energy.cf1_voltage_pulse_length = cf1_avg;
           if (cf1_avg && power_on) {
             const uint32_t volts_x10 = (energy.voltage_ratio * kHlwVoltageCal) / cf1_avg;
@@ -1714,7 +2064,6 @@ void maintainEnergy() {
             energy.current = 0.0f;
           }
         }
-        selectEnergyCf1Mode(!energy.select_voltage);
       }
     }
   }
@@ -1747,7 +2096,7 @@ void setupDevicePins() {
     if (!hasPin(runtime_template.buttons[i])) continue;
     pinMode(runtime_template.buttons[i].pin, runtime_template.buttons[i].no_pullup ? INPUT : INPUT_PULLUP);
     const bool pressed = readAssignedPressed(runtime_template.buttons[i]);
-    button_state[i] = {pressed, pressed, pressed, millis()};
+    button_state[i] = {pressed, pressed, false, millis(), millis()};
   }
 
   setupEnergyMonitor();
@@ -1762,7 +2111,7 @@ void maintainDevice() {
   updateDeviceLeds();
 }
 
-void appendHeader(String &page, const __FlashStringHelper *title) {
+void appendHeader(String &page, const __FlashStringHelper *title, bool show_spinner = false) {
   page += F("<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>");
   page += F("<title>");
   page += title;
@@ -1773,34 +2122,40 @@ void appendHeader(String &page, const __FlashStringHelper *title) {
   page += F(".spin{width:13px;height:13px;border:2px solid rgba(255,255,255,.35);border-top-color:#7dd3aa;border-radius:50%;opacity:.55}.spin.active{opacity:1;animation:rot .7s linear infinite}@keyframes rot{to{transform:rotate(360deg)}}main{max-width:1080px;margin:18px auto 28px;padding:0 14px}");
   page += F(".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;box-shadow:0 1px 2px rgba(0,0,0,.04)}.wide{grid-column:1/-1}");
   page += F(".panel h2{font-size:17px;margin:0 0 12px}.kv{display:grid;grid-template-columns:minmax(110px,42%) 1fr;gap:8px 12px}.kv span,.hint{color:var(--muted)}.kv div{min-width:0}");
-  page += F("code{background:#eef2f6;border:1px solid #dce3ea;border-radius:4px;padding:1px 4px;word-break:break-word}.pill{display:inline-block;border-radius:999px;padding:2px 8px;background:#eef2f6;color:#364152}.ok{color:var(--ok)}.bad{color:var(--bad)}.muted{color:var(--muted)}");
+  page += F("code{background:#eef2f6;border:1px solid #dce3ea;border-radius:4px;padding:1px 4px;word-break:break-word}.pill{display:inline-block;border-radius:999px;padding:2px 8px;background:#eef2f6;color:#364152}.pill.ok{background:var(--ok);color:#fff}.pill.bad{background:var(--bad);color:#fff}.panel h2 .pill{font-size:13px;font-weight:400;vertical-align:1px}.ok{color:var(--ok)}.bad{color:var(--bad)}.muted{color:var(--muted)}");
   page += F("form{margin:0}.row{margin:10px 0}label{display:block;font-weight:600;color:#344054}input,button,select,textarea{font:inherit}input,select,textarea{width:100%;margin-top:4px;padding:9px;border:1px solid #b9c4d0;border-radius:6px;background:#fff}textarea{min-height:92px;resize:vertical}");
   page += F("button,.btn{display:inline-block;margin:4px 4px 0 0;padding:8px 12px;border:1px solid var(--accent);border-radius:6px;background:var(--accent);color:#fff;text-decoration:none;cursor:pointer}.secondary{background:#fff;color:var(--accent2);border-color:#9eb7cf}.danger{background:#fff;color:var(--bad);border-color:#d4aaa7}.inline{display:inline}.actions{display:flex;flex-wrap:wrap;gap:6px}.inline button{margin:0 4px 0 0}.list{margin:0;padding-left:18px}@media(max-width:520px){.kv{grid-template-columns:1fr}.brand{font-size:24px}}</style></head><body>");
   page += F("<header class='top'><div class='topin'><div><div class='brand'>my<span>Mota</span></div><div class='sub'>ESP8266/ESP8285 firmware</div></div><div class='sub meta'><span>");
   page += F(MYMOTA_VERSION);
   page += F(" / ");
   page += F(MYMOTA_TARGET);
-  page += F("</span><span id='poll-spin' class='spin'></span></div></div></header><main>");
+  page += F("</span>");
+  if (show_spinner) {
+    page += F("<span id='poll-spin' class='spin active'></span>");
+  }
+  page += F("</div></div></header><main>");
 }
 
 void appendFooter(String &page, bool live_poll = true, bool reboot_wait = false) {
-  page += F("<script>function sp(a){var e=document.getElementById('poll-spin');if(e)e.className=a?'spin active':'spin';}");
-  page += F("function fh(){sp(1);return fetch('/health',{cache:'no-store'}).then(function(r){sp(0);if(!r.ok)throw Error();return r.json();},function(e){sp(0);throw e;});}");
+  page += F("<script>var ls=Date.now();function ok(){ls=Date.now();var e=document.getElementById('poll-spin');if(e)e.className='spin active';}");
+  page += F("function ck(){var e=document.getElementById('poll-spin');if(e&&Date.now()-ls>5000)e.className='spin';}");
+  page += F("function fh(){return fetch('/health',{cache:'no-store'}).then(function(r){if(!r.ok)throw Error();return r.json();}).then(function(d){ok();return d;});}");
   page += F("function t(i,v){var e=document.getElementById(i);if(e)e.textContent=v;}");
   page += F("function p(i,v,c){var e=document.getElementById(i);if(e){e.textContent=v;e.className=c;}}");
   page += F("function fmt(v,d,u){return v==null?'n/a':Number(v).toFixed(d)+(u||'');}");
   page += F("function live(){fh().then(function(d){");
   page += F("t('live-heap',d.heap+' bytes');t('live-uptime',d.uptime+'s');t('live-active-phy',d.active_phy);");
   page += F("t('live-recovery',d.recovery.fast_boot_count+'/'+d.recovery.limit);");
-  page += F("p('live-wifi',d.wifi?'connected':'not connected',d.wifi?'pill ok':'pill bad');t('live-ssid',d.wifi_ssid||'n/a');t('live-ip',d.ip||'n/a');t('live-rssi',d.rssi==null?'n/a':d.rssi+' dBm');");
-  page += F("p('live-mqtt',d.mqtt.enabled?(d.mqtt.connected?'connected':'not connected'):'not configured',d.mqtt.enabled&&d.mqtt.connected?'pill ok':'pill');");
-  page += F("if(d.power){for(var i=0;i<d.power.length;i++){if(d.power[i]!==null)p('live-relay-'+i,d.power[i]?'on':'off',d.power[i]?'pill ok':'pill');}}");
-  page += F("if(d.leds){for(var l=0;l<d.leds.length;l++){if(d.leds[l])p('live-led-'+l,d.leds[l].on?'on':'off',d.leds[l].on?'pill ok':'pill');}}");
+  page += F("p('live-wifi',d.wifi?'connected':'disconnected',d.wifi?'pill ok':'pill bad');t('live-ssid',d.wifi_ssid||'n/a');t('live-ip',d.ip||'n/a');t('live-rssi',d.rssi==null?'n/a':d.rssi+' dBm');");
+  page += F("p('live-mqtt',d.mqtt.enabled?(d.mqtt.connected?'connected':'disconnected'):'not configured',d.mqtt.enabled?(d.mqtt.connected?'pill ok':'pill bad'):'pill');");
+  page += F("if(d.power){for(var i=0;i<d.power.length;i++){if(d.power[i]!==null)p('live-relay-'+i,d.power[i]?'on':'off',d.power[i]?'pill ok':'pill bad');}}");
+  page += F("if(d.buttons){for(var b=0;b<d.buttons.length;b++){if(d.buttons[b])p('live-button-'+b,d.buttons[b].pressed?'pressed':'released',d.buttons[b].pressed?'pill ok':'pill bad');}}");
+  page += F("if(d.leds){for(var l=0;l<d.leds.length;l++){if(d.leds[l])p('live-led-'+l,d.leds[l].on?'on':'off',d.leds[l].on?'pill ok':'pill bad');}}");
   page += F("if(d.energy){t('live-energy-power',fmt(d.energy.power,1,' W'));t('live-energy-voltage',fmt(d.energy.voltage,1,' V'));t('live-energy-current',fmt(d.energy.current,3,' A'));t('live-energy-total',fmt(d.energy.total_kwh,4,' kWh'));t('live-energy-offset',fmt(d.energy.offset_kwh,4,' kWh'));}");
   page += F("t('live-temp',d.temperature_c==null?'n/a':Number(d.temperature_c).toFixed(1)+' C');t('live-adc-raw',d.adc_raw==null?'n/a':d.adc_raw);");
   page += F("}).catch(function(){});}");
   if (live_poll) {
-    page += F("setInterval(live,1000);live();");
+    page += F("setInterval(live,1000);setInterval(ck,1000);live();");
   }
   if (reboot_wait) {
     page += F("var rb=");
@@ -1854,7 +2209,7 @@ void appendStatusBlock(String &page) {
     page += String(WiFi.RSSI());
     page += F(" dBm</code></div>");
   } else {
-    page += F("<span>Wi-Fi</span><div><span id='live-wifi' class='pill bad'>not connected</span> <code id='live-ssid'>n/a</code></div>");
+    page += F("<span>Wi-Fi</span><div><span id='live-wifi' class='pill bad'>disconnected</span> <code id='live-ssid'>n/a</code></div>");
     page += F("<span>IP</span><div><code id='live-ip'>n/a</code></div><span>RSSI</span><div><code id='live-rssi'>n/a</code></div>");
   }
 
@@ -1953,7 +2308,7 @@ void appendDeviceControls(String &page) {
     } else {
       page += F("<span id='live-relay-");
       page += String(i);
-      page += F("' class='pill'>off</span>");
+      page += F("' class='pill bad'>off</span>");
     }
     page += F("<form class='inline' method='post' action='/power'><input type='hidden' name='relay' value='");
     page += String(i + 1);
@@ -1977,6 +2332,14 @@ void appendDeviceControls(String &page) {
     page += String(kEnergyTotalOffsetMaxKwh, 0);
     page += F("' step='0.0001' value='");
     page += String(config.energy_total_offset_kwh, 4);
+    page += F("'></label></div><div class='row'><label>MQTT report interval seconds<br><input name='energy_report_interval' type='number' min='0' max='");
+    page += String(kMqttEnergyIntervalMax);
+    page += F("' step='1' value='");
+    page += String(config.energy_mqtt_interval);
+    page += F("'></label></div><div class='row'><label>MQTT report power change percent<br><input name='energy_report_change_percent' type='number' min='0' max='");
+    page += String(kMqttEnergyChangeMaxPercent, 1);
+    page += F("' step='0.1' value='");
+    page += String(energyMqttChangePercent(), 1);
     page += F("'></label></div><button type='submit'>Save energy</button></form>");
   }
   page += F("</section>");
@@ -2007,7 +2370,17 @@ void appendLedSettings(String &page) {
     page += htmlEscape(ledOutputName(i));
     page += F(" <span class='hint'>");
     page += pinName(assignment->pin);
-    page += F("</span><br><select name='led");
+    page += F("</span> ");
+    if (ledOutputOn(i)) {
+      page += F("<span id='live-led-");
+      page += String(i);
+      page += F("' class='pill ok'>on</span>");
+    } else {
+      page += F("<span id='live-led-");
+      page += String(i);
+      page += F("' class='pill bad'>off</span>");
+    }
+    page += F("<br><select name='led");
     page += String(i);
     page += F("'>");
     appendLedAttachmentOption(page, kLedAttachNone, F("Nothing"), selected);
@@ -2019,37 +2392,90 @@ void appendLedSettings(String &page) {
       if (!hasPin(runtime_template.buttons[button])) continue;
       appendLedAttachmentOption(page, kLedAttachButtonBase + button, String(F("Button ")) + String(button + 1), selected);
     }
-    page += F("</select></label> ");
-    if (ledOutputOn(i)) {
-      page += F("<span id='live-led-");
-      page += String(i);
-      page += F("' class='pill ok'>on</span>");
-    } else {
-      page += F("<span id='live-led-");
-      page += String(i);
-      page += F("' class='pill'>off</span>");
-    }
-    page += F("</div>");
+    page += F("</select></label></div>");
   }
   page += F("<button type='submit'>Save LEDs</button></form></section>");
 }
 
+void appendButtonActionOption(String &page, uint8_t value, const String &label, uint8_t selected) {
+  page += F("<option value='");
+  page += String(value);
+  page += F("'");
+  if (selected == value) {
+    page += F(" selected");
+  }
+  page += F(">");
+  page += htmlEscape(label);
+  page += F("</option>");
+}
+
+void appendButtonActionSelect(String &page, uint8_t button, const __FlashStringHelper *name, uint8_t selected) {
+  page += F("<select name='");
+  page += name;
+  page += String(button);
+  page += F("'>");
+  appendButtonActionOption(page, kButtonActionNone, F("Nothing"), selected);
+  if (buttonActionAvailable(button, kButtonActionRelayToggle)) {
+    appendButtonActionOption(page, kButtonActionRelayToggle, F("Relay toggle"), selected);
+  }
+  page += F("</select>");
+}
+
+void appendButtonSettings(String &page) {
+  if (!runtime_template.enabled || !hasConfigurableButtons()) return;
+
+  page += F("<section class='panel'><h2>Buttons</h2><form method='post' action='/buttons'>");
+  page += F("<div class='row'><label>Hold time ms<br><input name='hold_ms' type='number' min='");
+  page += String(kButtonHoldMinMs);
+  page += F("' max='");
+  page += String(kButtonHoldMaxMs);
+  page += F("' step='1' value='");
+  page += String(config.button_hold_ms);
+  page += F("'></label></div>");
+
+  for (uint8_t i = 0; i < runtime_template.button_count; i++) {
+    if (!hasPin(runtime_template.buttons[i])) continue;
+    page += F("<div class='row'><strong>Button ");
+    page += String(i + 1);
+    page += F("</strong> <span class='hint'>");
+    page += pinName(runtime_template.buttons[i].pin);
+    page += F("</span> ");
+    if (button_state[i].stable_pressed) {
+      page += F("<span id='live-button-");
+      page += String(i);
+      page += F("' class='pill ok'>pressed</span>");
+    } else {
+      page += F("<span id='live-button-");
+      page += String(i);
+      page += F("' class='pill bad'>released</span>");
+    }
+    page += F("<div class='row'><label>Press<br>");
+    appendButtonActionSelect(page, i, F("press"), config.button_press_action[i]);
+    page += F("</label></div><div class='row'><label>Hold<br>");
+    appendButtonActionSelect(page, i, F("hold"), config.button_hold_action[i]);
+    page += F("</label></div></div>");
+  }
+  page += F("<button type='submit'>Save buttons</button></form></section>");
+}
+
 void appendMqttStatus(String &page) {
-  page += F("<section class='panel'><h2>MQTT</h2><div class='kv'>");
+  page += F("<section class='panel'><h2>MQTT ");
   if (config.mqtt_host[0] == '\0') {
-    page += F("<span>Broker</span><div><span id='live-mqtt' class='pill'>not configured</span></div>");
+    page += F("<span id='live-mqtt' class='pill'>not configured</span>");
+  } else if (mqtt_client.connected()) {
+    page += F("<span id='live-mqtt' class='pill ok'>connected</span>");
+  } else {
+    page += F("<span id='live-mqtt' class='pill bad'>disconnected</span>");
+  }
+  page += F("</h2><div class='kv'>");
+  if (config.mqtt_host[0] == '\0') {
+    page += F("<span>Broker</span><div><span class='muted'>not configured</span></div>");
   } else {
     page += F("<span>Broker</span><div><code>");
     page += htmlEscape(config.mqtt_host);
     page += F(":");
     page += String(config.mqtt_port);
-    page += F("</code> ");
-    if (mqtt_client.connected()) {
-      page += F("<span id='live-mqtt' class='pill ok'>connected</span>");
-    } else {
-      page += F("<span id='live-mqtt' class='pill'>not connected</span>");
-    }
-    page += F("</div>");
+    page += F("</code></div>");
   }
   page += F("<span>Topic</span><div><code>");
   page += htmlEscape(config.mqtt_topic);
@@ -2115,18 +2541,21 @@ void appendPhyModeSelect(String &page) {
 
 void handleRoot() {
   String page;
-  page.reserve(10800);
-  appendHeader(page, F("myMota"));
+  page.reserve(11800);
+  appendHeader(page, F("myMota"), true);
   page += F("<div class='grid'>");
   appendStatusBlock(page);
   appendTemplateStatus(page);
   appendDeviceControls(page);
+  appendButtonSettings(page);
   appendLedSettings(page);
   appendMqttStatus(page);
   page += F("<section class='panel'><h2>Wi-Fi</h2><form method='post' action='/wifi'>");
   page += F("<div class='row'><label>SSID<br><input name='ssid' maxlength='32' required value='");
   page += htmlEscape(config.ssid);
-  page += F("'></label></div><div class='row'><label>Password<br><input type='password' name='password' maxlength='64'></label></div>");
+  page += F("'></label></div><div class='row'><label>Password<br><input id='wifi-password' type='password' name='password' maxlength='64' autocomplete='current-password' value='");
+  page += htmlEscape(config.password);
+  page += F("' onfocus=\"this.type='text'\" onclick=\"this.type='text'\"></label></div>");
   page += F("<div class='row'><label>Hostname<br><input name='hostname' maxlength='32' value='");
   page += htmlEscape(config.hostname);
   page += F("'></label></div>");
@@ -2321,12 +2750,27 @@ void handleEnergySave() {
 
   String offset_arg = server.arg("total_offset_kwh");
   float total_offset_kwh = 0.0f;
+  uint16_t energy_report_interval = config.energy_mqtt_interval;
+  uint16_t energy_report_change_percent_x10 = config.energy_mqtt_change_percent_x10;
   if (!parseFloatInput(offset_arg, kEnergyTotalOffsetMinKwh, kEnergyTotalOffsetMaxKwh, total_offset_kwh)) {
     server.send(400, F("text/plain"), F("Invalid total kWh offset"));
     return;
   }
+  if (server.hasArg("energy_report_interval") &&
+      !parseUint16Input(server.arg("energy_report_interval"), 0, kMqttEnergyIntervalMax, energy_report_interval)) {
+    server.send(400, F("text/plain"), F("Invalid energy report interval"));
+    return;
+  }
+  if (server.hasArg("energy_report_change_percent")) {
+    float percent = 0.0f;
+    if (!parseFloatInput(server.arg("energy_report_change_percent"), 0.0f, kMqttEnergyChangeMaxPercent, percent)) {
+      server.send(400, F("text/plain"), F("Invalid energy report change percent"));
+      return;
+    }
+    energy_report_change_percent_x10 = static_cast<uint16_t>((percent * 10.0f) + 0.5f);
+  }
 
-  if (!saveEnergyConfig(total_offset_kwh)) {
+  if (!saveEnergyConfig(total_offset_kwh, energy_report_interval, energy_report_change_percent_x10)) {
     server.send(500, F("text/plain"), F("Could not save energy settings"));
     return;
   }
@@ -2382,6 +2826,70 @@ void handleLedSave() {
   page.reserve(700);
   appendHeader(page, F("myMota LEDs"));
   page += F("<p class='ok'>LED settings saved.</p>");
+  page += F("<p><a href='/'>Back</a></p>");
+  appendFooter(page);
+  sendHtml(page);
+}
+
+void handleButtonSave() {
+  if (!hasConfigurableButtons()) {
+    server.send(400, F("text/plain"), F("No configurable buttons are available"));
+    return;
+  }
+
+  uint16_t hold_ms = kButtonHoldDefaultMs;
+  if (!parseUint16Input(server.arg("hold_ms"), kButtonHoldMinMs, kButtonHoldMaxMs, hold_ms)) {
+    server.send(400, F("text/plain"), F("Invalid button hold time"));
+    return;
+  }
+
+  uint8_t press_actions[kMaxButtons];
+  uint8_t hold_actions[kMaxButtons];
+  memcpy(press_actions, config.button_press_action, sizeof(press_actions));
+  memcpy(hold_actions, config.button_hold_action, sizeof(hold_actions));
+  for (uint8_t i = 0; i < runtime_template.button_count; i++) {
+    if (!hasPin(runtime_template.buttons[i])) continue;
+
+    String press_arg = F("press");
+    press_arg += String(i);
+    String hold_arg = F("hold");
+    hold_arg += String(i);
+    if (!server.hasArg(press_arg) || !server.hasArg(hold_arg)) {
+      server.send(400, F("text/plain"), F("Missing button setting"));
+      return;
+    }
+
+    uint16_t press_value = 0;
+    uint16_t hold_value = 0;
+    if (!parseUint16Input(server.arg(press_arg), 0, 255, press_value) ||
+        !parseUint16Input(server.arg(hold_arg), 0, 255, hold_value)) {
+      server.send(400, F("text/plain"), F("Invalid button setting"));
+      return;
+    }
+
+    const uint8_t press_action = static_cast<uint8_t>(press_value);
+    const uint8_t hold_action = static_cast<uint8_t>(hold_value);
+    if (!isButtonActionEncoding(press_action) ||
+        !isButtonActionEncoding(hold_action) ||
+        !buttonActionAvailable(i, press_action) ||
+        !buttonActionAvailable(i, hold_action)) {
+      server.send(400, F("text/plain"), F("Invalid button action"));
+      return;
+    }
+    press_actions[i] = press_action;
+    hold_actions[i] = hold_action;
+  }
+
+  if (!saveButtonConfig(hold_ms, press_actions, hold_actions)) {
+    server.send(500, F("text/plain"), F("Could not save button settings"));
+    return;
+  }
+  updateDeviceLeds(true);
+
+  String page;
+  page.reserve(700);
+  appendHeader(page, F("myMota Buttons"));
+  page += F("<p class='ok'>Button settings saved.</p>");
   page += F("<p><a href='/'>Back</a></p>");
   appendFooter(page);
   sendHtml(page);
@@ -2479,7 +2987,7 @@ void handleReboot() {
 
 void handleHealth() {
   String out;
-  out.reserve(1900);
+  out.reserve(2500);
   out += F("{\"name\":\"myMota\",\"version\":\"");
   out += F(MYMOTA_VERSION);
   out += F("\",\"target\":\"");
@@ -2566,6 +3074,26 @@ void handleHealth() {
     }
   }
   out += F("]");
+  out += F(",\"button_hold_ms\":");
+  out += config.button_hold_ms;
+  out += F(",\"buttons\":[");
+  first = true;
+  for (uint8_t i = 0; i < runtime_template.button_count; i++) {
+    if (!first) out += ',';
+    first = false;
+    if (!hasPin(runtime_template.buttons[i])) {
+      out += F("null");
+    } else {
+      out += F("{\"pressed\":");
+      out += (button_state[i].stable_pressed ? F("true") : F("false"));
+      out += F(",\"press_action\":\"");
+      out += buttonActionName(config.button_press_action[i]);
+      out += F("\",\"hold_action\":\"");
+      out += buttonActionName(config.button_hold_action[i]);
+      out += F("\"}");
+    }
+  }
+  out += F("]");
   out += F(",\"leds\":[");
   first = true;
   for (uint8_t i = 0; i < kMaxLedOutputs; i++) {
@@ -2596,6 +3124,25 @@ void handleHealth() {
     out += String(energy.total_kwh, 4);
     out += F(",\"offset_kwh\":");
     out += String(config.energy_total_offset_kwh, 4);
+    out += F(",\"report_interval\":");
+    out += config.energy_mqtt_interval;
+    out += F(",\"report_change_percent\":");
+    out += String(energyMqttChangePercent(), 1);
+    out += F(",\"debug\":{\"cf_us\":");
+    out += energy.cf_power_pulse_length;
+    out += F(",\"cf1_last_us\":");
+    out += energy.cf1_pulse_length;
+    out += F(",\"cf1_voltage_us\":");
+    out += energy.cf1_voltage_pulse_length;
+    out += F(",\"cf1_current_us\":");
+    out += energy.cf1_current_pulse_length;
+    out += F(",\"cf1_timer\":");
+    out += energy.cf1_timer;
+    out += F(",\"selector\":");
+    out += (energy.select_ui_flag ? F("true") : F("false"));
+    out += F(",\"voltage_flag\":");
+    out += (energy.ui_flag ? F("true") : F("false"));
+    out += F("}");
     out += F("}");
   } else {
     out += F("null");
@@ -2804,6 +3351,7 @@ void setupRoutes() {
   server.on(F("/mqtt"), HTTP_POST, handleMqttSave);
   server.on(F("/energy"), HTTP_POST, handleEnergySave);
   server.on(F("/leds"), HTTP_POST, handleLedSave);
+  server.on(F("/buttons"), HTTP_POST, handleButtonSave);
   server.on(F("/power"), HTTP_POST, handlePowerSave);
   server.on(F("/cm"), HTTP_GET, handleCmnd);
   server.on(F("/reboot"), HTTP_GET, handleReboot);
