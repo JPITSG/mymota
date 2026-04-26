@@ -81,7 +81,7 @@ constexpr uint8_t kMaxLedOutputs = kMaxLeds + 1;
 constexpr uint16_t kButtonDebounceDefaultMs = 50;
 constexpr uint16_t kButtonDebounceMinMs = 5;
 constexpr uint16_t kButtonDebounceMaxMs = 200;
-constexpr uint16_t kButtonHoldDefaultMs = 1000;
+constexpr uint16_t kButtonHoldDefaultMs = 500;
 constexpr uint16_t kButtonHoldMinMs = 1;
 constexpr uint16_t kButtonHoldMaxMs = 60000;
 constexpr uint32_t kLedUpdateMs = 250;
@@ -634,13 +634,13 @@ String defaultHostname() {
 }
 
 String defaultMqttTopic() {
-  return "mymota_" + chipIdHex();
+  return "tasmota_" + chipIdHex();
 }
 
 void setDefaultMqttConfig() {
   memset(config.mqtt_host, 0, sizeof(config.mqtt_host));
   config.mqtt_port = kMqttDefaultPort;
-  config.mqtt_keepalive = 0;
+  config.mqtt_keepalive = 600;
   strlcpy(config.mqtt_topic, defaultMqttTopic().c_str(), sizeof(config.mqtt_topic));
 }
 
