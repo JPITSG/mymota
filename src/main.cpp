@@ -49,7 +49,9 @@ constexpr uint16_t kMqttDefaultPort = 1883;
 constexpr uint16_t kMqttKeepaliveMax = 65535U;
 constexpr uint16_t kMqttProtocolKeepaliveSec = 30;
 constexpr uint32_t kMqttReconnectMs = 5000;
-constexpr uint32_t kMqttReadTimeoutMs = 1000;
+constexpr uint32_t kMqttConnectTimeoutMs = 650;
+constexpr uint32_t kMqttConnackTimeoutMs = 250;
+constexpr uint32_t kMqttIoTimeoutMs = 250;
 constexpr uint16_t kMqttEnergyIntervalMax = 65535U;
 constexpr float kMqttEnergyChangeMaxPercent = 1000.0f;
 constexpr uint8_t kInvalidPin = 0xff;
@@ -81,6 +83,12 @@ constexpr uint32_t kWebhookTimeoutMs = 2000;
 constexpr const char *kDefaultButtonMqttTopic = "stat/{TOPIC}/RESULT";
 constexpr const char *kDefaultButtonMqttPressPayload = "{\"Switch{BUTTONID}\":{\"Action\":\"{TYPE}\"}}";
 constexpr const char *kDefaultButtonMqttHoldPayload = "{\"Switch{BUTTONID}\":{\"Action\":\"{TYPE}\"}}";
+constexpr uint8_t kMqttConnectIdle = 0;
+constexpr uint8_t kMqttConnectOk = 1;
+constexpr uint8_t kMqttConnectTcpFailed = 2;
+constexpr uint8_t kMqttConnectWriteFailed = 3;
+constexpr uint8_t kMqttConnectConnackTimeout = 4;
+constexpr uint8_t kMqttConnectConnackRejected = 5;
 
 constexpr uint16_t kTplNone = 0;
 constexpr uint16_t kTplUser = 1;
@@ -418,8 +426,11 @@ uint32_t next_mqtt_reconnect = 0;
 uint32_t last_mqtt_io = 0;
 uint32_t last_mqtt_state_publish = 0;
 uint32_t last_mqtt_energy_publish = 0;
+uint32_t last_mqtt_connect_attempt = 0;
+uint32_t last_mqtt_connect_duration = 0;
 float last_mqtt_energy_power = NAN;
 uint16_t mqtt_pending_relay_mask = 0;
+uint8_t last_mqtt_connect_result = kMqttConnectIdle;
 uint32_t boot_id = 0;
 uint8_t boot_recovery_count = 0;
 bool boot_recovery_armed = false;
@@ -1036,6 +1047,9 @@ bool saveMqttConfig(const char *host, uint16_t port, const char *topic, uint16_t
   last_mqtt_io = 0;
   last_mqtt_state_publish = 0;
   last_mqtt_energy_publish = 0;
+  last_mqtt_connect_attempt = 0;
+  last_mqtt_connect_duration = 0;
+  last_mqtt_connect_result = kMqttConnectIdle;
   last_mqtt_energy_power = NAN;
   mqtt_pending_relay_mask = 0;
   return commitConfig();
@@ -1746,10 +1760,25 @@ bool mqttConfigured() {
   return config.mqtt_host[0] != '\0' && config.mqtt_topic[0] != '\0' && config.mqtt_port != 0;
 }
 
-bool mqttReadByte(uint8_t &value, uint32_t timeout_ms = kMqttReadTimeoutMs) {
-  const uint32_t start = millis();
+const __FlashStringHelper *mqttConnectResultName(uint8_t result) {
+  switch (result) {
+    case kMqttConnectOk: return F("ok");
+    case kMqttConnectTcpFailed: return F("tcp_failed");
+    case kMqttConnectWriteFailed: return F("connect_write_failed");
+    case kMqttConnectConnackTimeout: return F("connack_timeout");
+    case kMqttConnectConnackRejected: return F("connack_rejected");
+    default: return F("idle");
+  }
+}
+
+void recordMqttConnectResult(uint8_t result, uint32_t started) {
+  last_mqtt_connect_result = result;
+  last_mqtt_connect_duration = millis() - started;
+}
+
+bool mqttReadByteUntil(uint8_t &value, uint32_t deadline_ms) {
   while (!mqtt_client.available()) {
-    if (!mqtt_client.connected() || millis() - start >= timeout_ms) {
+    if (!mqtt_client.connected() || static_cast<int32_t>(millis() - deadline_ms) >= 0) {
       return false;
     }
     delay(1);
@@ -1795,11 +1824,15 @@ void mqttStop() {
 bool mqttConnect() {
   if (!mqttConfigured() || WiFi.status() != WL_CONNECTED) return false;
 
+  const uint32_t started = millis();
+  last_mqtt_connect_attempt = started;
   mqttStop();
-  mqtt_client.setTimeout(kMqttReadTimeoutMs);
+  mqtt_client.setTimeout(kMqttConnectTimeoutMs);
   if (!mqtt_client.connect(config.mqtt_host, config.mqtt_port)) {
+    recordMqttConnectResult(kMqttConnectTcpFailed, started);
     return false;
   }
+  mqtt_client.setTimeout(kMqttIoTimeoutMs);
 
   const String client_id = mqttClientId();
   const uint32_t remaining_length = 10U + 2U + client_id.length();
@@ -1813,6 +1846,7 @@ bool mqttConnect() {
             mqttWriteString(client_id.c_str());
   if (!ok) {
     mqttStop();
+    recordMqttConnectResult(kMqttConnectWriteFailed, started);
     return false;
   }
   last_mqtt_io = millis();
@@ -1821,11 +1855,22 @@ bool mqttConnect() {
   uint8_t remaining = 0;
   uint8_t flags = 0;
   uint8_t return_code = 0;
-  ok = mqttReadByte(packet_type) && mqttReadByte(remaining) && mqttReadByte(flags) && mqttReadByte(return_code);
-  if (!ok || packet_type != 0x20 || remaining != 0x02 || return_code != 0x00) {
+  const uint32_t connack_deadline = millis() + kMqttConnackTimeoutMs;
+  ok = mqttReadByteUntil(packet_type, connack_deadline) &&
+       mqttReadByteUntil(remaining, connack_deadline) &&
+       mqttReadByteUntil(flags, connack_deadline) &&
+       mqttReadByteUntil(return_code, connack_deadline);
+  if (!ok) {
     mqttStop();
+    recordMqttConnectResult(kMqttConnectConnackTimeout, started);
     return false;
   }
+  if (!ok || packet_type != 0x20 || remaining != 0x02 || return_code != 0x00) {
+    mqttStop();
+    recordMqttConnectResult(kMqttConnectConnackRejected, started);
+    return false;
+  }
+  recordMqttConnectResult(kMqttConnectOk, started);
   return true;
 }
 
@@ -3453,6 +3498,16 @@ void handleHealth() {
   out += config.mqtt_keepalive;
   out += F(",\"pending\":");
   out += mqtt_pending_relay_mask;
+  out += F(",\"last_connect_result\":\"");
+  out += mqttConnectResultName(last_mqtt_connect_result);
+  out += F("\",\"last_connect_ms\":");
+  out += last_mqtt_connect_duration;
+  out += F(",\"last_attempt_ms_ago\":");
+  if (last_mqtt_connect_attempt == 0) {
+    out += F("null");
+  } else {
+    out += millis() - last_mqtt_connect_attempt;
+  }
   out += F("}");
   out += F(",\"template\":{\"enabled\":");
   if (runtime_template.enabled) {
