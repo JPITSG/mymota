@@ -25,7 +25,8 @@ constexpr uint32_t kBootRecoveryMagic = 0x4d595246;  // MYRF
 constexpr uint16_t kConfigVersionV1 = 1;
 constexpr uint16_t kConfigVersionV2 = 2;
 constexpr uint16_t kConfigVersionV3 = 3;
-constexpr uint16_t kConfigVersion = 4;
+constexpr uint16_t kConfigVersionV4 = 4;
+constexpr uint16_t kConfigVersion = 5;
 constexpr size_t kEepromSize = 512;
 constexpr size_t kBootRecoveryOffset = 480;
 constexpr uint32_t kConnectTimeoutMs = 20000;
@@ -55,6 +56,8 @@ constexpr uint32_t kLedUpdateMs = 250;
 constexpr uint32_t kAdcUpdateMs = 2000;
 constexpr uint32_t kEnergyUpdateMs = 200;
 constexpr uint32_t kEnergyIntegrateMs = 1000;
+constexpr float kEnergyTotalOffsetMinKwh = 0.0f;
+constexpr float kEnergyTotalOffsetMaxKwh = 1000000.0f;
 
 constexpr uint16_t kTplNone = 0;
 constexpr uint16_t kTplUser = 1;
@@ -140,7 +143,7 @@ struct StoredConfigV3 {
   uint32_t crc;
 };
 
-struct StoredConfig {
+struct StoredConfigV4 {
   uint32_t magic;
   uint16_t version;
   uint16_t size;
@@ -158,6 +161,28 @@ struct StoredConfig {
   char mqtt_host[kMqttHostMaxLen + 1];
   char mqtt_topic[kMqttTopicMaxLen + 1];
   uint8_t reserved[18];
+  uint32_t crc;
+};
+
+struct StoredConfig {
+  uint32_t magic;
+  uint16_t version;
+  uint16_t size;
+  char ssid[33];
+  char password[65];
+  char hostname[33];
+  uint8_t phy_mode;
+  uint8_t template_enabled;
+  uint16_t template_base;
+  uint32_t template_flag;
+  char template_name[33];
+  uint16_t template_gpio[kTemplateSlotCount];
+  uint16_t mqtt_port;
+  uint16_t mqtt_keepalive;
+  char mqtt_host[kMqttHostMaxLen + 1];
+  char mqtt_topic[kMqttTopicMaxLen + 1];
+  float energy_total_offset_kwh;
+  uint8_t reserved[14];
   uint32_t crc;
 };
 
@@ -415,6 +440,11 @@ void normalizeConfigStrings() {
   if (config.mqtt_topic[0] == '\0') {
     strlcpy(config.mqtt_topic, defaultMqttTopic().c_str(), sizeof(config.mqtt_topic));
   }
+  if (isnan(config.energy_total_offset_kwh) ||
+      config.energy_total_offset_kwh < kEnergyTotalOffsetMinKwh ||
+      config.energy_total_offset_kwh > kEnergyTotalOffsetMaxKwh) {
+    config.energy_total_offset_kwh = 0.0f;
+  }
   if (!config.template_enabled) {
     clearTemplateConfig();
   } else {
@@ -441,6 +471,7 @@ bool commitConfig() {
 
 bool saveWifiConfig(const char *ssid, const char *password, const char *hostname, uint8_t phy_mode);
 bool saveMqttConfig(const char *host, uint16_t port, const char *topic, uint16_t keepalive);
+bool saveEnergyConfig(float total_offset_kwh);
 
 bool loadConfig() {
   EEPROM.begin(kEepromSize);
@@ -465,6 +496,38 @@ bool loadConfig() {
     }
     normalizeConfigStrings();
     config_ok = config.ssid[0] != '\0';
+    return config_ok;
+  }
+
+  if (header.version == kConfigVersionV4 && header.size == sizeof(StoredConfigV4)) {
+    StoredConfigV4 old_config{};
+    EEPROM.get(0, old_config);
+    if (old_config.crc != configCrc(old_config)) {
+      setDefaultConfig();
+      return false;
+    }
+    old_config.ssid[sizeof(old_config.ssid) - 1] = '\0';
+    old_config.password[sizeof(old_config.password) - 1] = '\0';
+    old_config.hostname[sizeof(old_config.hostname) - 1] = '\0';
+    old_config.template_name[sizeof(old_config.template_name) - 1] = '\0';
+    old_config.mqtt_host[sizeof(old_config.mqtt_host) - 1] = '\0';
+    old_config.mqtt_topic[sizeof(old_config.mqtt_topic) - 1] = '\0';
+    memset(&config, 0, sizeof(config));
+    strlcpy(config.ssid, old_config.ssid, sizeof(config.ssid));
+    strlcpy(config.password, old_config.password, sizeof(config.password));
+    strlcpy(config.hostname, old_config.hostname, sizeof(config.hostname));
+    config.phy_mode = old_config.phy_mode;
+    config.template_enabled = old_config.template_enabled;
+    config.template_base = old_config.template_base;
+    config.template_flag = old_config.template_flag;
+    strlcpy(config.template_name, old_config.template_name, sizeof(config.template_name));
+    memcpy(config.template_gpio, old_config.template_gpio, sizeof(config.template_gpio));
+    config.mqtt_port = old_config.mqtt_port;
+    config.mqtt_keepalive = old_config.mqtt_keepalive;
+    strlcpy(config.mqtt_host, old_config.mqtt_host, sizeof(config.mqtt_host));
+    strlcpy(config.mqtt_topic, old_config.mqtt_topic, sizeof(config.mqtt_topic));
+    config.energy_total_offset_kwh = 0.0f;
+    commitConfig();
     return config_ok;
   }
 
@@ -566,6 +629,15 @@ bool saveMqttConfig(const char *host, uint16_t port, const char *topic, uint16_t
   last_mqtt_state_publish = 0;
   mqtt_pending_relay_mask = 0;
   return commitConfig();
+}
+
+bool saveEnergyConfig(float total_offset_kwh) {
+  config.energy_total_offset_kwh = total_offset_kwh;
+  return commitConfig();
+}
+
+float reportedEnergyTotalKwh() {
+  return energy.total_kwh + config.energy_total_offset_kwh;
 }
 
 String htmlEscape(const String &input) {
@@ -941,6 +1013,44 @@ bool parseUint16Input(const String &input, uint16_t min_value, uint16_t max_valu
   }
   if (value < min_value) return false;
   out = static_cast<uint16_t>(value);
+  return true;
+}
+
+bool parseFloatInput(const String &input, float min_value, float max_value, float &out) {
+  String value = input;
+  value.trim();
+  if (value.length() == 0) return false;
+
+  const char *p = value.c_str();
+  bool negative = false;
+  if (*p == '+' || *p == '-') {
+    negative = *p == '-';
+    p++;
+  }
+
+  bool has_digit = false;
+  double parsed = 0.0;
+  while (*p >= '0' && *p <= '9') {
+    has_digit = true;
+    parsed = (parsed * 10.0) + static_cast<double>(*p - '0');
+    p++;
+  }
+
+  if (*p == '.') {
+    p++;
+    double divisor = 10.0;
+    while (*p >= '0' && *p <= '9') {
+      has_digit = true;
+      parsed += static_cast<double>(*p - '0') / divisor;
+      divisor *= 10.0;
+      p++;
+    }
+  }
+
+  if (!has_digit || *p != '\0') return false;
+  if (negative) parsed = -parsed;
+  if (parsed < min_value || parsed > max_value) return false;
+  out = static_cast<float>(parsed);
   return true;
 }
 
@@ -1518,7 +1628,7 @@ void appendFooter(String &page) {
   page += F("p('live-wifi',d.wifi?'connected':'not connected',d.wifi?'pill ok':'pill bad');t('live-ssid',d.wifi_ssid||'n/a');t('live-ip',d.ip||'n/a');t('live-rssi',d.rssi==null?'n/a':d.rssi+' dBm');");
   page += F("p('live-mqtt',d.mqtt.enabled?(d.mqtt.connected?'connected':'not connected'):'not configured',d.mqtt.enabled&&d.mqtt.connected?'pill ok':'pill');");
   page += F("if(d.power){for(var i=0;i<d.power.length;i++){if(d.power[i]!==null)p('live-relay-'+i,d.power[i]?'on':'off',d.power[i]?'pill ok':'pill');}}");
-  page += F("if(d.energy){t('live-energy-power',fmt(d.energy.power,1,' W'));t('live-energy-voltage',fmt(d.energy.voltage,1,' V'));t('live-energy-current',fmt(d.energy.current,3,' A'));t('live-energy-total',fmt(d.energy.total_kwh,4,' kWh'));}");
+  page += F("if(d.energy){t('live-energy-power',fmt(d.energy.power,1,' W'));t('live-energy-voltage',fmt(d.energy.voltage,1,' V'));t('live-energy-current',fmt(d.energy.current,3,' A'));t('live-energy-total',fmt(d.energy.total_kwh,4,' kWh'));t('live-energy-offset',fmt(d.energy.offset_kwh,4,' kWh'));}");
   page += F("t('live-temp',d.temperature_c==null?'n/a':Number(d.temperature_c).toFixed(1)+' C');t('live-adc-raw',d.adc_raw==null?'n/a':d.adc_raw);");
   page += F("}).catch(function(){});}setInterval(live,1000);live();</script></main></body></html>");
 }
@@ -1645,7 +1755,7 @@ void appendTemplateStatus(String &page) {
 }
 
 void appendDeviceControls(String &page) {
-  if (!runtime_template.enabled || runtime_template.relay_count == 0) return;
+  if (!runtime_template.enabled || (runtime_template.relay_count == 0 && !energy.present)) return;
   page += F("<section class='panel'><h2>Device</h2>");
   for (uint8_t i = 0; i < runtime_template.relay_count; i++) {
     if (!hasPin(runtime_template.relays[i])) continue;
@@ -1675,8 +1785,17 @@ void appendDeviceControls(String &page) {
     page += F(" V</code></div><span>Current</span><div><code id='live-energy-current'>");
     page += String(energy.current, 3);
     page += F(" A</code></div><span>Total</span><div><code id='live-energy-total'>");
-    page += String(energy.total_kwh, 4);
+    page += String(reportedEnergyTotalKwh(), 4);
+    page += F(" kWh</code></div><span>Total offset</span><div><code id='live-energy-offset'>");
+    page += String(config.energy_total_offset_kwh, 4);
     page += F(" kWh</code></div></div>");
+    page += F("<form method='post' action='/energy'><div class='row'><label>Total kWh offset<br><input name='total_offset_kwh' type='number' min='");
+    page += String(kEnergyTotalOffsetMinKwh, 0);
+    page += F("' max='");
+    page += String(kEnergyTotalOffsetMaxKwh, 0);
+    page += F("' step='0.0001' value='");
+    page += String(config.energy_total_offset_kwh, 4);
+    page += F("'></label></div><button type='submit'>Save energy</button></form>");
   }
   page += F("</section>");
 }
@@ -1762,7 +1881,7 @@ void appendPhyModeSelect(String &page) {
 
 void handleRoot() {
   String page;
-  page.reserve(9200);
+  page.reserve(9800);
   appendHeader(page, F("myMota"));
   page += F("<div class='grid'>");
   appendStatusBlock(page);
@@ -1956,6 +2075,33 @@ void handleMqttSave() {
   sendHtml(page);
 }
 
+void handleEnergySave() {
+  if (!energy.present) {
+    server.send(400, F("text/plain"), F("No energy monitor is configured"));
+    return;
+  }
+
+  String offset_arg = server.arg("total_offset_kwh");
+  float total_offset_kwh = 0.0f;
+  if (!parseFloatInput(offset_arg, kEnergyTotalOffsetMinKwh, kEnergyTotalOffsetMaxKwh, total_offset_kwh)) {
+    server.send(400, F("text/plain"), F("Invalid total kWh offset"));
+    return;
+  }
+
+  if (!saveEnergyConfig(total_offset_kwh)) {
+    server.send(500, F("text/plain"), F("Could not save energy settings"));
+    return;
+  }
+
+  String page;
+  page.reserve(700);
+  appendHeader(page, F("myMota Energy"));
+  page += F("<p class='ok'>Energy settings saved.</p>");
+  page += F("<p><a href='/'>Back</a></p>");
+  appendFooter(page);
+  sendHtml(page);
+}
+
 void handlePowerSave() {
   if (!server.hasArg("relay") || !server.hasArg("state")) {
     server.send(400, F("text/plain"), F("Missing relay or state"));
@@ -2042,7 +2188,7 @@ void handleReboot() {
 
 void handleHealth() {
   String out;
-  out.reserve(1450);
+  out.reserve(1600);
   out += F("{\"name\":\"myMota\",\"version\":\"");
   out += F(MYMOTA_VERSION);
   out += F("\",\"target\":\"");
@@ -2136,7 +2282,11 @@ void handleHealth() {
     out += F(",\"power\":");
     out += String(energy.power, 1);
     out += F(",\"total_kwh\":");
+    out += String(reportedEnergyTotalKwh(), 4);
+    out += F(",\"recorded_total_kwh\":");
     out += String(energy.total_kwh, 4);
+    out += F(",\"offset_kwh\":");
+    out += String(config.energy_total_offset_kwh, 4);
     out += F("}");
   } else {
     out += F("null");
@@ -2342,6 +2492,7 @@ void setupRoutes() {
   server.on(F("/wifi"), HTTP_POST, handleWifiSave);
   server.on(F("/template"), HTTP_POST, handleTemplateSave);
   server.on(F("/mqtt"), HTTP_POST, handleMqttSave);
+  server.on(F("/energy"), HTTP_POST, handleEnergySave);
   server.on(F("/power"), HTTP_POST, handlePowerSave);
   server.on(F("/cm"), HTTP_GET, handleCmnd);
   server.on(F("/reboot"), HTTP_GET, handleReboot);
