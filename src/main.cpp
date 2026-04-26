@@ -133,6 +133,9 @@ constexpr uint8_t kMqttConnectTcpFailed = 2;
 constexpr uint8_t kMqttConnectWriteFailed = 3;
 constexpr uint8_t kMqttConnectConnackTimeout = 4;
 constexpr uint8_t kMqttConnectConnackRejected = 5;
+constexpr uint8_t kPowerStateOff = 0;
+constexpr uint8_t kPowerStateOn = 1;
+constexpr uint8_t kPowerStateToggle = 2;
 
 constexpr uint16_t kTplNone = 0;
 constexpr uint16_t kTplUser = 1;
@@ -2576,19 +2579,33 @@ bool parsePowerCommand(const char *p, size_t len, uint8_t &relay, char *response
   }
   if (relay_number == 0) return false;
   relay = static_cast<uint8_t>(relay_number - 1);
+  if (relay_number == 1 && runtime_template.relay_count <= 1) {
+    strlcpy(response_key, "POWER", key_size);
+    return true;
+  }
   if (snprintf(response_key, key_size, "POWER%u", static_cast<unsigned>(relay_number)) >= static_cast<int>(key_size)) {
     return false;
   }
   return true;
 }
 
-bool parsePowerState(const char *p, size_t len, bool &on) {
+bool parsePowerState(const char *p, size_t len, uint8_t &state) {
   if (len == 2 && (p[0] | 0x20) == 'o' && (p[1] | 0x20) == 'n') {
-    on = true;
+    state = kPowerStateOn;
     return true;
   }
   if (len == 3 && (p[0] | 0x20) == 'o' && (p[1] | 0x20) == 'f' && (p[2] | 0x20) == 'f') {
-    on = false;
+    state = kPowerStateOff;
+    return true;
+  }
+  if (len == 6 &&
+      (p[0] | 0x20) == 't' &&
+      (p[1] | 0x20) == 'o' &&
+      (p[2] | 0x20) == 'g' &&
+      (p[3] | 0x20) == 'g' &&
+      (p[4] | 0x20) == 'l' &&
+      (p[5] | 0x20) == 'e') {
+    state = kPowerStateToggle;
     return true;
   }
   return false;
@@ -4697,8 +4714,8 @@ void handleCmnd() {
     server.send(400, F("text/plain"), F("Unsupported command"));
     return;
   }
-  bool on = false;
-  if (!parsePowerState(raw + state_start, state_len, on)) {
+  uint8_t state = kPowerStateOff;
+  if (!parsePowerState(raw + state_start, state_len, state)) {
     server.send(400, F("text/plain"), F("Invalid power state"));
     return;
   }
@@ -4707,6 +4724,7 @@ void handleCmnd() {
     return;
   }
 
+  const bool on = state == kPowerStateToggle ? !relay_state[relay] : state == kPowerStateOn;
   setRelay(relay, on);
   updateDeviceLeds(true);
 
