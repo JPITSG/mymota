@@ -1413,14 +1413,24 @@ void appendHeader(String &page, const __FlashStringHelper *title) {
   page += F("<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>");
   page += F("<title>");
   page += title;
-  page += F("</title><style>body{font-family:sans-serif;max-width:720px;margin:24px auto;padding:0 14px;line-height:1.35}");
-  page += F("input,button,select,textarea{font:inherit;padding:8px;margin:4px 0;box-sizing:border-box}input[type=text],input[type=password],input[type=file],select,textarea{width:100%;max-width:560px}");
-  page += F("button{cursor:pointer}.row{margin:12px 0}.muted{color:#666}.ok{color:#176b32}.bad{color:#9b1c1c}code{background:#eee;padding:2px 4px}.inline{display:inline}</style></head><body>");
-  page += F("<h1>Mymota</h1>");
+  page += F("</title><style>:root{--bg:#f6f7f9;--panel:#fff;--line:#d8dee8;--text:#17202a;--muted:#687386;--ok:#177245;--bad:#a23a36;--accent:#1f7a5f;--accent2:#205c8a}");
+  page += F("*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,sans-serif;font-size:15px;line-height:1.4}");
+  page += F(".top{background:#17202a;color:#fff;border-bottom:4px solid var(--accent);padding:18px 16px}.topin{max-width:1080px;margin:0 auto;display:flex;align-items:end;justify-content:space-between;gap:12px;flex-wrap:wrap}");
+  page += F(".brand{font-size:28px;font-weight:700;letter-spacing:0}.brand span{color:#7dd3aa}.sub{color:#c7d0dc;font-size:13px}main{max-width:1080px;margin:18px auto 28px;padding:0 14px}");
+  page += F(".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;box-shadow:0 1px 2px rgba(0,0,0,.04)}.wide{grid-column:1/-1}");
+  page += F(".panel h2{font-size:17px;margin:0 0 12px}.kv{display:grid;grid-template-columns:minmax(110px,42%) 1fr;gap:8px 12px}.kv span,.hint{color:var(--muted)}.kv div{min-width:0}");
+  page += F("code{background:#eef2f6;border:1px solid #dce3ea;border-radius:4px;padding:1px 4px;word-break:break-word}.pill{display:inline-block;border-radius:999px;padding:2px 8px;background:#eef2f6;color:#364152}.ok{color:var(--ok)}.bad{color:var(--bad)}.muted{color:var(--muted)}");
+  page += F("form{margin:0}.row{margin:10px 0}label{display:block;font-weight:600;color:#344054}input,button,select,textarea{font:inherit}input,select,textarea{width:100%;margin-top:4px;padding:9px;border:1px solid #b9c4d0;border-radius:6px;background:#fff}textarea{min-height:92px;resize:vertical}");
+  page += F("button,.btn{display:inline-block;margin:4px 4px 0 0;padding:8px 12px;border:1px solid var(--accent);border-radius:6px;background:var(--accent);color:#fff;text-decoration:none;cursor:pointer}.secondary{background:#fff;color:var(--accent2);border-color:#9eb7cf}.danger{background:#fff;color:var(--bad);border-color:#d4aaa7}.inline{display:inline}.actions{display:flex;flex-wrap:wrap;gap:6px}.inline button{margin:0 4px 0 0}.list{margin:0;padding-left:18px}@media(max-width:520px){.kv{grid-template-columns:1fr}.brand{font-size:24px}}</style></head><body>");
+  page += F("<header class='top'><div class='topin'><div><div class='brand'>my<span>Mota</span></div><div class='sub'>ESP8266/ESP8285 firmware</div></div><div class='sub'>");
+  page += F(MYMOTA_VERSION);
+  page += F(" / ");
+  page += F(MYMOTA_TARGET);
+  page += F("</div></div></header><main>");
 }
 
 void appendFooter(String &page) {
-  page += F("</body></html>");
+  page += F("</main></body></html>");
 }
 
 void sendHtml(String &page) {
@@ -1429,70 +1439,69 @@ void sendHtml(String &page) {
 }
 
 void appendStatusBlock(String &page) {
-  page += F("<h2>Status</h2><ul>");
-  page += F("<li>Version: <code>");
+  page += F("<section class='panel wide'><h2>System Status</h2><div class='kv'>");
+  page += F("<span>Version</span><div><code>");
   page += F(MYMOTA_VERSION);
-  page += F("</code> / <code>");
+  page += F("</code> <code>");
   page += F(MYMOTA_TARGET);
-  page += F("</code></li><li>Chip: <code>");
+  page += F("</code></div><span>Chip</span><div><code>");
   page += chipIdHex();
-  page += F("</code></li><li>Hostname: <code>");
+  page += F("</code></div><span>Hostname</span><div><code>");
   page += htmlEscape(config.hostname);
-  page += F("</code></li><li>Heap: <code>");
+  page += F("</code></div><span>Heap</span><div><code>");
   page += String(ESP.getFreeHeap());
-  page += F("</code> bytes</li><li>Uptime: <code>");
+  page += F("</code> bytes</div><span>Uptime</span><div><code>");
   page += String(millis() / 1000);
-  page += F("</code>s</li>");
-  page += F("<li>PHY mode: <code>");
+  page += F("</code>s</div><span>PHY mode</span><div><code>");
   page += phyModeName(config.phy_mode);
-  page += F("</code> configured / <code>");
+  page += F("</code> configured <code>");
   page += phyModeName(WiFi.getPhyMode());
-  page += F("</code> active</li>");
+  page += F("</code> active</div>");
 
   if (WiFi.status() == WL_CONNECTED) {
-    page += F("<li>Wi-Fi: <span class='ok'>connected</span> to <code>");
+    page += F("<span>Wi-Fi</span><div><span class='pill ok'>connected</span> <code>");
     page += htmlEscape(WiFi.SSID());
-    page += F("</code></li><li>IP: <code>");
+    page += F("</code></div><span>IP</span><div><code>");
     page += ipToString(WiFi.localIP());
-    page += F("</code></li><li>RSSI: <code>");
+    page += F("</code></div><span>RSSI</span><div><code>");
     page += String(WiFi.RSSI());
-    page += F("</code> dBm</li>");
+    page += F("</code> dBm</div>");
   } else {
-    page += F("<li>Wi-Fi: <span class='bad'>not connected</span></li>");
+    page += F("<span>Wi-Fi</span><div><span class='pill bad'>not connected</span></div>");
   }
 
   if (ap_started) {
-    page += F("<li>Setup AP: <code>");
+    page += F("<span>Setup AP</span><div><code>");
     page += htmlEscape(WiFi.softAPSSID());
-    page += F("</code> / <code>");
+    page += F("</code> <code>");
     page += kApPassword;
     page += F("</code> at <code>");
     page += ipToString(WiFi.softAPIP());
-    page += F("</code></li>");
+    page += F("</code></div>");
   }
-  page += F("</ul>");
+  page += F("</div></section>");
 }
 
 void appendTemplateStatus(String &page) {
-  page += F("<h2>Template</h2><ul>");
+  page += F("<section class='panel'><h2>Template</h2>");
   if (!runtime_template.enabled) {
-    page += F("<li>No template configured.</li>");
+    page += F("<p class='muted'>No template configured.</p>");
   } else {
-    page += F("<li>Name: <code>");
+    page += F("<div class='kv'><span>Name</span><div><code>");
     page += htmlEscape(runtime_template.name);
-    page += F("</code></li><li>Base: <code>");
+    page += F("</code></div><span>Base</span><div><code>");
     page += String(runtime_template.base);
-    page += F("</code>, flag: <code>");
+    page += F("</code> flag <code>");
     page += String(runtime_template.flag);
-    page += F("</code></li><li>Relays: <code>");
+    page += F("</code></div><span>GPIO roles</span><div><code>");
     page += String(runtime_template.relay_count);
-    page += F("</code>, buttons: <code>");
+    page += F("</code> relays <code>");
     page += String(runtime_template.button_count);
-    page += F("</code>, LEDs: <code>");
+    page += F("</code> buttons <code>");
     page += String(runtime_template.led_count);
-    page += F("</code></li>");
+    page += F("</code> LEDs</div>");
     if (energy.present) {
-      page += F("<li>Energy: <code>");
+      page += F("<span>Energy</span><div><code>");
       if (energy.hjl) {
         page += F("HJL/BL0937");
       } else {
@@ -1504,10 +1513,10 @@ void appendTemplateStatus(String &page) {
       page += pinName(energy.cf1_pin);
       page += F("</code>, SEL <code>");
       page += pinName(energy.sel_pin);
-      page += F("</code></li>");
+      page += F("</code></div>");
     }
     if (runtime_template.adc_temp) {
-      page += F("<li>ADC temperature: <code>");
+      page += F("<span>ADC temperature</span><div><code>");
       if (isnan(adc_temperature_c)) {
         page += F("n/a");
       } else {
@@ -1516,10 +1525,11 @@ void appendTemplateStatus(String &page) {
       }
       page += F("</code> raw <code>");
       page += String(adc_raw);
-      page += F("</code></li>");
+      page += F("</code></div>");
     }
+    page += F("</div>");
     if (runtime_template.unsupported_count) {
-      page += F("<li class='bad'>Unsupported GPIO functions:");
+      page += F("<p class='bad'>Unsupported GPIO functions:");
       for (uint8_t i = 0; i < runtime_template.unsupported_count; i++) {
         page += F(" <code>");
         page += pinName(runtime_template.unsupported_pin[i]);
@@ -1527,86 +1537,86 @@ void appendTemplateStatus(String &page) {
         page += String(runtime_template.unsupported_code[i]);
         page += F("</code>");
       }
-      page += F("</li>");
+      page += F("</p>");
     }
   }
-  page += F("</ul>");
+  page += F("</section>");
 }
 
 void appendDeviceControls(String &page) {
   if (!runtime_template.enabled || runtime_template.relay_count == 0) return;
-  page += F("<h2>Device</h2><ul>");
+  page += F("<section class='panel'><h2>Device</h2>");
   for (uint8_t i = 0; i < runtime_template.relay_count; i++) {
     if (!hasPin(runtime_template.relays[i])) continue;
-    page += F("<li>Relay ");
+    page += F("<div class='row'><strong>Relay ");
     page += String(i + 1);
-    page += F(" on <code>");
+    page += F("</strong> <span class='hint'>on</span> <code>");
     page += pinName(runtime_template.relays[i].pin);
-    page += F("</code>: ");
+    page += F("</code> ");
     if (relay_state[i]) {
-      page += F("<span class='ok'>on</span>");
+      page += F("<span class='pill ok'>on</span>");
     } else {
-      page += F("<span class='muted'>off</span>");
+      page += F("<span class='pill'>off</span>");
     }
-    page += F(" <form class='inline' method='post' action='/power'><input type='hidden' name='relay' value='");
+    page += F("<form class='inline' method='post' action='/power'><input type='hidden' name='relay' value='");
     page += String(i + 1);
-    page += F("'><button name='state' value='toggle'>Toggle</button><button name='state' value='on'>On</button><button name='state' value='off'>Off</button></form></li>");
+    page += F("'><span class='actions'><button name='state' value='toggle'>Toggle</button><button name='state' value='on'>On</button><button class='secondary' name='state' value='off'>Off</button></span></form></div>");
   }
   if (energy.present) {
-    page += F("<li>Power: <code>");
+    page += F("<div class='kv'><span>Power</span><div><code>");
     page += String(energy.power, 1);
-    page += F("</code> W, voltage: <code>");
+    page += F("</code> W</div><span>Voltage</span><div><code>");
     page += String(energy.voltage, 1);
-    page += F("</code> V, current: <code>");
+    page += F("</code> V</div><span>Current</span><div><code>");
     page += String(energy.current, 3);
-    page += F("</code> A, total: <code>");
+    page += F("</code> A</div><span>Total</span><div><code>");
     page += String(energy.total_kwh, 4);
-    page += F("</code> kWh</li>");
+    page += F("</code> kWh</div></div>");
   }
-  page += F("</ul>");
+  page += F("</section>");
 }
 
 void appendMqttStatus(String &page) {
-  page += F("<h2>MQTT</h2><ul>");
+  page += F("<section class='panel'><h2>MQTT</h2><div class='kv'>");
   if (config.mqtt_host[0] == '\0') {
-    page += F("<li>Broker: <span class='muted'>not configured</span></li>");
+    page += F("<span>Broker</span><div><span class='pill'>not configured</span></div>");
   } else {
-    page += F("<li>Broker: <code>");
+    page += F("<span>Broker</span><div><code>");
     page += htmlEscape(config.mqtt_host);
     page += F(":");
     page += String(config.mqtt_port);
     page += F("</code> ");
     if (mqtt_client.connected()) {
-      page += F("<span class='ok'>connected</span>");
+      page += F("<span class='pill ok'>connected</span>");
     } else {
-      page += F("<span class='muted'>not connected</span>");
+      page += F("<span class='pill'>not connected</span>");
     }
-    page += F("</li>");
+    page += F("</div>");
   }
-  page += F("<li>Topic: <code>");
+  page += F("<span>Topic</span><div><code>");
   page += htmlEscape(config.mqtt_topic);
-  page += F("</code></li><li>State keepalive: <code>");
+  page += F("</code></div><span>State keepalive</span><div><code>");
   if (config.mqtt_keepalive == 0) {
     page += F("disabled");
   } else {
     page += String(config.mqtt_keepalive);
     page += F("s");
   }
-  page += F("</code></li></ul>");
+  page += F("</code></div></div></section>");
 }
 
 void appendTemplateForm(String &page) {
-  page += F("<h2>Template</h2><form method='post' action='/template'>");
+  page += F("<section class='panel wide'><h2>Template</h2><form method='post' action='/template'>");
   page += F("<div class='row'><label>Tasmota ESP8266 template JSON<br><textarea name='template' rows='5' maxlength='");
   page += String(kTemplateJsonMaxLen);
   page += F("'>");
   page += htmlEscape(currentTemplateJson());
   page += F("</textarea></label></div>");
-  page += F("<button type='submit'>Save template</button> <button type='submit' name='clear' value='1'>Clear template</button></form>");
+  page += F("<button type='submit'>Save template</button> <button class='danger' type='submit' name='clear' value='1'>Clear template</button></form></section>");
 }
 
 void appendMqttForm(String &page) {
-  page += F("<h2>MQTT</h2><form method='post' action='/mqtt'>");
+  page += F("<section class='panel'><h2>MQTT Settings</h2><form method='post' action='/mqtt'>");
   page += F("<div class='row'><label>Host<br><input name='host' maxlength='");
   page += String(kMqttHostMaxLen);
   page += F("' value='");
@@ -1621,7 +1631,7 @@ void appendMqttForm(String &page) {
   page += String(kMqttKeepaliveMax);
   page += F("' value='");
   page += String(config.mqtt_keepalive);
-  page += F("'></label></div><button type='submit'>Save MQTT</button></form>");
+  page += F("'></label></div><button type='submit'>Save MQTT</button></form></section>");
 }
 
 void appendPhyModeOption(String &page, uint8_t mode) {
@@ -1647,13 +1657,14 @@ void appendPhyModeSelect(String &page) {
 
 void handleRoot() {
   String page;
-  page.reserve(6500);
-  appendHeader(page, F("Mymota"));
+  page.reserve(9200);
+  appendHeader(page, F("myMota"));
+  page += F("<div class='grid'>");
   appendStatusBlock(page);
   appendTemplateStatus(page);
   appendDeviceControls(page);
   appendMqttStatus(page);
-  page += F("<h2>Wi-Fi</h2><form method='post' action='/wifi'>");
+  page += F("<section class='panel'><h2>Wi-Fi</h2><form method='post' action='/wifi'>");
   page += F("<div class='row'><label>SSID<br><input name='ssid' maxlength='32' required value='");
   page += htmlEscape(config.ssid);
   page += F("'></label></div><div class='row'><label>Password<br><input type='password' name='password' maxlength='64'></label></div>");
@@ -1662,14 +1673,14 @@ void handleRoot() {
   page += F("'></label></div>");
   appendPhyModeSelect(page);
   page += F("<button type='submit'>Save Wi-Fi</button></form>");
-  page += F("<p><a href='/scan'>Scan networks</a></p>");
+  page += F("<p><a class='btn secondary' href='/scan'>Scan networks</a></p></section>");
 
   appendTemplateForm(page);
   appendMqttForm(page);
 
-  page += F("<h2>Firmware</h2><form method='post' action='/update' enctype='multipart/form-data'>");
+  page += F("<section class='panel'><h2>Firmware</h2><form method='post' action='/update' enctype='multipart/form-data'>");
   page += F("<input type='file' name='firmware' accept='.bin,.bin.gz' required><br><button type='submit'>Upload firmware</button></form>");
-  page += F("<p><a href='/reboot'>Reboot</a></p>");
+  page += F("<p><a class='btn secondary' href='/reboot'>Reboot</a></p></section></div>");
   appendFooter(page);
   sendHtml(page);
 }
@@ -1677,8 +1688,8 @@ void handleRoot() {
 void handleScan() {
   String page;
   page.reserve(2600);
-  appendHeader(page, F("Mymota Scan"));
-  page += F("<h2>Networks</h2>");
+  appendHeader(page, F("myMota Scan"));
+  page += F("<section class='panel'><h2>Networks</h2>");
   const int count = WiFi.scanNetworks(false, true);
   if (count <= 0) {
     page += F("<p>No networks found.</p>");
@@ -1688,7 +1699,7 @@ void handleScan() {
     page += htmlEscape(config.hostname);
     page += F("'></label></div>");
     appendPhyModeSelect(page);
-    page += F("<ul>");
+    page += F("<ul class='list'>");
     for (int i = 0; i < count; i++) {
       page += F("<li><label><input type='radio' name='ssid' required value='");
       page += htmlEscape(WiFi.SSID(i));
@@ -1703,7 +1714,7 @@ void handleScan() {
     page += F("</ul><button type='submit'>Save Wi-Fi</button></form>");
   }
   WiFi.scanDelete();
-  page += F("<p><a href='/'>Back</a></p>");
+  page += F("<p><a class='btn secondary' href='/'>Back</a></p></section>");
   appendFooter(page);
   sendHtml(page);
 }
@@ -1736,7 +1747,7 @@ void handleWifiSave() {
 
   String page;
   page.reserve(800);
-  appendHeader(page, F("Mymota Wi-Fi"));
+  appendHeader(page, F("myMota Wi-Fi"));
   page += F("<p class='ok'>Wi-Fi settings saved. Rebooting.</p>");
   page += F("<p>Reconnect to the device after it joins the configured network.</p>");
   appendFooter(page);
@@ -1754,7 +1765,7 @@ void handleTemplateSave() {
     decodeTemplateConfig();
     String page;
     page.reserve(700);
-    appendHeader(page, F("Mymota Template"));
+    appendHeader(page, F("myMota Template"));
     page += F("<p class='ok'>Template cleared. Rebooting.</p>");
     appendFooter(page);
     sendHtml(page);
@@ -1787,7 +1798,7 @@ void handleTemplateSave() {
 
   String page;
   page.reserve(800);
-  appendHeader(page, F("Mymota Template"));
+  appendHeader(page, F("myMota Template"));
   page += F("<p class='ok'>Template saved. Rebooting.</p>");
   if (runtime_template.unsupported_count) {
     page += F("<p class='bad'>The template contains unsupported GPIO functions. Check the Template section after reboot.</p>");
@@ -1833,7 +1844,7 @@ void handleMqttSave() {
 
   String page;
   page.reserve(700);
-  appendHeader(page, F("Mymota MQTT"));
+  appendHeader(page, F("myMota MQTT"));
   page += F("<p class='ok'>MQTT settings saved.</p>");
   page += F("<p><a href='/'>Back</a></p>");
   appendFooter(page);
@@ -1927,7 +1938,7 @@ void handleReboot() {
 void handleHealth() {
   String out;
   out.reserve(1150);
-  out += F("{\"name\":\"mymota\",\"version\":\"");
+  out += F("{\"name\":\"myMota\",\"version\":\"");
   out += F(MYMOTA_VERSION);
   out += F("\",\"target\":\"");
   out += F(MYMOTA_TARGET);
@@ -2019,7 +2030,7 @@ void handleUpdateDone() {
   if (update_ok && !Update.hasError()) {
     String page;
     page.reserve(700);
-    appendHeader(page, F("Mymota Update"));
+    appendHeader(page, F("myMota Update"));
     page += F("<p class='ok'>Firmware uploaded. Rebooting.</p>");
     appendFooter(page);
     sendHtml(page);
@@ -2029,7 +2040,7 @@ void handleUpdateDone() {
 
   String page;
   page.reserve(800);
-  appendHeader(page, F("Mymota Update Failed"));
+  appendHeader(page, F("myMota Update Failed"));
   page += F("<p class='bad'>Firmware upload failed: ");
   page += updateErrorName(update_error);
   page += F("</p><p><a href='/'>Back</a></p>");
@@ -2230,7 +2241,7 @@ void setup() {
   Serial.begin(115200);
   delay(20);
   Serial.println();
-  Serial.printf("Mymota %s %s chip %06X\n", MYMOTA_VERSION, MYMOTA_TARGET, ESP.getChipId());
+  Serial.printf("myMota %s %s chip %06X\n", MYMOTA_VERSION, MYMOTA_TARGET, ESP.getChipId());
 
   loadConfig();
   decodeTemplateConfig();
