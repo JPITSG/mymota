@@ -21,17 +21,21 @@ extern "C" {
 namespace {
 
 constexpr uint32_t kConfigMagic = 0x4d594d4f;  // MYMO
+constexpr uint32_t kBootRecoveryMagic = 0x4d595246;  // MYRF
 constexpr uint16_t kConfigVersionV1 = 1;
 constexpr uint16_t kConfigVersionV2 = 2;
 constexpr uint16_t kConfigVersionV3 = 3;
 constexpr uint16_t kConfigVersion = 4;
 constexpr size_t kEepromSize = 512;
+constexpr size_t kBootRecoveryOffset = 480;
 constexpr uint32_t kConnectTimeoutMs = 20000;
 constexpr uint32_t kReconnectStartApMs = 90000;
 constexpr uint32_t kApRetryMs = 10000;
+constexpr uint32_t kBootRecoveryStableMs = 30000;
 constexpr const char *kApPassword = "mymota-setup";
 constexpr uint8_t kPhyModeAuto = 0;
 constexpr uint8_t kPhyModeFailsafe = WIFI_PHY_MODE_11G;
+constexpr uint8_t kBootRecoveryLimit = 5;
 constexpr size_t kTemplateSlotCount = 14;
 constexpr size_t kTemplateJsonMaxLen = 640;
 constexpr size_t kMqttHostMaxLen = 64;
@@ -157,7 +161,16 @@ struct StoredConfig {
   uint32_t crc;
 };
 
+struct BootRecoveryState {
+  uint32_t magic;
+  uint8_t boot_count;
+  uint8_t reserved[3];
+  uint32_t crc;
+};
+
 static_assert(sizeof(StoredConfig) <= kEepromSize, "StoredConfig exceeds EEPROM size");
+static_assert(sizeof(StoredConfig) <= kBootRecoveryOffset, "StoredConfig overlaps boot recovery state");
+static_assert(kBootRecoveryOffset + sizeof(BootRecoveryState) <= kEepromSize, "BootRecoveryState exceeds EEPROM size");
 static_assert(sizeof(kTemplateSlotToPin) == kTemplateSlotCount, "Template pin map size mismatch");
 
 struct PinAssignment {
@@ -250,6 +263,9 @@ uint32_t next_mqtt_reconnect = 0;
 uint32_t last_mqtt_io = 0;
 uint32_t last_mqtt_state_publish = 0;
 uint16_t mqtt_pending_relay_mask = 0;
+uint8_t boot_recovery_count = 0;
+bool boot_recovery_armed = false;
+bool boot_recovery_factory_reset = false;
 bool relay_state[kMaxRelays]{};
 float adc_temperature_c = NAN;
 uint16_t adc_raw = 0;
@@ -317,6 +333,63 @@ void setDefaultConfig() {
   config_ok = false;
 }
 
+bool commitConfig();
+
+bool loadBootRecoveryState(BootRecoveryState &state) {
+  EEPROM.get(kBootRecoveryOffset, state);
+  return state.magic == kBootRecoveryMagic && state.crc == configCrc(state);
+}
+
+bool saveBootRecoveryState(uint8_t boot_count) {
+  BootRecoveryState state{};
+  state.magic = kBootRecoveryMagic;
+  state.boot_count = boot_count;
+  state.crc = configCrc(state);
+  EEPROM.put(kBootRecoveryOffset, state);
+  const bool committed = EEPROM.commit();
+  if (committed) {
+    boot_recovery_count = boot_count;
+    boot_recovery_armed = boot_count > 0;
+  }
+  return committed;
+}
+
+bool clearBootRecoveryState() {
+  return saveBootRecoveryState(0);
+}
+
+bool recordBootRecoveryStart() {
+  BootRecoveryState state{};
+  uint8_t boot_count = 0;
+  if (loadBootRecoveryState(state)) {
+    boot_count = state.boot_count;
+  }
+  if (boot_count < 255) {
+    boot_count++;
+  }
+
+  if (boot_count >= kBootRecoveryLimit) {
+    boot_recovery_factory_reset = true;
+    clearBootRecoveryState();
+    return true;
+  }
+
+  saveBootRecoveryState(boot_count);
+  return false;
+}
+
+bool factoryResetConfig() {
+  setDefaultConfig();
+  return commitConfig();
+}
+
+void maintainBootRecovery() {
+  if (!boot_recovery_armed || millis() < kBootRecoveryStableMs) return;
+  if (clearBootRecoveryState()) {
+    Serial.println(F("Fast power-cycle recovery counter cleared"));
+  }
+}
+
 void clearTemplateConfig() {
   config.template_enabled = 0;
   config.template_base = 0;
@@ -371,6 +444,12 @@ bool saveMqttConfig(const char *host, uint16_t port, const char *topic, uint16_t
 
 bool loadConfig() {
   EEPROM.begin(kEepromSize);
+  if (recordBootRecoveryStart()) {
+    Serial.println(F("Factory reset triggered by fast power cycling"));
+    factoryResetConfig();
+    return false;
+  }
+
   ConfigHeader header{};
   EEPROM.get(0, header);
   if (header.magic != kConfigMagic) {
@@ -1456,7 +1535,17 @@ void appendStatusBlock(String &page) {
   page += phyModeName(config.phy_mode);
   page += F("</code> configured <code>");
   page += phyModeName(WiFi.getPhyMode());
-  page += F("</code> active</div>");
+  page += F("</code> active</div><span>Recovery guard</span><div><code>");
+  page += String(boot_recovery_count);
+  page += F("/");
+  page += String(kBootRecoveryLimit);
+  page += F("</code> clears after <code>");
+  page += String(kBootRecoveryStableMs / 1000);
+  page += F("s</code>");
+  if (boot_recovery_factory_reset) {
+    page += F(" <span class='pill bad'>factory reset</span>");
+  }
+  page += F("</div>");
 
   if (WiFi.status() == WL_CONNECTED) {
     page += F("<span>Wi-Fi</span><div><span class='pill ok'>connected</span> <code>");
@@ -1937,7 +2026,7 @@ void handleReboot() {
 
 void handleHealth() {
   String out;
-  out.reserve(1150);
+  out.reserve(1250);
   out += F("{\"name\":\"myMota\",\"version\":\"");
   out += F(MYMOTA_VERSION);
   out += F("\",\"target\":\"");
@@ -1958,7 +2047,16 @@ void handleHealth() {
   out += WiFi.getPhyMode();
   out += F(",\"active_phy\":\"");
   out += phyModeName(WiFi.getPhyMode());
-  out += F("\",\"mqtt\":{\"enabled\":");
+  out += F("\",\"recovery\":{\"fast_boot_count\":");
+  out += boot_recovery_count;
+  out += F(",\"limit\":");
+  out += kBootRecoveryLimit;
+  out += F(",\"stable_seconds\":");
+  out += kBootRecoveryStableMs / 1000;
+  out += F(",\"factory_reset\":");
+  out += (boot_recovery_factory_reset ? F("true") : F("false"));
+  out += F("}");
+  out += F(",\"mqtt\":{\"enabled\":");
   out += (config.mqtt_host[0] ? F("true") : F("false"));
   out += F(",\"connected\":");
   out += (mqtt_client.connected() ? F("true") : F("false"));
@@ -2257,6 +2355,7 @@ void setup() {
 
 void loop() {
   server.handleClient();
+  maintainBootRecovery();
   maintainWifi();
   maintainDevice();
   maintainMqtt();
