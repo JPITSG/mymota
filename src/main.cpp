@@ -45,7 +45,8 @@ constexpr size_t kFlashSectorSize = 4096;
 constexpr uint8_t kEnergyJournalSectorCount = 2;
 constexpr size_t kBootRecoveryOffset = 3072;
 constexpr uint32_t kConnectTimeoutMs = 20000;
-constexpr uint32_t kReconnectStartApMs = 90000;
+constexpr uint32_t kWifiReconnectBeginMs = 60000;
+constexpr uint32_t kInitialFallbackApMs = 300000;
 constexpr uint32_t kApRetryMs = 10000;
 constexpr uint32_t kBootRecoveryStableMs = 30000;
 constexpr uint32_t kBootRecoveryBootMarker = 0x4d594254;  // MYBT
@@ -125,6 +126,9 @@ constexpr uint32_t kWebhookFlushTimeoutMs = 50;
 constexpr uint32_t kWebhookStopTimeoutMs = 25;
 constexpr size_t kHtmlStreamChunkReserve = 5200;
 constexpr size_t kJsonStreamChunkReserve = 900;
+constexpr size_t kSettingsImportJsonMaxLen = 8192;
+constexpr size_t kSettingsImportDocCapacity = 12288;
+constexpr uint16_t kSettingsFormatVersion = 1;
 constexpr const char *kDefaultButtonMqttTopic = "stat/{TOPIC}/RESULT";
 constexpr const char *kDefaultButtonMqttPressPayload = "{\"Switch{BUTTONID}\":{\"Action\":\"{TYPE}\"}}";
 constexpr const char *kDefaultButtonMqttHoldPayload = "{\"Switch{BUTTONID}\":{\"Action\":\"{TYPE}\"}}";
@@ -666,6 +670,8 @@ uint32_t restart_at = 0;
 bool restart_pending = false;
 uint32_t disconnected_since = 0;
 bool disconnected_timer_active = false;
+uint32_t last_wifi_begin_attempt = 0;
+bool sta_connected_once = false;
 uint32_t last_ap_attempt = 0;
 uint32_t last_led_update = 0;
 uint32_t last_adc_update = 0;
@@ -823,52 +829,76 @@ uint8_t defaultLedAttachment(uint8_t led) {
   return kLedAttachNone;
 }
 
-void setDefaultLedConfig() {
+void setDefaultLedConfig(StoredConfig &target) {
   for (uint8_t i = 0; i < kMaxLedOutputs; i++) {
-    config.led_attach[i] = defaultLedAttachment(i);
+    target.led_attach[i] = defaultLedAttachment(i);
   }
 }
 
-void setDefaultButtonActionText(uint8_t button) {
+void setDefaultLedConfig() {
+  setDefaultLedConfig(config);
+}
+
+void setDefaultButtonActionText(StoredConfig &target, uint8_t button) {
   if (button >= kMaxButtons) return;
-  strlcpy(config.button_press_target[button], kDefaultButtonMqttTopic, sizeof(config.button_press_target[button]));
-  strlcpy(config.button_press_payload[button], kDefaultButtonMqttPressPayload, sizeof(config.button_press_payload[button]));
-  strlcpy(config.button_hold_target[button], kDefaultButtonMqttTopic, sizeof(config.button_hold_target[button]));
-  strlcpy(config.button_hold_payload[button], kDefaultButtonMqttHoldPayload, sizeof(config.button_hold_payload[button]));
+  strlcpy(target.button_press_target[button], kDefaultButtonMqttTopic, sizeof(target.button_press_target[button]));
+  strlcpy(target.button_press_payload[button], kDefaultButtonMqttPressPayload, sizeof(target.button_press_payload[button]));
+  strlcpy(target.button_hold_target[button], kDefaultButtonMqttTopic, sizeof(target.button_hold_target[button]));
+  strlcpy(target.button_hold_payload[button], kDefaultButtonMqttHoldPayload, sizeof(target.button_hold_payload[button]));
+}
+
+void setDefaultButtonActionText(uint8_t button) {
+  setDefaultButtonActionText(config, button);
+}
+
+void setDefaultButtonActionTexts(StoredConfig &target) {
+  for (uint8_t i = 0; i < kMaxButtons; i++) {
+    setDefaultButtonActionText(target, i);
+  }
 }
 
 void setDefaultButtonActionTexts() {
+  setDefaultButtonActionTexts(config);
+}
+
+void setDefaultButtonRelayConfig(StoredConfig &target) {
   for (uint8_t i = 0; i < kMaxButtons; i++) {
-    setDefaultButtonActionText(i);
+    target.button_press_relay[i] = kButtonRelayUnset;
+    target.button_hold_relay[i] = kButtonRelayUnset;
   }
 }
 
 void setDefaultButtonRelayConfig() {
+  setDefaultButtonRelayConfig(config);
+}
+
+void setDefaultInputConfig(StoredConfig &target) {
   for (uint8_t i = 0; i < kMaxButtons; i++) {
-    config.button_press_relay[i] = kButtonRelayUnset;
-    config.button_hold_relay[i] = kButtonRelayUnset;
+    target.input_mode[i] = kInputModeUnset;
+    target.input_relay[i] = i;
+    target.input_on_level[i] = kInputOnLevelUnset;
   }
+  memset(target.reserved, 0, sizeof(target.reserved));
 }
 
 void setDefaultInputConfig() {
+  setDefaultInputConfig(config);
+}
+
+void setDefaultButtonConfig(StoredConfig &target) {
+  target.button_hold_ms = kButtonHoldDefaultMs;
+  target.button_debounce_ms = kButtonDebounceDefaultMs;
   for (uint8_t i = 0; i < kMaxButtons; i++) {
-    config.input_mode[i] = kInputModeUnset;
-    config.input_relay[i] = i;
-    config.input_on_level[i] = kInputOnLevelUnset;
+    target.button_press_action[i] = kButtonActionRelayToggle;
+    target.button_hold_action[i] = kButtonActionNone;
   }
-  memset(config.reserved, 0, sizeof(config.reserved));
+  setDefaultButtonActionTexts(target);
+  setDefaultButtonRelayConfig(target);
+  setDefaultInputConfig(target);
 }
 
 void setDefaultButtonConfig() {
-  config.button_hold_ms = kButtonHoldDefaultMs;
-  config.button_debounce_ms = kButtonDebounceDefaultMs;
-  for (uint8_t i = 0; i < kMaxButtons; i++) {
-    config.button_press_action[i] = kButtonActionRelayToggle;
-    config.button_hold_action[i] = kButtonActionNone;
-  }
-  setDefaultButtonActionTexts();
-  setDefaultButtonRelayConfig();
-  setDefaultInputConfig();
+  setDefaultButtonConfig(config);
 }
 
 bool isLedAttachmentEncoding(uint8_t value) {
@@ -1266,14 +1296,18 @@ void maintainBootRecovery() {
   }
 }
 
+void clearTemplateConfig(StoredConfig &target) {
+  target.template_enabled = 0;
+  target.template_base = 0;
+  target.template_flag = 0;
+  memset(target.template_name, 0, sizeof(target.template_name));
+  memset(target.template_gpio, 0, sizeof(target.template_gpio));
+  setDefaultLedConfig(target);
+  setDefaultButtonConfig(target);
+}
+
 void clearTemplateConfig() {
-  config.template_enabled = 0;
-  config.template_base = 0;
-  config.template_flag = 0;
-  memset(config.template_name, 0, sizeof(config.template_name));
-  memset(config.template_gpio, 0, sizeof(config.template_gpio));
-  setDefaultLedConfig();
-  setDefaultButtonConfig();
+  clearTemplateConfig(config);
 }
 
 void normalizeConfigStrings() {
@@ -1803,11 +1837,7 @@ bool saveWifiConfig(const char *ssid, const char *password, const char *hostname
   return commitConfig();
 }
 
-bool saveMqttConfig(const char *host, uint16_t port, const char *topic, uint16_t keepalive) {
-  strlcpy(config.mqtt_host, host ? host : "", sizeof(config.mqtt_host));
-  config.mqtt_port = port;
-  strlcpy(config.mqtt_topic, topic ? topic : "", sizeof(config.mqtt_topic));
-  config.mqtt_keepalive = keepalive;
+void resetMqttRuntimeState() {
   mqtt_client.stop();
   next_mqtt_reconnect = 0;
   last_mqtt_io = 0;
@@ -1823,6 +1853,14 @@ bool saveMqttConfig(const char *host, uint16_t port, const char *topic, uint16_t
   mqtt_button_queue_head = 0;
   mqtt_button_queue_count = 0;
   mqtt_ping_pending = false;
+}
+
+bool saveMqttConfig(const char *host, uint16_t port, const char *topic, uint16_t keepalive) {
+  strlcpy(config.mqtt_host, host ? host : "", sizeof(config.mqtt_host));
+  config.mqtt_port = port;
+  strlcpy(config.mqtt_topic, topic ? topic : "", sizeof(config.mqtt_topic));
+  config.mqtt_keepalive = keepalive;
+  resetMqttRuntimeState();
   return commitConfig();
 }
 
@@ -2274,16 +2312,20 @@ bool hasConfigurableButtons() {
   return false;
 }
 
-void addUnsupportedTemplatePin(uint8_t pin, uint16_t code) {
-  if (runtime_template.unsupported_count >= sizeof(runtime_template.unsupported_code) / sizeof(runtime_template.unsupported_code[0])) {
+void addUnsupportedTemplatePin(RuntimeTemplate &target, uint8_t pin, uint16_t code) {
+  if (target.unsupported_count >= sizeof(target.unsupported_code) / sizeof(target.unsupported_code[0])) {
     return;
   }
-  const uint8_t index = runtime_template.unsupported_count++;
-  runtime_template.unsupported_pin[index] = pin;
-  runtime_template.unsupported_code[index] = code;
+  const uint8_t index = target.unsupported_count++;
+  target.unsupported_pin[index] = pin;
+  target.unsupported_code[index] = code;
 }
 
-void parseTemplateFunction(uint8_t pin, uint16_t code) {
+void addUnsupportedTemplatePin(uint8_t pin, uint16_t code) {
+  addUnsupportedTemplatePin(runtime_template, pin, code);
+}
+
+void parseTemplateFunction(RuntimeTemplate &target, uint8_t pin, uint16_t code) {
   if (code == kTplNone || code == kTplUser || code == 65504U) {
     return;
   }
@@ -2292,118 +2334,122 @@ void parseTemplateFunction(uint8_t pin, uint16_t code) {
   const uint8_t index = code & 0x1fU;
   if (pin == kAdc0Pin) {
     if (code == kTplAdcTemp) {
-      runtime_template.adc_temp = true;
+      target.adc_temp = true;
     } else {
-      addUnsupportedTemplatePin(pin, code);
+      addUnsupportedTemplatePin(target, pin, code);
     }
     return;
   }
 
   if (!digitalPinSupported(pin)) {
-    addUnsupportedTemplatePin(pin, code);
+    addUnsupportedTemplatePin(target, pin, code);
     return;
   }
 
   if (base == kTplKey1 || base == kTplKey1Np || base == kTplKey1Inv || base == kTplKey1InvNp) {
     if (index >= kMaxButtons) {
-      addUnsupportedTemplatePin(pin, code);
+      addUnsupportedTemplatePin(target, pin, code);
       return;
     }
-    runtime_template.buttons[index] = {
+    target.buttons[index] = {
       pin,
       base == kTplKey1Inv || base == kTplKey1InvNp,
       base == kTplKey1Np || base == kTplKey1InvNp
     };
-    runtime_template.input_kind[index] = kInputKindButton;
-    if (runtime_template.button_count <= index) runtime_template.button_count = index + 1;
+    target.input_kind[index] = kInputKindButton;
+    if (target.button_count <= index) target.button_count = index + 1;
     return;
   }
 
   if (base == kTplSwt1 || base == kTplSwt1Np) {
     if (index >= kMaxButtons) {
-      addUnsupportedTemplatePin(pin, code);
+      addUnsupportedTemplatePin(target, pin, code);
       return;
     }
-    runtime_template.buttons[index] = {
+    target.buttons[index] = {
       pin,
       false,
       base == kTplSwt1Np
     };
-    runtime_template.input_kind[index] = kInputKindSwitch;
-    if (runtime_template.button_count <= index) runtime_template.button_count = index + 1;
+    target.input_kind[index] = kInputKindSwitch;
+    if (target.button_count <= index) target.button_count = index + 1;
     return;
   }
 
   if (base == kTplRel1 || base == kTplRel1Inv) {
     if (index >= kMaxRelays) {
-      addUnsupportedTemplatePin(pin, code);
+      addUnsupportedTemplatePin(target, pin, code);
       return;
     }
-    runtime_template.relays[index] = {pin, base == kTplRel1Inv, false};
-    if (runtime_template.relay_count <= index) runtime_template.relay_count = index + 1;
+    target.relays[index] = {pin, base == kTplRel1Inv, false};
+    if (target.relay_count <= index) target.relay_count = index + 1;
     return;
   }
 
   if (base == kTplLed1 || base == kTplLed1Inv) {
     if (index >= kMaxLeds) {
-      addUnsupportedTemplatePin(pin, code);
+      addUnsupportedTemplatePin(target, pin, code);
       return;
     }
-    runtime_template.leds[index] = {pin, base == kTplLed1Inv, false};
-    if (runtime_template.led_count <= index) runtime_template.led_count = index + 1;
+    target.leds[index] = {pin, base == kTplLed1Inv, false};
+    if (target.led_count <= index) target.led_count = index + 1;
     return;
   }
 
   if (code == kTplLedLnk || code == kTplLedLnkInv) {
-    runtime_template.link_led = {pin, code == kTplLedLnkInv, false};
+    target.link_led = {pin, code == kTplLedLnkInv, false};
     return;
   }
 
   if (code == kTplI2cScl) {
-    runtime_template.i2c_scl_pin = pin;
+    target.i2c_scl_pin = pin;
     return;
   }
 
   if (code == kTplI2cSda) {
-    runtime_template.i2c_sda_pin = pin;
+    target.i2c_sda_pin = pin;
     return;
   }
 
   if (code == kTplNrgSel || code == kTplNrgSelInv) {
-    runtime_template.energy_sel_pin = pin;
-    runtime_template.energy_sel_inverted = code == kTplNrgSelInv;
+    target.energy_sel_pin = pin;
+    target.energy_sel_inverted = code == kTplNrgSelInv;
     return;
   }
 
   if (code == kTplNrgCf1) {
     if (!interruptPinSupported(pin)) {
-      addUnsupportedTemplatePin(pin, code);
+      addUnsupportedTemplatePin(target, pin, code);
       return;
     }
-    runtime_template.energy_cf1_pin = pin;
+    target.energy_cf1_pin = pin;
     return;
   }
 
   if (code == kTplHlwCf || code == kTplHjlCf) {
     if (!interruptPinSupported(pin)) {
-      addUnsupportedTemplatePin(pin, code);
+      addUnsupportedTemplatePin(target, pin, code);
       return;
     }
-    runtime_template.energy_cf_pin = pin;
-    runtime_template.energy_hjl = code == kTplHjlCf;
+    target.energy_cf_pin = pin;
+    target.energy_hjl = code == kTplHjlCf;
     return;
   }
 
   if (base == kTplAde7953Irq) {
-    runtime_template.ade7953_irq_pin = pin;
-    runtime_template.ade7953_model = index;
+    target.ade7953_irq_pin = pin;
+    target.ade7953_model = index;
     if (index != kAde7953ModelShelly25) {
-      addUnsupportedTemplatePin(pin, code);
+      addUnsupportedTemplatePin(target, pin, code);
     }
     return;
   }
 
-  addUnsupportedTemplatePin(pin, code);
+  addUnsupportedTemplatePin(target, pin, code);
+}
+
+void parseTemplateFunction(uint8_t pin, uint16_t code) {
+  parseTemplateFunction(runtime_template, pin, code);
 }
 
 void detachEnergyInterrupts() {
@@ -2420,29 +2466,36 @@ void detachEnergyInterrupts() {
   energy.driver = kEnergyDriverNone;
 }
 
+void resetRuntimeTemplate(RuntimeTemplate &target) {
+  memset(&target, 0, sizeof(target));
+  for (uint8_t i = 0; i < kMaxRelays; i++) resetPinAssignment(target.relays[i]);
+  for (uint8_t i = 0; i < kMaxButtons; i++) resetPinAssignment(target.buttons[i]);
+  for (uint8_t i = 0; i < kMaxLeds; i++) resetPinAssignment(target.leds[i]);
+  resetPinAssignment(target.link_led);
+  target.i2c_scl_pin = kInvalidPin;
+  target.i2c_sda_pin = kInvalidPin;
+  target.ade7953_irq_pin = kInvalidPin;
+  target.energy_cf_pin = kInvalidPin;
+  target.energy_cf1_pin = kInvalidPin;
+  target.energy_sel_pin = kInvalidPin;
+}
+
+void decodeTemplateConfigInto(const StoredConfig &source, RuntimeTemplate &target) {
+  resetRuntimeTemplate(target);
+  if (!source.template_enabled) return;
+
+  target.enabled = true;
+  strlcpy(target.name, source.template_name, sizeof(target.name));
+  target.base = source.template_base;
+  target.flag = source.template_flag;
+  for (uint8_t i = 0; i < kTemplateSlotCount; i++) {
+    parseTemplateFunction(target, kTemplateSlotToPin[i], source.template_gpio[i]);
+  }
+}
+
 void decodeTemplateConfig() {
   detachEnergyInterrupts();
-  memset(&runtime_template, 0, sizeof(runtime_template));
-  for (uint8_t i = 0; i < kMaxRelays; i++) resetPinAssignment(runtime_template.relays[i]);
-  for (uint8_t i = 0; i < kMaxButtons; i++) resetPinAssignment(runtime_template.buttons[i]);
-  for (uint8_t i = 0; i < kMaxLeds; i++) resetPinAssignment(runtime_template.leds[i]);
-  resetPinAssignment(runtime_template.link_led);
-  runtime_template.i2c_scl_pin = kInvalidPin;
-  runtime_template.i2c_sda_pin = kInvalidPin;
-  runtime_template.ade7953_irq_pin = kInvalidPin;
-  runtime_template.energy_cf_pin = kInvalidPin;
-  runtime_template.energy_cf1_pin = kInvalidPin;
-  runtime_template.energy_sel_pin = kInvalidPin;
-
-  if (!config.template_enabled) return;
-
-  runtime_template.enabled = true;
-  strlcpy(runtime_template.name, config.template_name, sizeof(runtime_template.name));
-  runtime_template.base = config.template_base;
-  runtime_template.flag = config.template_flag;
-  for (uint8_t i = 0; i < kTemplateSlotCount; i++) {
-    parseTemplateFunction(kTemplateSlotToPin[i], config.template_gpio[i]);
-  }
+  decodeTemplateConfigInto(config, runtime_template);
 }
 
 bool isJsonSpace(char c) {
@@ -2696,6 +2749,666 @@ bool isValidMqttTopic(const String &topic) {
     if (c < 0x20 || c == 0x7f) return false;
   }
   return true;
+}
+
+// Settings export/import is an explicit schema. When adding persisted config
+// fields, update these helpers so backups include the new setting safely.
+struct SettingsImportStats {
+  uint16_t applied;
+  uint16_t skipped;
+  String skipped_fields;
+};
+
+void recordSettingsApplied(SettingsImportStats &stats) {
+  stats.applied++;
+}
+
+void recordSettingsSkipped(SettingsImportStats &stats, const String &field) {
+  stats.skipped++;
+  if (stats.skipped_fields.length() >= 240) return;
+  if (stats.skipped_fields.length()) stats.skipped_fields += F(", ");
+  stats.skipped_fields += field;
+}
+
+String settingsJsonEscape(const char *input) {
+  String out;
+  if (!input) return out;
+  out.reserve(strlen(input) + 8);
+  for (const char *p = input; *p; p++) {
+    const char c = *p;
+    if (c == '"' || c == '\\') {
+      out += '\\';
+      out += c;
+    } else if (c == '\n') {
+      out += F("\\n");
+    } else if (c == '\r') {
+      out += F("\\r");
+    } else if (c == '\t') {
+      out += F("\\t");
+    } else if (static_cast<uint8_t>(c) < 0x20 || c == 0x7f) {
+      out += ' ';
+    } else {
+      out += c;
+    }
+  }
+  return out;
+}
+
+bool settingsReadString(JsonVariantConst value, String &out, size_t max_len, bool trim_value = true) {
+  if (!value.is<const char *>()) return false;
+  out = value.as<const char *>();
+  if (trim_value) out.trim();
+  return out.length() <= max_len;
+}
+
+bool settingsReadUint16(JsonVariantConst value, uint16_t min_value, uint16_t max_value, uint16_t &out) {
+  if (!value.is<long>() && !value.is<unsigned long>() && !value.is<int>() && !value.is<unsigned int>()) return false;
+  const long raw = value.as<long>();
+  if (raw < static_cast<long>(min_value) || raw > static_cast<long>(max_value)) return false;
+  out = static_cast<uint16_t>(raw);
+  return true;
+}
+
+bool settingsReadFloat(JsonVariantConst value, float min_value, float max_value, float &out) {
+  if (!value.is<float>() && !value.is<double>() && !value.is<long>() && !value.is<unsigned long>() &&
+      !value.is<int>() && !value.is<unsigned int>()) {
+    return false;
+  }
+  const float raw = value.as<float>();
+  if (isnan(raw) || raw < min_value || raw > max_value) return false;
+  out = raw;
+  return true;
+}
+
+const __FlashStringHelper *settingsActionName(uint8_t action) {
+  switch (action) {
+    case kButtonActionRelayToggle: return F("relay_toggle");
+    case kButtonActionMqtt: return F("mqtt");
+    case kButtonActionWebhook: return F("webhook");
+    default: return F("none");
+  }
+}
+
+bool parseSettingsActionName(const String &name, uint8_t &action) {
+  if (name == F("none") || name == F("nothing")) {
+    action = kButtonActionNone;
+  } else if (name == F("relay_toggle") || name == F("relay toggle")) {
+    action = kButtonActionRelayToggle;
+  } else if (name == F("mqtt") || name == F("mqtt broadcast")) {
+    action = kButtonActionMqtt;
+  } else if (name == F("webhook") || name == F("webhook exec")) {
+    action = kButtonActionWebhook;
+  } else {
+    return false;
+  }
+  return true;
+}
+
+const __FlashStringHelper *settingsInputModeName(uint8_t mode) {
+  return mode == kInputModeSwitch ? F("switch") : F("button");
+}
+
+bool parseSettingsInputMode(const String &name, uint8_t &mode) {
+  if (name == F("button") || name == F("button actions")) {
+    mode = kInputModeButton;
+  } else if (name == F("switch") || name == F("switch follow") || name == F("switch follows relay")) {
+    mode = kInputModeSwitch;
+  } else {
+    return false;
+  }
+  return true;
+}
+
+String settingsLedAttachmentName(uint8_t value) {
+  uint8_t index = 0;
+  if (ledAttachmentRelayIndex(value, index)) {
+    return String(F("relay")) + String(index + 1);
+  }
+  if (ledAttachmentButtonIndex(value, index)) {
+    return String(F("input")) + String(index + 1);
+  }
+  return F("none");
+}
+
+bool parseSettingsLedAttachment(const String &name, uint8_t &value) {
+  if (name == F("none") || name == F("nothing")) {
+    value = kLedAttachNone;
+    return true;
+  }
+  if (name.startsWith(F("relay"))) {
+    uint16_t index = 0;
+    if (!parseUint16Input(name.substring(5), 1, kMaxRelays, index)) return false;
+    value = kLedAttachRelayBase + static_cast<uint8_t>(index - 1);
+    return true;
+  }
+  if (name.startsWith(F("input"))) {
+    uint16_t index = 0;
+    if (!parseUint16Input(name.substring(5), 1, kMaxButtons, index)) return false;
+    value = kLedAttachButtonBase + static_cast<uint8_t>(index - 1);
+    return true;
+  }
+  return false;
+}
+
+bool relayAvailableIn(const RuntimeTemplate &rt, uint8_t relay) {
+  return relay < rt.relay_count && hasPin(rt.relays[relay]);
+}
+
+bool buttonAvailableIn(const RuntimeTemplate &rt, uint8_t button) {
+  return button < rt.button_count && hasPin(rt.buttons[button]);
+}
+
+const PinAssignment *ledOutputAssignmentIn(const RuntimeTemplate &rt, uint8_t led) {
+  if (led < kMaxLeds) return &rt.leds[led];
+  if (led == kMaxLeds) return &rt.link_led;
+  return nullptr;
+}
+
+bool hasLedOutputIn(const RuntimeTemplate &rt, uint8_t led) {
+  const PinAssignment *assignment = ledOutputAssignmentIn(rt, led);
+  if (!assignment || !hasPin(*assignment)) return false;
+  return led >= kMaxLeds || led < rt.led_count;
+}
+
+bool ledAttachmentAvailableIn(const RuntimeTemplate &rt, uint8_t value) {
+  uint8_t index = 0;
+  if (value == kLedAttachNone) return true;
+  if (ledAttachmentRelayIndex(value, index)) return relayAvailableIn(rt, index);
+  if (ledAttachmentButtonIndex(value, index)) return buttonAvailableIn(rt, index);
+  return false;
+}
+
+bool defaultButtonRelayTargetIn(const RuntimeTemplate &rt, uint8_t button, uint8_t &relay) {
+  if (button < rt.relay_count && hasPin(rt.relays[button])) {
+    relay = button;
+    return true;
+  }
+  if (hasPin(rt.relays[0])) {
+    relay = 0;
+    return true;
+  }
+  for (uint8_t i = 0; i < rt.relay_count; i++) {
+    if (hasPin(rt.relays[i])) {
+      relay = i;
+      return true;
+    }
+  }
+  return false;
+}
+
+bool buttonActionAvailableIn(const RuntimeTemplate &rt, uint8_t button, uint8_t action) {
+  if (action == kButtonActionNone || action == kButtonActionMqtt || action == kButtonActionWebhook) return true;
+  if (action == kButtonActionRelayToggle) {
+    uint8_t relay = 0;
+    return defaultButtonRelayTargetIn(rt, button, relay);
+  }
+  return false;
+}
+
+bool templatesDiffer(const StoredConfig &a, const StoredConfig &b) {
+  return a.template_enabled != b.template_enabled ||
+         a.template_base != b.template_base ||
+         a.template_flag != b.template_flag ||
+         strcmp(a.template_name, b.template_name) != 0 ||
+         memcmp(a.template_gpio, b.template_gpio, sizeof(a.template_gpio)) != 0;
+}
+
+bool mqttConfigDiffers(const StoredConfig &a, const StoredConfig &b) {
+  return a.mqtt_port != b.mqtt_port ||
+         a.mqtt_keepalive != b.mqtt_keepalive ||
+         strcmp(a.mqtt_host, b.mqtt_host) != 0 ||
+         strcmp(a.mqtt_topic, b.mqtt_topic) != 0;
+}
+
+bool energyConfigDiffers(const StoredConfig &a, const StoredConfig &b) {
+  return a.energy_total_offset_kwh != b.energy_total_offset_kwh ||
+         a.energy_mqtt_interval != b.energy_mqtt_interval ||
+         a.energy_mqtt_change_percent_x10 != b.energy_mqtt_change_percent_x10;
+}
+
+bool ledConfigDiffers(const StoredConfig &a, const StoredConfig &b) {
+  return memcmp(a.led_attach, b.led_attach, sizeof(a.led_attach)) != 0;
+}
+
+bool inputConfigDiffers(const StoredConfig &a, const StoredConfig &b) {
+  return a.button_hold_ms != b.button_hold_ms ||
+         a.button_debounce_ms != b.button_debounce_ms ||
+         memcmp(a.button_press_action, b.button_press_action, sizeof(a.button_press_action)) != 0 ||
+         memcmp(a.button_hold_action, b.button_hold_action, sizeof(a.button_hold_action)) != 0 ||
+         memcmp(a.button_press_target, b.button_press_target, sizeof(a.button_press_target)) != 0 ||
+         memcmp(a.button_press_payload, b.button_press_payload, sizeof(a.button_press_payload)) != 0 ||
+         memcmp(a.button_hold_target, b.button_hold_target, sizeof(a.button_hold_target)) != 0 ||
+         memcmp(a.button_hold_payload, b.button_hold_payload, sizeof(a.button_hold_payload)) != 0 ||
+         memcmp(a.input_mode, b.input_mode, sizeof(a.input_mode)) != 0 ||
+         memcmp(a.input_relay, b.input_relay, sizeof(a.input_relay)) != 0 ||
+         memcmp(a.input_on_level, b.input_on_level, sizeof(a.input_on_level)) != 0 ||
+         memcmp(a.button_press_relay, b.button_press_relay, sizeof(a.button_press_relay)) != 0 ||
+         memcmp(a.button_hold_relay, b.button_hold_relay, sizeof(a.button_hold_relay)) != 0;
+}
+
+void appendSettingsActionJson(String &out, uint8_t button, bool hold) {
+  const uint8_t action = hold ? config.button_hold_action[button] : config.button_press_action[button];
+  const uint8_t configured_relay = hold ? config.button_hold_relay[button] : config.button_press_relay[button];
+  const char *target = hold ? config.button_hold_target[button] : config.button_press_target[button];
+  const char *payload = hold ? config.button_hold_payload[button] : config.button_press_payload[button];
+  out += F("{\"action\":\"");
+  out += settingsActionName(action);
+  out += F("\"");
+  uint8_t relay = 0;
+  if (relayAvailable(configured_relay)) {
+    relay = configured_relay;
+    out += F(",\"relay\":");
+    out += relay + 1;
+  } else if (buttonRelayTarget(button, hold, relay)) {
+    out += F(",\"relay\":");
+    out += relay + 1;
+  }
+  out += F(",\"target\":\"");
+  out += settingsJsonEscape(target);
+  out += F("\",\"payload\":\"");
+  out += settingsJsonEscape(payload);
+  out += F("\"}");
+}
+
+void appendSettingsExportJson(String &out) {
+  out += F("{\"format\":\"mymota-settings\",\"format_version\":");
+  out += kSettingsFormatVersion;
+  out += F(",\"firmware\":{\"name\":\"myMota\",\"version\":\"");
+  out += F(MYMOTA_VERSION);
+  out += F("\",\"target\":\"");
+  out += F(MYMOTA_TARGET);
+  out += F("\",\"chip\":\"");
+  out += chipIdHex();
+  out += F("\"},\"template\":{\"enabled\":");
+  out += config.template_enabled ? F("true") : F("false");
+  if (config.template_enabled) {
+    const String tpl = currentTemplateJson();
+    out += F(",\"json\":\"");
+    out += settingsJsonEscape(tpl.c_str());
+    out += F("\"");
+  }
+  out += F("},\"mqtt\":{\"host\":\"");
+  out += settingsJsonEscape(config.mqtt_host);
+  out += F("\",\"port\":");
+  out += config.mqtt_port;
+  out += F(",\"topic\":\"");
+  out += settingsJsonEscape(config.mqtt_topic);
+  out += F("\",\"keepalive\":");
+  out += config.mqtt_keepalive;
+  out += F("},\"energy\":{\"total_offset_kwh\":");
+  out += String(config.energy_total_offset_kwh, 4);
+  out += F(",\"report_interval\":");
+  out += config.energy_mqtt_interval;
+  out += F(",\"report_change_percent\":");
+  out += String(energyMqttChangePercent(), 1);
+  out += F("},\"leds\":[");
+  for (uint8_t i = 0; i < kMaxLedOutputs; i++) {
+    if (i) out += ',';
+    out += F("{\"attach\":\"");
+    out += settingsLedAttachmentName(config.led_attach[i]);
+    out += F("\"}");
+  }
+  out += F("],\"inputs\":{\"hold_ms\":");
+  out += config.button_hold_ms;
+  out += F(",\"debounce_ms\":");
+  out += config.button_debounce_ms;
+  out += F(",\"items\":[");
+  for (uint8_t i = 0; i < kMaxButtons; i++) {
+    if (i) out += ',';
+    const uint8_t mode = effectiveInputMode(i);
+    const uint8_t on_level = effectiveInputOnLevel(i);
+    uint8_t relay = 0;
+    out += F("{\"mode\":\"");
+    out += settingsInputModeName(mode);
+    out += F("\",\"on_level\":\"");
+    out += on_level == kInputOnLevelHigh ? F("high") : F("low");
+    out += F("\"");
+    if (inputRelayTarget(i, relay)) {
+      out += F(",\"relay\":");
+      out += relay + 1;
+    }
+    out += F(",\"press\":");
+    appendSettingsActionJson(out, i, false);
+    out += F(",\"hold\":");
+    appendSettingsActionJson(out, i, true);
+    out += F("}");
+  }
+  out += F("]}}");
+}
+
+bool importSettingsTemplate(JsonObjectConst root, StoredConfig &target, SettingsImportStats &stats) {
+  JsonVariantConst template_value = root["template"];
+  if (template_value.isNull()) return false;
+  JsonObjectConst tpl = template_value.as<JsonObjectConst>();
+  if (tpl.isNull()) {
+    recordSettingsSkipped(stats, F("template"));
+    return false;
+  }
+
+  JsonVariantConst enabled_value = tpl["enabled"];
+  if (!enabled_value.isNull() && !enabled_value.is<bool>()) {
+    recordSettingsSkipped(stats, F("template.enabled"));
+    return false;
+  }
+  const bool enabled = enabled_value.isNull() ? true : enabled_value.as<bool>();
+  if (!enabled) {
+    clearTemplateConfig(target);
+    recordSettingsApplied(stats);
+    return true;
+  }
+
+  String template_json;
+  if (!settingsReadString(tpl["json"], template_json, kTemplateJsonMaxLen)) {
+    recordSettingsSkipped(stats, F("template.json"));
+    return false;
+  }
+
+  StoredConfig candidate = target;
+  String error;
+  if (!parseTemplateJson(template_json, candidate, error)) {
+    recordSettingsSkipped(stats, F("template.json"));
+    return false;
+  }
+  target = candidate;
+  recordSettingsApplied(stats);
+  return true;
+}
+
+void importSettingsMqtt(JsonObjectConst root, StoredConfig &target, SettingsImportStats &stats) {
+  JsonVariantConst mqtt_value = root["mqtt"];
+  if (mqtt_value.isNull()) return;
+  JsonObjectConst mqtt = mqtt_value.as<JsonObjectConst>();
+  if (mqtt.isNull()) {
+    recordSettingsSkipped(stats, F("mqtt"));
+    return;
+  }
+
+  if (mqtt.containsKey("host")) {
+    String host;
+    if (settingsReadString(mqtt["host"], host, kMqttHostMaxLen) && isValidMqttHost(host)) {
+      strlcpy(target.mqtt_host, host.c_str(), sizeof(target.mqtt_host));
+      recordSettingsApplied(stats);
+    } else {
+      recordSettingsSkipped(stats, F("mqtt.host"));
+    }
+  }
+  if (mqtt.containsKey("port")) {
+    uint16_t port = 0;
+    if (settingsReadUint16(mqtt["port"], 1, 65535U, port)) {
+      target.mqtt_port = port;
+      recordSettingsApplied(stats);
+    } else {
+      recordSettingsSkipped(stats, F("mqtt.port"));
+    }
+  }
+  if (mqtt.containsKey("topic")) {
+    String topic;
+    if (settingsReadString(mqtt["topic"], topic, kMqttTopicMaxLen) && isValidMqttTopic(topic)) {
+      strlcpy(target.mqtt_topic, topic.c_str(), sizeof(target.mqtt_topic));
+      recordSettingsApplied(stats);
+    } else {
+      recordSettingsSkipped(stats, F("mqtt.topic"));
+    }
+  }
+  if (mqtt.containsKey("keepalive")) {
+    uint16_t keepalive = 0;
+    if (settingsReadUint16(mqtt["keepalive"], 0, kMqttKeepaliveMax, keepalive)) {
+      target.mqtt_keepalive = keepalive;
+      recordSettingsApplied(stats);
+    } else {
+      recordSettingsSkipped(stats, F("mqtt.keepalive"));
+    }
+  }
+}
+
+void importSettingsEnergy(JsonObjectConst root, StoredConfig &target, SettingsImportStats &stats) {
+  JsonVariantConst energy_value = root["energy"];
+  if (energy_value.isNull()) return;
+  JsonObjectConst energy_settings = energy_value.as<JsonObjectConst>();
+  if (energy_settings.isNull()) {
+    recordSettingsSkipped(stats, F("energy"));
+    return;
+  }
+
+  if (energy_settings.containsKey("total_offset_kwh")) {
+    float offset = 0.0f;
+    if (settingsReadFloat(energy_settings["total_offset_kwh"], kEnergyTotalOffsetMinKwh, kEnergyTotalOffsetMaxKwh, offset)) {
+      target.energy_total_offset_kwh = offset;
+      recordSettingsApplied(stats);
+    } else {
+      recordSettingsSkipped(stats, F("energy.total_offset_kwh"));
+    }
+  }
+  if (energy_settings.containsKey("report_interval")) {
+    uint16_t interval = 0;
+    if (settingsReadUint16(energy_settings["report_interval"], 0, kMqttEnergyIntervalMax, interval)) {
+      target.energy_mqtt_interval = interval;
+      recordSettingsApplied(stats);
+    } else {
+      recordSettingsSkipped(stats, F("energy.report_interval"));
+    }
+  }
+  if (energy_settings.containsKey("report_change_percent")) {
+    float percent = 0.0f;
+    if (settingsReadFloat(energy_settings["report_change_percent"], 0.0f, kMqttEnergyChangeMaxPercent, percent)) {
+      target.energy_mqtt_change_percent_x10 = static_cast<uint16_t>((percent * 10.0f) + 0.5f);
+      recordSettingsApplied(stats);
+    } else {
+      recordSettingsSkipped(stats, F("energy.report_change_percent"));
+    }
+  }
+}
+
+void importSettingsLeds(JsonObjectConst root, StoredConfig &target, const RuntimeTemplate &rt, SettingsImportStats &stats) {
+  JsonVariantConst leds_value = root["leds"];
+  if (leds_value.isNull()) return;
+  JsonArrayConst leds = leds_value.as<JsonArrayConst>();
+  if (leds.isNull()) {
+    recordSettingsSkipped(stats, F("leds"));
+    return;
+  }
+
+  const uint8_t count = min(static_cast<size_t>(kMaxLedOutputs), leds.size());
+  for (uint8_t i = 0; i < count; i++) {
+    JsonObjectConst led = leds[i].as<JsonObjectConst>();
+    if (led.isNull()) {
+      if (!leds[i].isNull()) recordSettingsSkipped(stats, String(F("leds[")) + String(i) + F("]"));
+      continue;
+    }
+    if (!hasLedOutputIn(rt, i)) continue;
+    String attach_name;
+    uint8_t attachment = kLedAttachNone;
+    if (!settingsReadString(led["attach"], attach_name, 16) ||
+        !parseSettingsLedAttachment(attach_name, attachment) ||
+        !ledAttachmentAvailableIn(rt, attachment)) {
+      recordSettingsSkipped(stats, String(F("leds[")) + String(i) + F("].attach"));
+      continue;
+    }
+    target.led_attach[i] = attachment;
+    recordSettingsApplied(stats);
+  }
+}
+
+bool importSettingsRelay(JsonVariantConst value, const RuntimeTemplate &rt, uint8_t &relay) {
+  uint16_t relay_number = 0;
+  if (!settingsReadUint16(value, 1, kMaxRelays, relay_number)) return false;
+  const uint8_t parsed = static_cast<uint8_t>(relay_number - 1);
+  if (!relayAvailableIn(rt, parsed)) return false;
+  relay = parsed;
+  return true;
+}
+
+void importSettingsAction(JsonVariantConst value, StoredConfig &target, const RuntimeTemplate &rt,
+                          uint8_t button, bool hold, SettingsImportStats &stats, const String &field) {
+  JsonObjectConst action_object = value.as<JsonObjectConst>();
+  if (action_object.isNull() || !buttonAvailableIn(rt, button)) {
+    if (!value.isNull()) recordSettingsSkipped(stats, field);
+    return;
+  }
+
+  String action_name;
+  uint8_t action = kButtonActionNone;
+  if (!settingsReadString(action_object["action"], action_name, 24) ||
+      !parseSettingsActionName(action_name, action) ||
+      !buttonActionAvailableIn(rt, button, action)) {
+    recordSettingsSkipped(stats, field + F(".action"));
+    return;
+  }
+
+  uint8_t *actions = hold ? target.button_hold_action : target.button_press_action;
+  uint8_t *relays = hold ? target.button_hold_relay : target.button_press_relay;
+  char (*targets)[kButtonActionTargetMaxLen + 1] = hold ? target.button_hold_target : target.button_press_target;
+  char (*payloads)[kButtonActionPayloadMaxLen + 1] = hold ? target.button_hold_payload : target.button_press_payload;
+
+  uint8_t relay = relays[button];
+  if (action_object.containsKey("relay")) {
+    if (!importSettingsRelay(action_object["relay"], rt, relay)) {
+      recordSettingsSkipped(stats, field + F(".relay"));
+      relay = relays[button];
+    }
+  }
+
+  String target_text = targets[button];
+  String payload_text = payloads[button];
+  bool text_ok = true;
+  if (action == kButtonActionMqtt) {
+    if (action_object.containsKey("target")) {
+      text_ok = settingsReadString(action_object["target"], target_text, kButtonActionTargetMaxLen) &&
+                isValidMqttPublishTopicTemplate(target_text);
+    } else if (target_text.length() == 0) {
+      target_text = kDefaultButtonMqttTopic;
+    }
+    if (text_ok) {
+      if (action_object.containsKey("payload")) {
+        text_ok = settingsReadString(action_object["payload"], payload_text, kButtonActionPayloadMaxLen, false) &&
+                  isValidButtonActionText(payload_text, kButtonActionPayloadMaxLen, false, true);
+      } else if (payload_text.length() == 0) {
+        payload_text = hold ? kDefaultButtonMqttHoldPayload : kDefaultButtonMqttPressPayload;
+      }
+    }
+  } else if (action == kButtonActionWebhook) {
+    text_ok = action_object.containsKey("target") &&
+              settingsReadString(action_object["target"], target_text, kButtonActionTargetMaxLen) &&
+              isValidWebhookUrlTemplate(target_text);
+    if (text_ok && action_object.containsKey("payload")) {
+      text_ok = settingsReadString(action_object["payload"], payload_text, kButtonActionPayloadMaxLen, false) &&
+                isValidButtonActionText(payload_text, kButtonActionPayloadMaxLen, true, true);
+    }
+  } else {
+    if (action_object.containsKey("target")) {
+      text_ok = settingsReadString(action_object["target"], target_text, kButtonActionTargetMaxLen) &&
+                isValidButtonActionText(target_text, kButtonActionTargetMaxLen, true);
+    }
+    if (text_ok && action_object.containsKey("payload")) {
+      text_ok = settingsReadString(action_object["payload"], payload_text, kButtonActionPayloadMaxLen, false) &&
+                isValidButtonActionText(payload_text, kButtonActionPayloadMaxLen, true, true);
+    }
+  }
+
+  if (!text_ok) {
+    recordSettingsSkipped(stats, field + F(".text"));
+    return;
+  }
+
+  actions[button] = action;
+  relays[button] = relay;
+  strlcpy(targets[button], target_text.c_str(), kButtonActionTargetMaxLen + 1);
+  strlcpy(payloads[button], payload_text.c_str(), kButtonActionPayloadMaxLen + 1);
+  recordSettingsApplied(stats);
+}
+
+void importSettingsInputs(JsonObjectConst root, StoredConfig &target, const RuntimeTemplate &rt, SettingsImportStats &stats) {
+  JsonVariantConst inputs_value = root["inputs"];
+  if (inputs_value.isNull()) return;
+  JsonObjectConst inputs = inputs_value.as<JsonObjectConst>();
+  if (inputs.isNull()) {
+    recordSettingsSkipped(stats, F("inputs"));
+    return;
+  }
+
+  if (inputs.containsKey("hold_ms")) {
+    uint16_t hold_ms = kButtonHoldDefaultMs;
+    if (settingsReadUint16(inputs["hold_ms"], kButtonHoldMinMs, kButtonHoldMaxMs, hold_ms)) {
+      target.button_hold_ms = hold_ms;
+      recordSettingsApplied(stats);
+    } else {
+      recordSettingsSkipped(stats, F("inputs.hold_ms"));
+    }
+  }
+  if (inputs.containsKey("debounce_ms")) {
+    uint16_t debounce_ms = kButtonDebounceDefaultMs;
+    if (settingsReadUint16(inputs["debounce_ms"], kButtonDebounceMinMs, kButtonDebounceMaxMs, debounce_ms)) {
+      target.button_debounce_ms = debounce_ms;
+      recordSettingsApplied(stats);
+    } else {
+      recordSettingsSkipped(stats, F("inputs.debounce_ms"));
+    }
+  }
+
+  JsonVariantConst items_value = inputs["items"];
+  if (items_value.isNull()) return;
+  JsonArrayConst items = items_value.as<JsonArrayConst>();
+  if (items.isNull()) {
+    recordSettingsSkipped(stats, F("inputs.items"));
+    return;
+  }
+  const uint8_t count = min(static_cast<size_t>(kMaxButtons), items.size());
+  for (uint8_t i = 0; i < count; i++) {
+    JsonObjectConst item = items[i].as<JsonObjectConst>();
+    if (item.isNull()) {
+      if (!items[i].isNull()) recordSettingsSkipped(stats, String(F("inputs.items[")) + String(i) + F("]"));
+      continue;
+    }
+    if (!buttonAvailableIn(rt, i)) continue;
+
+    if (item.containsKey("mode")) {
+      String mode_name;
+      uint8_t mode = kInputModeUnset;
+      if (settingsReadString(item["mode"], mode_name, 24) && parseSettingsInputMode(mode_name, mode)) {
+        target.input_mode[i] = mode;
+        recordSettingsApplied(stats);
+        if (mode == kInputModeButton) {
+          target.input_relay[i] = i;
+          target.input_on_level[i] = kInputOnLevelUnset;
+        }
+      } else {
+        recordSettingsSkipped(stats, String(F("inputs.items[")) + String(i) + F("].mode"));
+      }
+    }
+
+    if (target.input_mode[i] == kInputModeSwitch) {
+      JsonVariantConst relay_value = item.containsKey("relay") ? item["relay"] : item["target_relay"];
+      if (!relay_value.isNull()) {
+        uint8_t relay = 0;
+        if (importSettingsRelay(relay_value, rt, relay)) {
+          target.input_relay[i] = relay;
+          recordSettingsApplied(stats);
+        } else {
+          recordSettingsSkipped(stats, String(F("inputs.items[")) + String(i) + F("].relay"));
+        }
+      }
+      if (item.containsKey("on_level")) {
+        String on_level;
+        if (settingsReadString(item["on_level"], on_level, 8) && (on_level == F("high") || on_level == F("low"))) {
+          target.input_on_level[i] = on_level == F("high") ? kInputOnLevelHigh : kInputOnLevelLow;
+          recordSettingsApplied(stats);
+        } else {
+          recordSettingsSkipped(stats, String(F("inputs.items[")) + String(i) + F("].on_level"));
+        }
+      } else if (item.containsKey("reverse")) {
+        JsonVariantConst reverse = item["reverse"];
+        if (reverse.is<bool>()) {
+          target.input_on_level[i] = reverse.as<bool>() ? kInputOnLevelLow : kInputOnLevelHigh;
+          recordSettingsApplied(stats);
+        } else {
+          recordSettingsSkipped(stats, String(F("inputs.items[")) + String(i) + F("].reverse"));
+        }
+      }
+    }
+
+    importSettingsAction(item["press"], target, rt, i, false, stats, String(F("inputs.items[")) + String(i) + F("].press"));
+    importSettingsAction(item["hold"], target, rt, i, true, stats, String(F("inputs.items[")) + String(i) + F("].hold"));
+  }
 }
 
 String ipToString(const IPAddress &ip) {
@@ -3860,6 +4573,7 @@ void appendFooter(String &page, bool live_poll = true, bool reboot_wait = false)
   page += F("function im(s){var k=s.getAttribute('data-input'),v=s.value,b=document.getElementById('input-button-'+k),w=document.getElementById('input-switch-'+k);if(b)b.className=v=='0'?'mode-extra show':'mode-extra';if(w)w.className=v=='1'?'mode-extra show':'mode-extra';}");
   page += F("function ts(){var s=document.getElementById('known-template'),t=document.getElementById('template-json');if(!s||!t)return;var v=t.value.trim(),m=0;for(var i=1;i<s.options.length;i++){if(s.options[i].getAttribute('data-json')==v){m=i;break;}}s.selectedIndex=m;}");
   page += F("function tp(s){var o=s.options[s.selectedIndex],t=document.getElementById('template-json');if(o&&t&&o.getAttribute('data-json')){t.value=o.getAttribute('data-json');ts();}}");
+  page += F("function sf(i){var t=document.getElementById('settings-json');if(!i.files||!i.files[0]||!t)return;var r=new FileReader();r.onload=function(){t.value=String(r.result||'');};r.readAsText(i.files[0]);}");
   page += F("function bi(){var a=document.querySelectorAll('.button-action');for(var i=0;i<a.length;i++){a[i].onchange=function(){ba(this)};ba(a[i]);}var m=document.querySelectorAll('.input-mode');for(var j=0;j<m.length;j++){m[j].onchange=function(){im(this)};im(m[j]);}var t=document.getElementById('template-json');if(t){t.oninput=ts;t.onchange=ts;}ts();}bi();");
   page += F("document.addEventListener('click',function(e){var b=e.target;while(b&&b.tagName!='BUTTON'&&b.tagName!='INPUT')b=b.parentNode;if(!b||!b.form)return;var t=(b.type||'').toLowerCase();if(t=='submit'||t=='image')b.form._s=b;},true);");
   page += F("document.addEventListener('submit',function(e){var f=e.target;if(!f||f.getAttribute('data-inline')!='1')return;e.preventDefault();var fd=new FormData(f),b=e.submitter||f._s;if(b&&b.name)fd.append(b.name,b.value);fd.append('_inline','1');fetch(f.getAttribute('action')||location.pathname,{method:(f.method||'POST').toUpperCase(),body:fd,cache:'no-store'}).then(function(r){if(!r.ok)return r.text().then(function(x){throw Error(x||r.statusText)});live();}).catch(function(x){alert(x.message||x);});},true);");
@@ -4425,6 +5139,18 @@ void appendMqttForm(String &page) {
   page += F("'></label></div><button type='submit'>Save MQTT</button></form></section>");
 }
 
+void appendSettingsForm(String &page) {
+  page += F("<section class='panel wide'><h2>Settings</h2>");
+  page += F("<p><a class='btn secondary' href='/settings/export'>Export settings</a></p>");
+  page += F("<form method='post' action='/settings/import'>");
+  page += F("<div class='row'><label>Import settings JSON<br><input type='file' accept='application/json,.json' onchange='sf(this)'></label></div>");
+  page += F("<div class='row'><label>Settings JSON<br><textarea id='settings-json' name='settings_json' rows='8' maxlength='");
+  page += String(kSettingsImportJsonMaxLen);
+  page += F("'></textarea></label></div>");
+  page += F("<p class='hint'>Wi-Fi SSID, password, hostname, and PHY mode are not exported or imported.</p>");
+  page += F("<button type='submit'>Import settings</button></form></section>");
+}
+
 void appendPhyModeOption(String &page, uint8_t mode) {
   page += F("<option value='");
   page += String(mode);
@@ -4484,6 +5210,9 @@ void handleRoot() {
   page += F("<input type='file' name='firmware' accept='.bin,.bin.gz' required><br><button type='submit'>Upload firmware</button></form>");
   page += F("<p><a class='btn secondary' href='/reboot'>Reboot</a></p>");
   page += F("<form method='post' action='/factory-reset' onsubmit=\"return confirm('Factory reset will delete Wi-Fi, template, MQTT, input, LED, and energy settings. Continue?')\"><button class='danger' type='submit'>Factory reset</button></form></section>");
+  flushStreamChunk(page);
+
+  appendSettingsForm(page);
   flushStreamChunk(page);
 
   appendTemplateForm(page);
@@ -5096,6 +5825,140 @@ void handleFactoryReset() {
   scheduleRestart(800);
 }
 
+void handleSettingsExport() {
+  String out;
+  out.reserve(5200);
+  appendSettingsExportJson(out);
+  String disposition = F("attachment; filename=\"mymota-settings-");
+  disposition += chipIdHex();
+  disposition += F(".json\"");
+  server.sendHeader(F("Cache-Control"), F("no-store"));
+  server.sendHeader(F("Content-Disposition"), disposition);
+  server.send(200, F("application/json"), out);
+}
+
+void appendSettingsImportSummary(String &page, const SettingsImportStats &stats) {
+  page += F("<p><code>");
+  page += String(stats.applied);
+  page += F("</code> setting fields imported");
+  if (stats.skipped > 0) {
+    page += F(", <code>");
+    page += String(stats.skipped);
+    page += F("</code> skipped.</p><p class='hint'>Skipped: ");
+    page += htmlEscape(stats.skipped_fields);
+    page += F("</p>");
+  } else {
+    page += F(".</p>");
+  }
+}
+
+void handleSettingsImport() {
+  String settings_json = server.arg("settings_json");
+  if (settings_json.length() == 0 && server.hasArg("plain")) {
+    settings_json = server.arg("plain");
+  }
+  settings_json.trim();
+  if (settings_json.length() == 0) {
+    server.send(400, F("text/plain"), F("Settings JSON is empty"));
+    return;
+  }
+  if (settings_json.length() > kSettingsImportJsonMaxLen) {
+    server.send(400, F("text/plain"), F("Settings JSON is too large"));
+    return;
+  }
+
+  DynamicJsonDocument doc(kSettingsImportDocCapacity);
+  const DeserializationError json_error = deserializeJson(doc, settings_json);
+  if (json_error) {
+    String msg = F("Settings JSON parse failed: ");
+    msg += json_error.c_str();
+    server.send(400, F("text/plain"), msg);
+    return;
+  }
+
+  JsonObjectConst root = doc.as<JsonObjectConst>();
+  if (root.isNull()) {
+    server.send(400, F("text/plain"), F("Settings JSON root must be an object"));
+    return;
+  }
+
+  const char *format = root["format"] | "";
+  if (strcmp(format, "mymota-settings") != 0) {
+    server.send(400, F("text/plain"), F("Unsupported settings format"));
+    return;
+  }
+  uint16_t format_version = 0;
+  if (!settingsReadUint16(root["format_version"], 1, 65535U, format_version) ||
+      format_version != kSettingsFormatVersion) {
+    server.send(400, F("text/plain"), F("Unsupported settings format version"));
+    return;
+  }
+
+  StoredConfig before = config;
+  StoredConfig candidate = config;
+  SettingsImportStats stats = {0, 0, String()};
+
+  importSettingsTemplate(root, candidate, stats);
+  RuntimeTemplate candidate_runtime{};
+  decodeTemplateConfigInto(candidate, candidate_runtime);
+  importSettingsMqtt(root, candidate, stats);
+  importSettingsEnergy(root, candidate, stats);
+  importSettingsLeds(root, candidate, candidate_runtime, stats);
+  importSettingsInputs(root, candidate, candidate_runtime, stats);
+
+  String page;
+  page.reserve(1200);
+  appendHeader(page, F("myMota Settings"));
+  if (stats.applied == 0) {
+    page += F("<p class='bad'>No valid settings were imported.</p>");
+    appendSettingsImportSummary(page, stats);
+    page += F("<p><a href='/'>Back</a></p>");
+    appendFooter(page);
+    sendHtml(page);
+    return;
+  }
+
+  const bool template_changed = templatesDiffer(before, candidate);
+  const bool mqtt_changed = mqttConfigDiffers(before, candidate);
+  const bool energy_changed = energyConfigDiffers(before, candidate);
+  const bool led_changed = ledConfigDiffers(before, candidate);
+  const bool input_changed = inputConfigDiffers(before, candidate);
+
+  config = candidate;
+  if (!commitConfig()) {
+    config = before;
+    server.send(500, F("text/plain"), F("Could not save imported settings"));
+    return;
+  }
+
+  if (template_changed) {
+    decodeTemplateConfig();
+    page += F("<p class='ok'>Settings imported. Rebooting.</p>");
+    appendSettingsImportSummary(page, stats);
+    if (runtime_template.unsupported_count) {
+      page += F("<p class='bad'>The imported template contains unsupported GPIO functions. Check the Template section after reboot.</p>");
+    }
+    page += F("<p>The page will return to the dashboard when the device is reachable again.</p>");
+    appendFooter(page, false, true);
+    sendHtml(page);
+    scheduleRestart(1200);
+    return;
+  }
+
+  if (mqtt_changed) resetMqttRuntimeState();
+  if (energy_changed) {
+    last_mqtt_energy_publish = 0;
+    last_mqtt_energy_power = NAN;
+  }
+  if (led_changed || input_changed) updateDeviceLeds(true);
+
+  page += F("<p class='ok'>Settings imported.</p>");
+  appendSettingsImportSummary(page, stats);
+  page += F("<p><a href='/'>Back</a></p>");
+  appendFooter(page);
+  sendHtml(page);
+}
+
 void handleHealth() {
   String out;
   out.reserve(kJsonStreamChunkReserve);
@@ -5526,11 +6389,27 @@ void startAp() {
   ap_started = WiFi.softAP(ap_name.c_str());
 }
 
+void stopAp() {
+  if (!ap_started) return;
+  if (WiFi.softAPdisconnect(true)) {
+    ap_started = false;
+    last_ap_attempt = 0;
+  }
+}
+
 void applyPhyMode(uint8_t phy_mode) {
   phy_mode = sanitizePhyMode(phy_mode);
   if (phy_mode != kPhyModeAuto) {
     WiFi.setPhyMode(static_cast<WiFiPhyMode_t>(phy_mode));
   }
+}
+
+void beginWifiReconnect(uint32_t now) {
+  if (!config_ok || WiFi.status() == WL_CONNECTED) return;
+  WiFi.mode(ap_started ? WIFI_AP_STA : WIFI_STA);
+  applyPhyMode(config.phy_mode);
+  WiFi.begin(config.ssid, config.password);
+  last_wifi_begin_attempt = now;
 }
 
 bool waitForWifi(uint32_t timeout_ms) {
@@ -5548,6 +6427,7 @@ bool connectWifiWithPhy(uint8_t phy_mode, uint32_t timeout_ms) {
   WiFi.mode(WIFI_STA);
   applyPhyMode(phy_mode);
   WiFi.begin(config.ssid, config.password);
+  last_wifi_begin_attempt = millis();
   return waitForWifi(timeout_ms);
 }
 
@@ -5569,19 +6449,20 @@ void connectWifi() {
     return;
   }
 
+  disconnected_since = millis();
+  disconnected_timer_active = true;
   if (connectWifiWithPhy(config.phy_mode, kConnectTimeoutMs)) {
+    sta_connected_once = true;
     return;
   }
 
   if (WiFi.status() != WL_CONNECTED) {
     if (config.phy_mode != kPhyModeAuto && config.phy_mode != kPhyModeFailsafe) {
       if (connectWifiWithPhy(kPhyModeFailsafe, kConnectTimeoutMs)) {
+        sta_connected_once = true;
         return;
       }
     }
-    startAp();
-    disconnected_since = millis();
-    disconnected_timer_active = true;
   }
 }
 
@@ -5598,6 +6479,8 @@ void setupRoutes() {
   server.on(F("/cm"), HTTP_GET, handleCmnd);
   server.on(F("/reboot"), HTTP_GET, handleReboot);
   server.on(F("/factory-reset"), HTTP_POST, handleFactoryReset);
+  server.on(F("/settings/export"), HTTP_GET, handleSettingsExport);
+  server.on(F("/settings/import"), HTTP_POST, handleSettingsImport);
   server.on(F("/health"), HTTP_GET, handleHealth);
   server.on(F("/update"), HTTP_POST, handleUpdateDone, handleUpdateUpload);
   server.onNotFound(handleNotFound);
@@ -5609,15 +6492,23 @@ void maintainWifi() {
     return;
   }
   if (WiFi.status() == WL_CONNECTED) {
+    sta_connected_once = true;
+    stopAp();
     disconnected_since = 0;
     disconnected_timer_active = false;
+    last_wifi_begin_attempt = 0;
     return;
   }
+  const uint32_t now = millis();
   if (!disconnected_timer_active) {
-    disconnected_since = millis();
+    disconnected_since = now;
     disconnected_timer_active = true;
+    last_wifi_begin_attempt = now;
   }
-  if (!ap_started && millis() - disconnected_since > kReconnectStartApMs) {
+  if (now - last_wifi_begin_attempt >= kWifiReconnectBeginMs) {
+    beginWifiReconnect(now);
+  }
+  if (!sta_connected_once && !ap_started && now - disconnected_since >= kInitialFallbackApMs) {
     startAp();
   }
 }
