@@ -422,6 +422,7 @@ bool update_started = false;
 bool update_ok = false;
 uint8_t update_error = UPDATE_ERROR_OK;
 uint32_t restart_at = 0;
+bool restart_pending = false;
 uint32_t disconnected_since = 0;
 uint32_t last_ap_attempt = 0;
 uint32_t last_led_update = 0;
@@ -579,6 +580,15 @@ void setDefaultConfig() {
 }
 
 bool commitConfig();
+
+void scheduleRestart(uint32_t delay_ms) {
+  restart_at = millis() + delay_ms;
+  restart_pending = true;
+}
+
+bool restartDue() {
+  return restart_pending && static_cast<int32_t>(millis() - restart_at) >= 0;
+}
 
 bool loadBootRecoveryState(BootRecoveryState &state) {
   EEPROM.get(kBootRecoveryOffset, state);
@@ -3037,7 +3047,7 @@ void handleWifiSave() {
   page += F("<p class='muted'>If Wi-Fi or IP changed, reconnect to the device manually.</p>");
   appendFooter(page, false, true);
   sendHtml(page);
-  restart_at = millis() + 1200;
+  scheduleRestart(1200);
 }
 
 void handleTemplateSave() {
@@ -3055,7 +3065,7 @@ void handleTemplateSave() {
     page += F("<p>The page will return to the dashboard when the device is reachable again.</p>");
     appendFooter(page, false, true);
     sendHtml(page);
-    restart_at = millis() + 1200;
+    scheduleRestart(1200);
     return;
   }
 
@@ -3099,7 +3109,7 @@ void handleTemplateSave() {
   page += F("<p>The page will return to the dashboard when the device is reachable again.</p>");
   appendFooter(page, false, true);
   sendHtml(page);
-  restart_at = millis() + 1200;
+  scheduleRestart(1200);
 }
 
 void handleMqttSave() {
@@ -3453,7 +3463,7 @@ void handleReboot() {
   page += F("<p>The page will return to the dashboard when the device is reachable again.</p>");
   appendFooter(page, false, true);
   sendHtml(page);
-  restart_at = millis() + 500;
+  scheduleRestart(500);
 }
 
 void handleFactoryReset() {
@@ -3471,7 +3481,7 @@ void handleFactoryReset() {
   page += F("<p>All saved settings have been cleared. After reboot, use the setup AP if the device does not return on this address.</p>");
   appendFooter(page, false, true);
   sendHtml(page);
-  restart_at = millis() + 800;
+  scheduleRestart(800);
 }
 
 void handleHealth() {
@@ -3672,7 +3682,7 @@ void handleUpdateDone() {
     page += F("<p>The page will return to the dashboard when the device is reachable again.</p>");
     appendFooter(page, false, true);
     sendHtml(page);
-    restart_at = millis() + 1200;
+    scheduleRestart(1200);
     return;
   }
 
@@ -3906,7 +3916,7 @@ void loop() {
   maintainDevice();
   maintainMqtt();
 
-  if (restart_at && millis() > restart_at) {
+  if (restartDue()) {
     delay(50);
     ESP.restart();
   }
