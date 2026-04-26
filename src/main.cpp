@@ -288,6 +288,7 @@ uint32_t next_mqtt_reconnect = 0;
 uint32_t last_mqtt_io = 0;
 uint32_t last_mqtt_state_publish = 0;
 uint16_t mqtt_pending_relay_mask = 0;
+uint32_t boot_id = 0;
 uint8_t boot_recovery_count = 0;
 bool boot_recovery_armed = false;
 bool boot_recovery_factory_reset = false;
@@ -1605,24 +1606,27 @@ void appendHeader(String &page, const __FlashStringHelper *title) {
   page += F("</title><style>:root{--bg:#f6f7f9;--panel:#fff;--line:#d8dee8;--text:#17202a;--muted:#687386;--ok:#177245;--bad:#a23a36;--accent:#1f7a5f;--accent2:#205c8a}");
   page += F("*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,sans-serif;font-size:15px;line-height:1.4}");
   page += F(".top{background:#17202a;color:#fff;border-bottom:4px solid var(--accent);padding:18px 16px}.topin{max-width:1080px;margin:0 auto;display:flex;align-items:end;justify-content:space-between;gap:12px;flex-wrap:wrap}");
-  page += F(".brand{font-size:28px;font-weight:700;letter-spacing:0}.brand span{color:#7dd3aa}.sub{color:#c7d0dc;font-size:13px}main{max-width:1080px;margin:18px auto 28px;padding:0 14px}");
+  page += F(".brand{font-size:28px;font-weight:700;letter-spacing:0}.brand span{color:#7dd3aa}.sub{color:#c7d0dc;font-size:13px}.meta{display:flex;align-items:center;gap:8px}");
+  page += F(".spin{width:13px;height:13px;border:2px solid rgba(255,255,255,.35);border-top-color:#7dd3aa;border-radius:50%;opacity:.55}.spin.active{opacity:1;animation:rot .7s linear infinite}@keyframes rot{to{transform:rotate(360deg)}}main{max-width:1080px;margin:18px auto 28px;padding:0 14px}");
   page += F(".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;box-shadow:0 1px 2px rgba(0,0,0,.04)}.wide{grid-column:1/-1}");
   page += F(".panel h2{font-size:17px;margin:0 0 12px}.kv{display:grid;grid-template-columns:minmax(110px,42%) 1fr;gap:8px 12px}.kv span,.hint{color:var(--muted)}.kv div{min-width:0}");
   page += F("code{background:#eef2f6;border:1px solid #dce3ea;border-radius:4px;padding:1px 4px;word-break:break-word}.pill{display:inline-block;border-radius:999px;padding:2px 8px;background:#eef2f6;color:#364152}.ok{color:var(--ok)}.bad{color:var(--bad)}.muted{color:var(--muted)}");
   page += F("form{margin:0}.row{margin:10px 0}label{display:block;font-weight:600;color:#344054}input,button,select,textarea{font:inherit}input,select,textarea{width:100%;margin-top:4px;padding:9px;border:1px solid #b9c4d0;border-radius:6px;background:#fff}textarea{min-height:92px;resize:vertical}");
   page += F("button,.btn{display:inline-block;margin:4px 4px 0 0;padding:8px 12px;border:1px solid var(--accent);border-radius:6px;background:var(--accent);color:#fff;text-decoration:none;cursor:pointer}.secondary{background:#fff;color:var(--accent2);border-color:#9eb7cf}.danger{background:#fff;color:var(--bad);border-color:#d4aaa7}.inline{display:inline}.actions{display:flex;flex-wrap:wrap;gap:6px}.inline button{margin:0 4px 0 0}.list{margin:0;padding-left:18px}@media(max-width:520px){.kv{grid-template-columns:1fr}.brand{font-size:24px}}</style></head><body>");
-  page += F("<header class='top'><div class='topin'><div><div class='brand'>my<span>Mota</span></div><div class='sub'>ESP8266/ESP8285 firmware</div></div><div class='sub'>");
+  page += F("<header class='top'><div class='topin'><div><div class='brand'>my<span>Mota</span></div><div class='sub'>ESP8266/ESP8285 firmware</div></div><div class='sub meta'><span>");
   page += F(MYMOTA_VERSION);
   page += F(" / ");
   page += F(MYMOTA_TARGET);
-  page += F("</div></div></header><main>");
+  page += F("</span><span id='poll-spin' class='spin'></span></div></div></header><main>");
 }
 
-void appendFooter(String &page) {
-  page += F("<script>function t(i,v){var e=document.getElementById(i);if(e)e.textContent=v;}");
+void appendFooter(String &page, bool live_poll = true, bool reboot_wait = false) {
+  page += F("<script>function sp(a){var e=document.getElementById('poll-spin');if(e)e.className=a?'spin active':'spin';}");
+  page += F("function fh(){sp(1);return fetch('/health',{cache:'no-store'}).then(function(r){sp(0);if(!r.ok)throw Error();return r.json();},function(e){sp(0);throw e;});}");
+  page += F("function t(i,v){var e=document.getElementById(i);if(e)e.textContent=v;}");
   page += F("function p(i,v,c){var e=document.getElementById(i);if(e){e.textContent=v;e.className=c;}}");
   page += F("function fmt(v,d,u){return v==null?'n/a':Number(v).toFixed(d)+(u||'');}");
-  page += F("function live(){fetch('/health',{cache:'no-store'}).then(function(r){return r.json();}).then(function(d){");
+  page += F("function live(){fh().then(function(d){");
   page += F("t('live-heap',d.heap+' bytes');t('live-uptime',d.uptime+'s');t('live-active-phy',d.active_phy);");
   page += F("t('live-recovery',d.recovery.fast_boot_count+'/'+d.recovery.limit);");
   page += F("p('live-wifi',d.wifi?'connected':'not connected',d.wifi?'pill ok':'pill bad');t('live-ssid',d.wifi_ssid||'n/a');t('live-ip',d.ip||'n/a');t('live-rssi',d.rssi==null?'n/a':d.rssi+' dBm');");
@@ -1630,7 +1634,16 @@ void appendFooter(String &page) {
   page += F("if(d.power){for(var i=0;i<d.power.length;i++){if(d.power[i]!==null)p('live-relay-'+i,d.power[i]?'on':'off',d.power[i]?'pill ok':'pill');}}");
   page += F("if(d.energy){t('live-energy-power',fmt(d.energy.power,1,' W'));t('live-energy-voltage',fmt(d.energy.voltage,1,' V'));t('live-energy-current',fmt(d.energy.current,3,' A'));t('live-energy-total',fmt(d.energy.total_kwh,4,' kWh'));t('live-energy-offset',fmt(d.energy.offset_kwh,4,' kWh'));}");
   page += F("t('live-temp',d.temperature_c==null?'n/a':Number(d.temperature_c).toFixed(1)+' C');t('live-adc-raw',d.adc_raw==null?'n/a':d.adc_raw);");
-  page += F("}).catch(function(){});}setInterval(live,1000);live();</script></main></body></html>");
+  page += F("}).catch(function(){});}");
+  if (live_poll) {
+    page += F("setInterval(live,1000);live();");
+  }
+  if (reboot_wait) {
+    page += F("var rb=");
+    page += String(boot_id);
+    page += F(";function rw(){fh().then(function(d){if(d.boot_id==null||d.boot_id!=rb)location.href='/';else setTimeout(rw,1000);}).catch(function(){setTimeout(rw,1000);});}setTimeout(rw,4000);");
+  }
+  page += F("</script></main></body></html>");
 }
 
 void sendHtml(String &page) {
@@ -1973,8 +1986,9 @@ void handleWifiSave() {
   page.reserve(800);
   appendHeader(page, F("myMota Wi-Fi"));
   page += F("<p class='ok'>Wi-Fi settings saved. Rebooting.</p>");
-  page += F("<p>Reconnect to the device after it joins the configured network.</p>");
-  appendFooter(page);
+  page += F("<p>The page will return to the dashboard when the device is reachable again.</p>");
+  page += F("<p class='muted'>If Wi-Fi or IP changed, reconnect to the device manually.</p>");
+  appendFooter(page, false, true);
   sendHtml(page);
   restart_at = millis() + 1200;
 }
@@ -1991,7 +2005,8 @@ void handleTemplateSave() {
     page.reserve(700);
     appendHeader(page, F("myMota Template"));
     page += F("<p class='ok'>Template cleared. Rebooting.</p>");
-    appendFooter(page);
+    page += F("<p>The page will return to the dashboard when the device is reachable again.</p>");
+    appendFooter(page, false, true);
     sendHtml(page);
     restart_at = millis() + 1200;
     return;
@@ -2027,7 +2042,8 @@ void handleTemplateSave() {
   if (runtime_template.unsupported_count) {
     page += F("<p class='bad'>The template contains unsupported GPIO functions. Check the Template section after reboot.</p>");
   }
-  appendFooter(page);
+  page += F("<p>The page will return to the dashboard when the device is reachable again.</p>");
+  appendFooter(page, false, true);
   sendHtml(page);
   restart_at = millis() + 1200;
 }
@@ -2182,20 +2198,28 @@ void handleCmnd() {
 }
 
 void handleReboot() {
-  server.send(200, F("text/plain"), F("Rebooting\n"));
+  String page;
+  page.reserve(700);
+  appendHeader(page, F("myMota Reboot"));
+  page += F("<p class='ok'>Rebooting.</p>");
+  page += F("<p>The page will return to the dashboard when the device is reachable again.</p>");
+  appendFooter(page, false, true);
+  sendHtml(page);
   restart_at = millis() + 500;
 }
 
 void handleHealth() {
   String out;
-  out.reserve(1600);
+  out.reserve(1650);
   out += F("{\"name\":\"myMota\",\"version\":\"");
   out += F(MYMOTA_VERSION);
   out += F("\",\"target\":\"");
   out += F(MYMOTA_TARGET);
   out += F("\",\"chip\":\"");
   out += chipIdHex();
-  out += F("\",\"heap\":");
+  out += F("\",\"boot_id\":");
+  out += boot_id;
+  out += F(",\"heap\":");
   out += ESP.getFreeHeap();
   out += F(",\"uptime\":");
   out += millis() / 1000;
@@ -2314,7 +2338,8 @@ void handleUpdateDone() {
     page.reserve(700);
     appendHeader(page, F("myMota Update"));
     page += F("<p class='ok'>Firmware uploaded. Rebooting.</p>");
-    appendFooter(page);
+    page += F("<p>The page will return to the dashboard when the device is reachable again.</p>");
+    appendFooter(page, false, true);
     sendHtml(page);
     restart_at = millis() + 1200;
     return;
@@ -2530,6 +2555,8 @@ void setup() {
   decodeTemplateConfig();
   setupDevicePins();
   connectWifi();
+  boot_id = ESP.getCycleCount() ^ micros() ^ ESP.getChipId();
+  if (boot_id == 0) boot_id = ESP.getChipId();
   setupRoutes();
   server.begin();
 
