@@ -89,6 +89,8 @@ constexpr uint32_t kWebhookFlushTimeoutMs = 50;
 constexpr uint32_t kWebhookResponseTimeoutMs = 100;
 constexpr uint32_t kWebhookStopTimeoutMs = 25;
 constexpr uint8_t kWebhookEmptyReadLimit = 2;
+constexpr size_t kHtmlStreamChunkReserve = 5200;
+constexpr size_t kJsonStreamChunkReserve = 900;
 constexpr const char *kDefaultButtonMqttTopic = "stat/{TOPIC}/RESULT";
 constexpr const char *kDefaultButtonMqttPressPayload = "{\"Switch{BUTTONID}\":{\"Action\":\"{TYPE}\"}}";
 constexpr const char *kDefaultButtonMqttHoldPayload = "{\"Switch{BUTTONID}\":{\"Action\":\"{TYPE}\"}}";
@@ -2616,6 +2618,24 @@ void sendHtml(String &page) {
   server.send(200, F("text/html"), page);
 }
 
+void beginStreamedResponse(const char *content_type) {
+  server.sendHeader(F("Cache-Control"), F("no-store"));
+  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server.send(200, content_type, String());
+}
+
+void flushStreamChunk(String &chunk) {
+  if (chunk.length() == 0) return;
+  server.sendContent(chunk);
+  chunk.remove(0);
+  delay(0);
+}
+
+void endStreamedResponse(String &chunk) {
+  flushStreamChunk(chunk);
+  server.chunkedResponseFinalize();
+}
+
 void appendStatusBlock(String &page) {
   page += F("<section class='panel wide'><h2>System Status</h2><div class='kv'>");
   page += F("<span>Version</span><div><code>");
@@ -3029,15 +3049,23 @@ void appendPhyModeSelect(String &page) {
 
 void handleRoot() {
   String page;
-  page.reserve(17000);
+  page.reserve(kHtmlStreamChunkReserve);
+  beginStreamedResponse("text/html");
   appendHeader(page, F("myMota"), true);
   page += F("<div class='grid'>");
+  flushStreamChunk(page);
   appendStatusBlock(page);
+  flushStreamChunk(page);
   appendTemplateStatus(page);
+  flushStreamChunk(page);
   appendDeviceControls(page);
+  flushStreamChunk(page);
   appendButtonSettings(page);
+  flushStreamChunk(page);
   appendLedSettings(page);
+  flushStreamChunk(page);
   appendMqttStatus(page);
+  flushStreamChunk(page);
   page += F("<section class='panel'><h2>Wi-Fi</h2><form method='post' action='/wifi'>");
   page += F("<div class='row'><label>SSID<br><input name='ssid' maxlength='32' required value='");
   page += htmlEscape(config.ssid);
@@ -3050,16 +3078,20 @@ void handleRoot() {
   appendPhyModeSelect(page);
   page += F("<button type='submit'>Save Wi-Fi</button></form>");
   page += F("<p><a class='btn secondary' href='/scan'>Scan networks</a></p></section>");
+  flushStreamChunk(page);
 
   appendTemplateForm(page);
+  flushStreamChunk(page);
   appendMqttForm(page);
+  flushStreamChunk(page);
 
   page += F("<section class='panel'><h2>Firmware</h2><form method='post' action='/update' enctype='multipart/form-data'>");
   page += F("<input type='file' name='firmware' accept='.bin,.bin.gz' required><br><button type='submit'>Upload firmware</button></form>");
   page += F("<p><a class='btn secondary' href='/reboot'>Reboot</a></p>");
   page += F("<form method='post' action='/factory-reset' onsubmit=\"return confirm('Factory reset will delete Wi-Fi, template, MQTT, button, LED, and energy settings. Continue?')\"><button class='danger' type='submit'>Factory reset</button></form></section></div>");
+  flushStreamChunk(page);
   appendFooter(page);
-  sendHtml(page);
+  endStreamedResponse(page);
 }
 
 void handleScan() {
@@ -3586,7 +3618,8 @@ void handleFactoryReset() {
 
 void handleHealth() {
   String out;
-  out.reserve(2500);
+  out.reserve(kJsonStreamChunkReserve);
+  beginStreamedResponse("application/json");
   out += F("{\"name\":\"myMota\",\"version\":\"");
   out += F(MYMOTA_VERSION);
   out += F("\",\"target\":\"");
@@ -3628,6 +3661,7 @@ void handleHealth() {
   out += F(",\"factory_reset\":");
   out += (boot_recovery_factory_reset ? F("true") : F("false"));
   out += F("}");
+  flushStreamChunk(out);
   out += F(",\"mqtt\":{\"enabled\":");
   out += (config.mqtt_host[0] ? F("true") : F("false"));
   out += F(",\"connected\":");
@@ -3653,6 +3687,7 @@ void handleHealth() {
     out += millis() - last_mqtt_connect_attempt;
   }
   out += F("}");
+  flushStreamChunk(out);
   out += F(",\"template\":{\"enabled\":");
   if (runtime_template.enabled) {
     out += F("true");
@@ -3683,6 +3718,7 @@ void handleHealth() {
     }
   }
   out += F("]");
+  flushStreamChunk(out);
   out += F(",\"button_hold_ms\":");
   out += config.button_hold_ms;
   out += F(",\"buttons\":[");
@@ -3703,6 +3739,7 @@ void handleHealth() {
     }
   }
   out += F("]");
+  flushStreamChunk(out);
   out += F(",\"leds\":[");
   first = true;
   for (uint8_t i = 0; i < kMaxLedOutputs; i++) {
@@ -3719,6 +3756,7 @@ void handleHealth() {
     }
   }
   out += F("]");
+  flushStreamChunk(out);
   out += F(",\"energy\":");
   if (energy.present) {
     out += F("{\"voltage\":");
@@ -3756,6 +3794,7 @@ void handleHealth() {
   } else {
     out += F("null");
   }
+  flushStreamChunk(out);
   out += F(",\"temperature_c\":");
   if (runtime_template.adc_temp && !isnan(adc_temperature_c)) {
     out += String(adc_temperature_c, 1);
@@ -3769,8 +3808,7 @@ void handleHealth() {
     out += F("null");
   }
   out += F("}");
-  server.sendHeader(F("Cache-Control"), F("no-store"));
-  server.send(200, F("application/json"), out);
+  endStreamedResponse(out);
 }
 
 void handleUpdateDone() {
