@@ -6,6 +6,7 @@
 #include <Updater.h>
 #include <WiFiUdp.h>
 #include <math.h>
+#include <stddef.h>
 
 extern "C" {
 #include <user_interface.h>
@@ -519,11 +520,22 @@ uint32_t fnv1a(const uint8_t *data, size_t len) {
   return hash;
 }
 
+uint32_t fnv1aUpdate(uint32_t hash, uint8_t value) {
+  hash ^= value;
+  hash *= 16777619UL;
+  return hash;
+}
+
 template <typename ConfigT>
 uint32_t configCrc(const ConfigT &cfg) {
-  ConfigT tmp = cfg;
-  tmp.crc = 0;
-  return fnv1a(reinterpret_cast<const uint8_t *>(&tmp), sizeof(tmp));
+  const uint8_t *data = reinterpret_cast<const uint8_t *>(&cfg);
+  const size_t crc_offset = offsetof(ConfigT, crc);
+  uint32_t hash = 2166136261UL;
+  for (size_t i = 0; i < sizeof(ConfigT); i++) {
+    const bool crc_byte = i >= crc_offset && i < crc_offset + sizeof(cfg.crc);
+    hash = fnv1aUpdate(hash, crc_byte ? 0 : data[i]);
+  }
+  return hash;
 }
 
 uint8_t sanitizePhyMode(uint8_t mode) {
