@@ -26,6 +26,7 @@ namespace {
 
 constexpr uint32_t kConfigMagic = 0x4d594d4f;  // MYMO
 constexpr uint32_t kBootRecoveryMagic = 0x4d595246;  // MYRF
+constexpr uint32_t kEnergyJournalMagic = 0x4d59454a;  // MYEJ
 constexpr uint16_t kConfigVersionV1 = 1;
 constexpr uint16_t kConfigVersionV2 = 2;
 constexpr uint16_t kConfigVersionV3 = 3;
@@ -37,6 +38,8 @@ constexpr uint16_t kConfigVersionV8 = 8;
 constexpr uint16_t kConfigVersionV9 = 9;
 constexpr uint16_t kConfigVersion = 10;
 constexpr size_t kEepromSize = 4096;
+constexpr size_t kFlashSectorSize = 4096;
+constexpr uint8_t kEnergyJournalSectorCount = 2;
 constexpr size_t kBootRecoveryOffset = 3072;
 constexpr uint32_t kConnectTimeoutMs = 20000;
 constexpr uint32_t kReconnectStartApMs = 90000;
@@ -86,6 +89,10 @@ constexpr uint32_t kAdcUpdateMs = 2000;
 constexpr uint32_t kEnergyUpdateMs = 200;
 constexpr uint32_t kEnergyIntegrateMs = 1000;
 constexpr uint32_t kEnergyReportBootSettleMs = 5000;
+constexpr uint16_t kEnergyJournalVersion = 1;
+constexpr uint32_t kEnergyPersistMinMs = 600000;
+constexpr uint64_t kEnergyPersistDeltaUkwh = 10000;
+constexpr uint64_t kEnergyTotalMaxUkwh = 1000000000000ULL;
 constexpr float kEnergyTotalOffsetMinKwh = 0.0f;
 constexpr float kEnergyTotalOffsetMaxKwh = 1000000.0f;
 constexpr uint8_t kLedAttachNone = 0;
@@ -459,6 +466,18 @@ struct EnergyState {
   float total_kwh;
 };
 
+struct EnergyJournalRecord {
+  uint32_t magic;
+  uint16_t version;
+  uint16_t size;
+  uint32_t sequence;
+  uint64_t total_ukwh;
+  uint32_t crc;
+  uint32_t reserved;
+};
+
+static_assert(sizeof(EnergyJournalRecord) % sizeof(uint32_t) == 0, "Energy journal records must be word aligned");
+
 ESP8266WebServer server(80);
 WiFiClient mqtt_client;
 StoredConfig config{};
@@ -506,6 +525,13 @@ bool boot_recovery_armed = false;
 bool boot_recovery_factory_reset = false;
 bool relay_state[kMaxRelays]{};
 bool energy_report_boot_settled = false;
+bool energy_journal_loaded = false;
+uint8_t energy_journal_sector = 0;
+uint8_t energy_journal_next_slot = 0;
+uint32_t energy_journal_sequence = 0;
+uint32_t last_energy_persist_ms = 0;
+uint64_t energy_journal_saved_ukwh = 0;
+bool energy_persist_requested = false;
 float adc_temperature_c = NAN;
 uint16_t adc_raw = 0;
 
@@ -679,7 +705,186 @@ uint32_t makeBootId() {
 }
 
 uint32_t eepromFlashBase() {
-  return ((reinterpret_cast<uint32_t>(&_EEPROM_start) - 0x40200000UL) / kEepromSize) * kEepromSize;
+  return ((reinterpret_cast<uint32_t>(&_EEPROM_start) - 0x40200000UL) / kFlashSectorSize) * kFlashSectorSize;
+}
+
+uint32_t energyJournalFlashBase() {
+  // Use the last two filesystem-reserved sectors immediately before EEPROM.
+  // myMota does not mount a filesystem, and OTA sketch writes do not touch this area.
+  return eepromFlashBase() - (static_cast<uint32_t>(kEnergyJournalSectorCount) * kFlashSectorSize);
+}
+
+uint32_t energyJournalSectorAddress(uint8_t sector) {
+  return energyJournalFlashBase() + (static_cast<uint32_t>(sector) * kFlashSectorSize);
+}
+
+uint32_t energyJournalSlotAddress(uint8_t sector, uint8_t slot) {
+  return energyJournalSectorAddress(sector) + (static_cast<uint32_t>(slot) * sizeof(EnergyJournalRecord));
+}
+
+uint8_t energyJournalRecordCount() {
+  return kFlashSectorSize / sizeof(EnergyJournalRecord);
+}
+
+float ukwhToKwh(uint64_t value) {
+  return static_cast<float>(value) / 1000000.0f;
+}
+
+uint64_t energyTotalUkwh() {
+  if (energy.total_kwh <= 0.0f || isnan(energy.total_kwh)) return 0;
+  const float value = energy.total_kwh * 1000000.0f;
+  if (value >= static_cast<float>(kEnergyTotalMaxUkwh)) return kEnergyTotalMaxUkwh;
+  return static_cast<uint64_t>(value + 0.5f);
+}
+
+bool sequenceNewer(uint32_t candidate, uint32_t current) {
+  return static_cast<int32_t>(candidate - current) > 0;
+}
+
+bool readEnergyJournalRecord(uint8_t sector, uint8_t slot, EnergyJournalRecord &record) {
+  if (sector >= kEnergyJournalSectorCount || slot >= energyJournalRecordCount()) return false;
+  return ESP.flashRead(energyJournalSlotAddress(sector, slot),
+                       reinterpret_cast<uint32_t *>(&record),
+                       sizeof(record));
+}
+
+bool energyJournalRecordEmpty(const EnergyJournalRecord &record) {
+  const uint32_t *words = reinterpret_cast<const uint32_t *>(&record);
+  for (size_t i = 0; i < sizeof(record) / sizeof(uint32_t); i++) {
+    if (words[i] != 0xffffffffUL) return false;
+  }
+  return true;
+}
+
+bool energyJournalSlotEmpty(uint8_t sector, uint8_t slot) {
+  EnergyJournalRecord record{};
+  return readEnergyJournalRecord(sector, slot, record) && energyJournalRecordEmpty(record);
+}
+
+bool energyJournalRecordValid(const EnergyJournalRecord &record) {
+  if (record.magic != kEnergyJournalMagic) return false;
+  if (record.version != kEnergyJournalVersion) return false;
+  if (record.size != sizeof(EnergyJournalRecord)) return false;
+  if (record.reserved != 0) return false;
+  if (record.total_ukwh > kEnergyTotalMaxUkwh) return false;
+  return record.crc == configCrc(record);
+}
+
+bool eraseEnergyJournalSector(uint8_t sector) {
+  if (sector >= kEnergyJournalSectorCount) return false;
+  return ESP.flashEraseSector(energyJournalSectorAddress(sector) / kFlashSectorSize);
+}
+
+bool writeEnergyJournalRecord(uint8_t sector, uint8_t slot, uint64_t total_ukwh, uint32_t sequence) {
+  if (!energyJournalSlotEmpty(sector, slot)) return false;
+
+  EnergyJournalRecord record{};
+  record.magic = kEnergyJournalMagic;
+  record.version = kEnergyJournalVersion;
+  record.size = sizeof(EnergyJournalRecord);
+  record.sequence = sequence;
+  record.total_ukwh = total_ukwh;
+  record.crc = configCrc(record);
+
+  const uint32_t address = energyJournalSlotAddress(sector, slot);
+  if (!ESP.flashWrite(address, reinterpret_cast<uint32_t *>(&record), sizeof(record))) {
+    return false;
+  }
+
+  EnergyJournalRecord verify{};
+  return readEnergyJournalRecord(sector, slot, verify) &&
+         memcmp(&verify, &record, sizeof(record)) == 0 &&
+         energyJournalRecordValid(verify);
+}
+
+bool eraseEnergyJournal() {
+  bool ok = true;
+  for (uint8_t sector = 0; sector < kEnergyJournalSectorCount; sector++) {
+    ok = eraseEnergyJournalSector(sector) && ok;
+  }
+  energy_journal_loaded = true;
+  energy_journal_sector = 0;
+  energy_journal_next_slot = 0;
+  energy_journal_sequence = 0;
+  energy_journal_saved_ukwh = 0;
+  last_energy_persist_ms = millis();
+  energy_persist_requested = false;
+  energy.total_kwh = 0.0f;
+  return ok;
+}
+
+void loadEnergyJournal() {
+  bool found = false;
+  uint8_t found_sector = 0;
+  uint8_t found_slot = 0;
+  uint32_t found_sequence = 0;
+  uint64_t found_total = 0;
+
+  for (uint8_t sector = 0; sector < kEnergyJournalSectorCount; sector++) {
+    for (uint8_t slot = 0; slot < energyJournalRecordCount(); slot++) {
+      EnergyJournalRecord record{};
+      if (!readEnergyJournalRecord(sector, slot, record)) continue;
+      if (!energyJournalRecordValid(record)) continue;
+      if (!found || sequenceNewer(record.sequence, found_sequence)) {
+        found = true;
+        found_sector = sector;
+        found_slot = slot;
+        found_sequence = record.sequence;
+        found_total = record.total_ukwh;
+      }
+    }
+  }
+
+  energy_journal_loaded = true;
+  energy_journal_sector = found ? found_sector : 0;
+  energy_journal_next_slot = found ? static_cast<uint8_t>(found_slot + 1) : 0;
+  energy_journal_sequence = found ? found_sequence : 0;
+  energy_journal_saved_ukwh = found ? found_total : 0;
+  last_energy_persist_ms = millis();
+  energy_persist_requested = false;
+}
+
+bool persistEnergyTotal(bool force) {
+  if (!energy.present) return true;
+  if (!energy_journal_loaded) loadEnergyJournal();
+
+  const uint32_t now = millis();
+  const uint64_t total = energyTotalUkwh();
+  const uint64_t saved = energy_journal_saved_ukwh;
+  const uint64_t delta = total > saved ? total - saved : 0;
+  if (delta == 0) {
+    energy_persist_requested = false;
+    return true;
+  }
+  if (!force) {
+    if (now - last_energy_persist_ms < kEnergyPersistMinMs) return true;
+    if (!energy_persist_requested && delta < kEnergyPersistDeltaUkwh) return true;
+  }
+
+  uint8_t target_sector = energy_journal_sector;
+  uint8_t target_slot = energy_journal_next_slot;
+  const uint8_t record_count = energyJournalRecordCount();
+  if (target_slot >= record_count || !energyJournalSlotEmpty(target_sector, target_slot)) {
+    const uint8_t old_sector = target_sector;
+    target_sector = (target_sector + 1) % kEnergyJournalSectorCount;
+    target_slot = 0;
+    if (!eraseEnergyJournalSector(target_sector)) return false;
+    if (!writeEnergyJournalRecord(target_sector, target_slot, total, energy_journal_sequence + 1)) return false;
+    eraseEnergyJournalSector(old_sector);
+  } else {
+    if (target_slot == 0 && !energyJournalSlotEmpty(target_sector, target_slot)) {
+      if (!eraseEnergyJournalSector(target_sector)) return false;
+    }
+    if (!writeEnergyJournalRecord(target_sector, target_slot, total, energy_journal_sequence + 1)) return false;
+  }
+
+  energy_journal_sector = target_sector;
+  energy_journal_next_slot = target_slot + 1;
+  energy_journal_sequence++;
+  energy_journal_saved_ukwh = total;
+  last_energy_persist_ms = now;
+  energy_persist_requested = false;
+  return true;
 }
 
 // Boot recovery uses append-only marker writes so normal boots do not erase the
@@ -810,9 +1015,10 @@ bool recordBootRecoveryStart() {
 }
 
 bool factoryResetConfig() {
+  const bool energy_erased = eraseEnergyJournal();
   setDefaultConfig();
   clearBootRecoveryLogShadow();
-  return commitConfig(true);
+  return energy_erased && commitConfig(true);
 }
 
 void maintainBootRecovery() {
@@ -2520,6 +2726,7 @@ void setupEnergyMonitor() {
   energy.current_ratio = energy.hjl ? kHjlCurrentRatio : kHlwCurrentRatio;
   energy.select_ui_flag = false;
   energy.ui_flag = !runtime_template.energy_sel_inverted;
+  energy.total_kwh = ukwhToKwh(energy_journal_saved_ukwh);
   energy.last_update_ms = millis();
   energy.last_integrate_ms = millis();
 
@@ -2542,10 +2749,14 @@ void updateDeviceLeds(bool force);
 void setRelay(uint8_t relay, bool on) {
   if (relay >= kMaxRelays || !hasPin(runtime_template.relays[relay])) return;
   const bool changed = relay_state[relay] != on;
+  const bool was_on = relay_state[relay];
   relay_state[relay] = on;
   writeAssignedPin(runtime_template.relays[relay], on);
   if (changed) {
     scheduleMqttRelayPublish(relay);
+    if (energy.present && relay == 0 && was_on && !on) {
+      energy_persist_requested = true;
+    }
     updateDeviceLeds(true);
   }
 }
@@ -2798,6 +3009,8 @@ void maintainEnergy() {
     energy.last_integrate_ms = now;
     energy.total_kwh += (energy.power * static_cast<float>(elapsed)) / 3600000000.0f;
   }
+
+  persistEnergyTotal(false);
 }
 
 void setupDevicePins() {
@@ -4156,6 +4369,7 @@ void handleUpdateUpload() {
     update_mqtt_paused = true;
     update_error = UPDATE_ERROR_OK;
     update_max_size = 0;
+    persistEnergyTotal(true);
     mqttStop();
     WiFiUDP::stopAll();
     if (upload.filename.length() == 0) {
@@ -4378,6 +4592,7 @@ void setup() {
   Serial.printf("myMota %s %s chip %06X\n", MYMOTA_VERSION, MYMOTA_TARGET, ESP.getChipId());
 
   loadConfig();
+  loadEnergyJournal();
   decodeTemplateConfig();
   setupDevicePins();
   connectWifi();
@@ -4399,6 +4614,7 @@ void loop() {
   maintainMqtt();
 
   if (restartDue()) {
+    persistEnergyTotal(true);
     delay(50);
     ESP.restart();
   }
