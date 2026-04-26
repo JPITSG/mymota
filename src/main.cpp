@@ -33,7 +33,8 @@ constexpr uint16_t kConfigVersionV5 = 5;
 constexpr uint16_t kConfigVersionV6 = 6;
 constexpr uint16_t kConfigVersionV7 = 7;
 constexpr uint16_t kConfigVersionV8 = 8;
-constexpr uint16_t kConfigVersion = 9;
+constexpr uint16_t kConfigVersionV9 = 9;
+constexpr uint16_t kConfigVersion = 10;
 constexpr size_t kEepromSize = 4096;
 constexpr size_t kBootRecoveryOffset = 3072;
 constexpr uint32_t kConnectTimeoutMs = 20000;
@@ -73,7 +74,9 @@ constexpr uint8_t kMaxRelays = 8;
 constexpr uint8_t kMaxButtons = 4;
 constexpr uint8_t kMaxLeds = 4;
 constexpr uint8_t kMaxLedOutputs = kMaxLeds + 1;
-constexpr uint32_t kButtonDebounceMs = 50;
+constexpr uint16_t kButtonDebounceDefaultMs = 50;
+constexpr uint16_t kButtonDebounceMinMs = 5;
+constexpr uint16_t kButtonDebounceMaxMs = 200;
 constexpr uint16_t kButtonHoldDefaultMs = 1000;
 constexpr uint16_t kButtonHoldMinMs = 1;
 constexpr uint16_t kButtonHoldMaxMs = 60000;
@@ -93,11 +96,13 @@ constexpr uint8_t kButtonActionMqtt = 2;
 constexpr uint8_t kButtonActionWebhook = 3;
 constexpr size_t kButtonActionTargetMaxLen = 128;
 constexpr size_t kButtonActionPayloadMaxLen = 128;
+constexpr uint8_t kMqttButtonQueueDepth = 4;
+constexpr size_t kMqttButtonTopicMaxLen = kButtonActionTargetMaxLen + kMqttTopicMaxLen + 16;
+constexpr size_t kMqttButtonPayloadMaxLen = kButtonActionPayloadMaxLen + kMqttTopicMaxLen + 24;
+constexpr uint32_t kMqttButtonQueueMaxAgeMs = 5000;
 constexpr uint32_t kWebhookConnectTimeoutMs = 500;
 constexpr uint32_t kWebhookFlushTimeoutMs = 50;
-constexpr uint32_t kWebhookResponseTimeoutMs = 100;
 constexpr uint32_t kWebhookStopTimeoutMs = 25;
-constexpr uint8_t kWebhookEmptyReadLimit = 2;
 constexpr size_t kHtmlStreamChunkReserve = 5200;
 constexpr size_t kJsonStreamChunkReserve = 900;
 constexpr const char *kDefaultButtonMqttTopic = "stat/{TOPIC}/RESULT";
@@ -312,6 +317,37 @@ struct StoredConfigV8 {
   uint32_t crc;
 };
 
+struct StoredConfigV9 {
+  uint32_t magic;
+  uint16_t version;
+  uint16_t size;
+  char ssid[33];
+  char password[65];
+  char hostname[33];
+  uint8_t phy_mode;
+  uint8_t template_enabled;
+  uint16_t template_base;
+  uint32_t template_flag;
+  char template_name[33];
+  uint16_t template_gpio[kTemplateSlotCount];
+  uint16_t mqtt_port;
+  uint16_t mqtt_keepalive;
+  char mqtt_host[kMqttHostMaxLen + 1];
+  char mqtt_topic[kMqttTopicMaxLen + 1];
+  float energy_total_offset_kwh;
+  uint8_t led_attach[kMaxLedOutputs];
+  uint16_t button_hold_ms;
+  uint8_t button_press_action[kMaxButtons];
+  uint8_t button_hold_action[kMaxButtons];
+  uint16_t energy_mqtt_interval;
+  uint16_t energy_mqtt_change_percent_x10;
+  char button_press_target[kMaxButtons][kButtonActionTargetMaxLen + 1];
+  char button_press_payload[kMaxButtons][kButtonActionPayloadMaxLen + 1];
+  char button_hold_target[kMaxButtons][kButtonActionTargetMaxLen + 1];
+  char button_hold_payload[kMaxButtons][kButtonActionPayloadMaxLen + 1];
+  uint32_t crc;
+};
+
 struct StoredConfig {
   uint32_t magic;
   uint16_t version;
@@ -340,6 +376,7 @@ struct StoredConfig {
   char button_press_payload[kMaxButtons][kButtonActionPayloadMaxLen + 1];
   char button_hold_target[kMaxButtons][kButtonActionTargetMaxLen + 1];
   char button_hold_payload[kMaxButtons][kButtonActionPayloadMaxLen + 1];
+  uint16_t button_debounce_ms;
   uint32_t crc;
 };
 
@@ -452,6 +489,14 @@ uint32_t last_mqtt_connect_attempt = 0;
 uint32_t last_mqtt_connect_duration = 0;
 float last_mqtt_energy_power = NAN;
 uint16_t mqtt_pending_relay_mask = 0;
+struct MqttButtonPending {
+  uint32_t queued_at;
+  char topic[kMqttButtonTopicMaxLen + 1];
+  char payload[kMqttButtonPayloadMaxLen + 1];
+};
+MqttButtonPending mqtt_button_queue[kMqttButtonQueueDepth]{};
+uint8_t mqtt_button_queue_head = 0;
+uint8_t mqtt_button_queue_count = 0;
 uint8_t last_mqtt_connect_result = kMqttConnectIdle;
 bool mqtt_ping_pending = false;
 uint32_t boot_id = 0;
@@ -550,6 +595,7 @@ void setDefaultButtonActionTexts() {
 
 void setDefaultButtonConfig() {
   config.button_hold_ms = kButtonHoldDefaultMs;
+  config.button_debounce_ms = kButtonDebounceDefaultMs;
   for (uint8_t i = 0; i < kMaxButtons; i++) {
     config.button_press_action[i] = kButtonActionRelayToggle;
     config.button_hold_action[i] = kButtonActionNone;
@@ -813,6 +859,9 @@ void normalizeConfigStrings() {
   if (config.button_hold_ms < kButtonHoldMinMs || config.button_hold_ms > kButtonHoldMaxMs) {
     config.button_hold_ms = kButtonHoldDefaultMs;
   }
+  if (config.button_debounce_ms < kButtonDebounceMinMs || config.button_debounce_ms > kButtonDebounceMaxMs) {
+    config.button_debounce_ms = kButtonDebounceDefaultMs;
+  }
   for (uint8_t i = 0; i < kMaxButtons; i++) {
     if (!isButtonActionEncoding(config.button_press_action[i])) {
       config.button_press_action[i] = kButtonActionRelayToggle;
@@ -871,7 +920,8 @@ bool saveWifiConfig(const char *ssid, const char *password, const char *hostname
 bool saveMqttConfig(const char *host, uint16_t port, const char *topic, uint16_t keepalive);
 bool saveEnergyConfig(float total_offset_kwh, uint16_t mqtt_interval, uint16_t mqtt_change_percent_x10);
 bool saveLedConfig(const uint8_t *attachments);
-bool saveButtonConfig(uint16_t hold_ms, const uint8_t *press_actions, const uint8_t *hold_actions,
+bool saveButtonConfig(uint16_t hold_ms, uint16_t debounce_ms,
+                      const uint8_t *press_actions, const uint8_t *hold_actions,
                       const char press_targets[][kButtonActionTargetMaxLen + 1],
                       const char press_payloads[][kButtonActionPayloadMaxLen + 1],
                       const char hold_targets[][kButtonActionTargetMaxLen + 1],
@@ -900,6 +950,49 @@ bool loadConfig() {
     }
     normalizeConfigStrings();
     config_ok = config.ssid[0] != '\0';
+    return config_ok;
+  }
+
+  if (header.version == kConfigVersionV9 && header.size == sizeof(StoredConfigV9)) {
+    StoredConfigV9 old_config{};
+    EEPROM.get(0, old_config);
+    if (old_config.crc != configCrc(old_config)) {
+      setDefaultConfig();
+      return false;
+    }
+    old_config.ssid[sizeof(old_config.ssid) - 1] = '\0';
+    old_config.password[sizeof(old_config.password) - 1] = '\0';
+    old_config.hostname[sizeof(old_config.hostname) - 1] = '\0';
+    old_config.template_name[sizeof(old_config.template_name) - 1] = '\0';
+    old_config.mqtt_host[sizeof(old_config.mqtt_host) - 1] = '\0';
+    old_config.mqtt_topic[sizeof(old_config.mqtt_topic) - 1] = '\0';
+    memset(&config, 0, sizeof(config));
+    strlcpy(config.ssid, old_config.ssid, sizeof(config.ssid));
+    strlcpy(config.password, old_config.password, sizeof(config.password));
+    strlcpy(config.hostname, old_config.hostname, sizeof(config.hostname));
+    config.phy_mode = old_config.phy_mode;
+    config.template_enabled = old_config.template_enabled;
+    config.template_base = old_config.template_base;
+    config.template_flag = old_config.template_flag;
+    strlcpy(config.template_name, old_config.template_name, sizeof(config.template_name));
+    memcpy(config.template_gpio, old_config.template_gpio, sizeof(config.template_gpio));
+    config.mqtt_port = old_config.mqtt_port;
+    config.mqtt_keepalive = old_config.mqtt_keepalive;
+    strlcpy(config.mqtt_host, old_config.mqtt_host, sizeof(config.mqtt_host));
+    strlcpy(config.mqtt_topic, old_config.mqtt_topic, sizeof(config.mqtt_topic));
+    config.energy_total_offset_kwh = old_config.energy_total_offset_kwh;
+    memcpy(config.led_attach, old_config.led_attach, sizeof(config.led_attach));
+    config.button_hold_ms = old_config.button_hold_ms;
+    memcpy(config.button_press_action, old_config.button_press_action, sizeof(config.button_press_action));
+    memcpy(config.button_hold_action, old_config.button_hold_action, sizeof(config.button_hold_action));
+    config.energy_mqtt_interval = old_config.energy_mqtt_interval;
+    config.energy_mqtt_change_percent_x10 = old_config.energy_mqtt_change_percent_x10;
+    memcpy(config.button_press_target, old_config.button_press_target, sizeof(config.button_press_target));
+    memcpy(config.button_press_payload, old_config.button_press_payload, sizeof(config.button_press_payload));
+    memcpy(config.button_hold_target, old_config.button_hold_target, sizeof(config.button_hold_target));
+    memcpy(config.button_hold_payload, old_config.button_hold_payload, sizeof(config.button_hold_payload));
+    config.button_debounce_ms = kButtonDebounceDefaultMs;
+    commitConfig();
     return config_ok;
   }
 
@@ -1197,6 +1290,8 @@ bool saveMqttConfig(const char *host, uint16_t port, const char *topic, uint16_t
   last_mqtt_connect_result = kMqttConnectIdle;
   last_mqtt_energy_power = NAN;
   mqtt_pending_relay_mask = 0;
+  mqtt_button_queue_head = 0;
+  mqtt_button_queue_count = 0;
   mqtt_ping_pending = false;
   return commitConfig();
 }
@@ -1215,12 +1310,14 @@ bool saveLedConfig(const uint8_t *attachments) {
   return commitConfig();
 }
 
-bool saveButtonConfig(uint16_t hold_ms, const uint8_t *press_actions, const uint8_t *hold_actions,
+bool saveButtonConfig(uint16_t hold_ms, uint16_t debounce_ms,
+                      const uint8_t *press_actions, const uint8_t *hold_actions,
                       const char press_targets[][kButtonActionTargetMaxLen + 1],
                       const char press_payloads[][kButtonActionPayloadMaxLen + 1],
                       const char hold_targets[][kButtonActionTargetMaxLen + 1],
                       const char hold_payloads[][kButtonActionPayloadMaxLen + 1]) {
   config.button_hold_ms = hold_ms;
+  config.button_debounce_ms = debounce_ms;
   memcpy(config.button_press_action, press_actions, sizeof(config.button_press_action));
   memcpy(config.button_hold_action, hold_actions, sizeof(config.button_hold_action));
   memcpy(config.button_press_target, press_targets, sizeof(config.button_press_target));
@@ -1831,42 +1928,34 @@ bool parseFloatInput(const String &input, float min_value, float max_value, floa
   return true;
 }
 
-bool parsePowerCommand(const String &input, uint8_t &relay, String &response_key) {
-  String cmd = input;
-  cmd.trim();
-  cmd.toLowerCase();
-  if (cmd == F("power")) {
+bool parsePowerCommand(const char *p, size_t len, uint8_t &relay, char *response_key, size_t key_size) {
+  if (len < 5 || strncasecmp(p, "power", 5) != 0) return false;
+  if (len == 5) {
     relay = 0;
-    response_key = F("POWER");
+    strlcpy(response_key, "POWER", key_size);
     return true;
   }
-  if (!cmd.startsWith(F("power")) || cmd.length() == 5) {
-    return false;
-  }
-
   uint16_t relay_number = 0;
-  for (size_t i = 5; i < cmd.length(); i++) {
-    const char c = cmd[i];
+  for (size_t i = 5; i < len; i++) {
+    const char c = p[i];
     if (c < '0' || c > '9') return false;
     relay_number = (relay_number * 10U) + static_cast<uint16_t>(c - '0');
     if (relay_number > kMaxRelays) return false;
   }
   if (relay_number == 0) return false;
   relay = static_cast<uint8_t>(relay_number - 1);
-  response_key = F("POWER");
-  response_key += String(relay_number);
+  if (snprintf(response_key, key_size, "POWER%u", static_cast<unsigned>(relay_number)) >= static_cast<int>(key_size)) {
+    return false;
+  }
   return true;
 }
 
-bool parsePowerState(const String &input, bool &on) {
-  String state = input;
-  state.trim();
-  state.toLowerCase();
-  if (state == F("on")) {
+bool parsePowerState(const char *p, size_t len, bool &on) {
+  if (len == 2 && (p[0] | 0x20) == 'o' && (p[1] | 0x20) == 'n') {
     on = true;
     return true;
   }
-  if (state == F("off")) {
+  if (len == 3 && (p[0] | 0x20) == 'o' && (p[1] | 0x20) == 'f' && (p[2] | 0x20) == 'f') {
     on = false;
     return true;
   }
@@ -1929,6 +2018,47 @@ const __FlashStringHelper *mqttConnectResultName(uint8_t result) {
     case kMqttConnectConnackRejected: return F("connack_rejected");
     default: return F("idle");
   }
+}
+
+void clearMqttButtonQueue() {
+  mqtt_button_queue_head = 0;
+  mqtt_button_queue_count = 0;
+}
+
+uint8_t mqttButtonQueueIndex(uint8_t offset) {
+  return (mqtt_button_queue_head + offset) % kMqttButtonQueueDepth;
+}
+
+void dropMqttButtonQueueHead() {
+  if (mqtt_button_queue_count == 0) return;
+  mqtt_button_queue_head = mqttButtonQueueIndex(1);
+  mqtt_button_queue_count--;
+}
+
+bool mqttButtonQueueExpired(const MqttButtonPending &item, uint32_t now) {
+  return static_cast<uint32_t>(now - item.queued_at) > kMqttButtonQueueMaxAgeMs;
+}
+
+void expireMqttButtonQueue(uint32_t now) {
+  while (mqtt_button_queue_count > 0 && mqttButtonQueueExpired(mqtt_button_queue[mqtt_button_queue_head], now)) {
+    dropMqttButtonQueueHead();
+  }
+}
+
+bool pushMqttButtonQueue(const String &topic, const String &payload) {
+  if (topic.length() == 0 || topic.length() > kMqttButtonTopicMaxLen) return false;
+  if (payload.length() == 0 || payload.length() > kMqttButtonPayloadMaxLen) return false;
+
+  if (mqtt_button_queue_count >= kMqttButtonQueueDepth) {
+    dropMqttButtonQueueHead();
+  }
+
+  MqttButtonPending &slot = mqtt_button_queue[mqttButtonQueueIndex(mqtt_button_queue_count)];
+  slot.queued_at = millis();
+  strlcpy(slot.topic, topic.c_str(), sizeof(slot.topic));
+  strlcpy(slot.payload, payload.c_str(), sizeof(slot.payload));
+  mqtt_button_queue_count++;
+  return true;
 }
 
 void recordMqttConnectResult(uint8_t result, uint32_t started) {
@@ -2269,16 +2399,18 @@ void maintainMqtt() {
 
   if (!mqttConfigured() || WiFi.status() != WL_CONNECTED) {
     mqttStop();
+    clearMqttButtonQueue();
     last_mqtt_energy_publish = 0;
     last_mqtt_energy_power = NAN;
     return;
   }
 
+  const uint32_t now = millis();
+  expireMqttButtonQueue(now);
   if (!mqttEnsureConnected()) return;
 
   if (!mqttProcessInbound()) return;
 
-  const uint32_t now = millis();
   if ((last_mqtt_rx && now - last_mqtt_rx >= kMqttBrokerSilenceTimeoutMs) ||
       (mqtt_ping_pending && last_mqtt_ping && now - last_mqtt_ping >= kMqttBrokerSilenceTimeoutMs)) {
     mqttStop();
@@ -2301,6 +2433,16 @@ void maintainMqtt() {
     if (!(mqtt_pending_relay_mask & mask)) continue;
     if (!mqttPublishRelayState(i)) return;
     mqtt_pending_relay_mask &= ~mask;
+  }
+
+  while (mqtt_button_queue_count > 0) {
+    MqttButtonPending &slot = mqtt_button_queue[mqtt_button_queue_head];
+    if (mqttButtonQueueExpired(slot, now)) {
+      dropMqttButtonQueueHead();
+      continue;
+    }
+    if (!mqttPublish(slot.topic, slot.payload)) return;
+    dropMqttButtonQueueHead();
   }
 
   if (config.mqtt_keepalive > 0 && runtime_template.relay_count > 0) {
@@ -2395,12 +2537,14 @@ void toggleRelay(uint8_t relay) {
   setRelay(relay, !relay_state[relay]);
 }
 
-bool mqttPublishButtonAction(uint8_t button, bool hold) {
+bool mqttQueueButtonAction(uint8_t button, bool hold) {
+  if (button >= kMaxButtons) return false;
+  if (!mqttConfigured()) return false;
   String topic = expandButtonActionText(buttonActionTarget(button, hold), button, hold);
   String payload = expandButtonActionText(buttonActionPayload(button, hold), button, hold);
   topic.trim();
   if (topic.length() == 0 || payload.length() == 0) return false;
-  return mqttPublish(topic.c_str(), payload.c_str());
+  return pushMqttButtonQueue(topic, payload);
 }
 
 bool parseHttpUrl(const String &url, String &host, uint16_t &port, String &path) {
@@ -2460,35 +2604,23 @@ bool runWebhookAction(uint8_t button, bool hold) {
     return false;
   }
   client.flush(kWebhookFlushTimeoutMs);
-
-  const uint32_t started = millis();
-  uint8_t empty_reads = 0;
-  while (client.connected() &&
-         millis() - started < kWebhookResponseTimeoutMs &&
-         empty_reads < kWebhookEmptyReadLimit) {
-    const int value = client.read();
-    if (value >= 0) {
-      empty_reads = 0;
-    } else {
-      empty_reads++;
-      delay(1);
-    }
-  }
   client.stop(kWebhookStopTimeoutMs);
   return true;
 }
 
-void runButtonAction(uint8_t button, uint8_t action, bool hold) {
+bool runButtonAction(uint8_t button, uint8_t action, bool hold) {
   if (action == kButtonActionRelayToggle) {
     uint8_t relay = 0;
     if (buttonRelayTarget(button, relay)) {
       toggleRelay(relay);
+      return true;
     }
   } else if (action == kButtonActionMqtt) {
-    mqttPublishButtonAction(button, hold);
+    mqttQueueButtonAction(button, hold);
   } else if (action == kButtonActionWebhook) {
     runWebhookAction(button, hold);
   }
+  return false;
 }
 
 void updateDeviceLeds(bool force = false) {
@@ -2540,25 +2672,31 @@ void maintainButtons() {
       button_state[i].raw_pressed = raw;
       button_state[i].changed_at = now;
     }
-    if ((now - button_state[i].changed_at) >= kButtonDebounceMs && raw != button_state[i].stable_pressed) {
+    if ((now - button_state[i].changed_at) >= config.button_debounce_ms && raw != button_state[i].stable_pressed) {
       button_state[i].stable_pressed = raw;
+      bool led_handled = false;
       if (raw) {
         button_state[i].pressed_at = now;
         button_state[i].hold_emitted = false;
+        if (config.button_hold_action[i] == kButtonActionNone) {
+          led_handled = runButtonAction(i, config.button_press_action[i], false);
+          button_state[i].hold_emitted = true;
+        }
       } else {
         if (!button_state[i].hold_emitted) {
-          runButtonAction(i, config.button_press_action[i], false);
+          led_handled = runButtonAction(i, config.button_press_action[i], false);
         }
         button_state[i].hold_emitted = false;
       }
-      updateDeviceLeds(true);
+      if (!led_handled) updateDeviceLeds(true);
     }
     if (button_state[i].stable_pressed &&
         !button_state[i].hold_emitted &&
         now - button_state[i].pressed_at >= config.button_hold_ms) {
       button_state[i].hold_emitted = true;
-      runButtonAction(i, config.button_hold_action[i], true);
-      updateDeviceLeds(true);
+      if (!runButtonAction(i, config.button_hold_action[i], true)) {
+        updateDeviceLeds(true);
+      }
     }
   }
 }
@@ -3055,6 +3193,12 @@ void appendButtonSettings(String &page) {
   page += String(kButtonHoldMaxMs);
   page += F("' step='1' value='");
   page += String(config.button_hold_ms);
+  page += F("'></label><label>Debounce ms<br><input name='debounce_ms' type='number' min='");
+  page += String(kButtonDebounceMinMs);
+  page += F("' max='");
+  page += String(kButtonDebounceMaxMs);
+  page += F("' step='1' value='");
+  page += String(config.button_debounce_ms);
   page += F("'></label></div>");
   page += F("<div class='note'><p><strong>Action placeholders</strong></p><div class='tokens'>");
   page += F("<div><code>{BUTTONID}</code><span class='hint'>button number, starting at 1</span></div>");
@@ -3561,6 +3705,12 @@ void handleButtonSave() {
     return;
   }
 
+  uint16_t debounce_ms = kButtonDebounceDefaultMs;
+  if (!parseUint16Input(server.arg("debounce_ms"), kButtonDebounceMinMs, kButtonDebounceMaxMs, debounce_ms)) {
+    server.send(400, F("text/plain"), F("Invalid button debounce time"));
+    return;
+  }
+
   StoredConfig *candidate = new StoredConfig(config);
   if (!candidate) {
     server.send(500, F("text/plain"), F("Could not allocate button settings"));
@@ -3611,7 +3761,7 @@ void handleButtonSave() {
     }
   }
 
-  const bool saved = saveButtonConfig(hold_ms,
+  const bool saved = saveButtonConfig(hold_ms, debounce_ms,
                                       candidate->button_press_action,
                                       candidate->button_hold_action,
                                       candidate->button_press_target,
@@ -3666,31 +3816,48 @@ void handleCmnd() {
     return;
   }
 
-  String cmnd = server.arg("cmnd");
-  cmnd.trim();
-  int separator = -1;
-  for (size_t i = 0; i < cmnd.length(); i++) {
-    const char c = cmnd[i];
-    if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
-      separator = static_cast<int>(i);
-      break;
-    }
+  const String &cmnd_str = server.arg("cmnd");
+  const char *raw = cmnd_str.c_str();
+  size_t total_len = cmnd_str.length();
+
+  while (total_len > 0) {
+    const char c = raw[0];
+    if (c != ' ' && c != '\t' && c != '\r' && c != '\n') break;
+    raw++;
+    total_len--;
   }
-  if (separator <= 0 || separator >= static_cast<int>(cmnd.length()) - 1) {
+  while (total_len > 0) {
+    const char c = raw[total_len - 1];
+    if (c != ' ' && c != '\t' && c != '\r' && c != '\n') break;
+    total_len--;
+  }
+
+  size_t cmd_len = 0;
+  while (cmd_len < total_len) {
+    const char c = raw[cmd_len];
+    if (c == ' ' || c == '\t' || c == '\r' || c == '\n') break;
+    cmd_len++;
+  }
+  size_t state_start = cmd_len;
+  while (state_start < total_len) {
+    const char c = raw[state_start];
+    if (c != ' ' && c != '\t' && c != '\r' && c != '\n') break;
+    state_start++;
+  }
+  if (cmd_len == 0 || state_start >= total_len) {
     server.send(400, F("text/plain"), F("Invalid cmnd"));
     return;
   }
+  const size_t state_len = total_len - state_start;
 
-  const String command = cmnd.substring(0, separator);
-  const String state_arg = cmnd.substring(separator + 1);
   uint8_t relay = 0;
-  String response_key;
-  bool on = false;
-  if (!parsePowerCommand(command, relay, response_key)) {
+  char response_key[12];
+  if (!parsePowerCommand(raw, cmd_len, relay, response_key, sizeof(response_key))) {
     server.send(400, F("text/plain"), F("Unsupported command"));
     return;
   }
-  if (!parsePowerState(state_arg, on)) {
+  bool on = false;
+  if (!parsePowerState(raw + state_start, state_len, on)) {
     server.send(400, F("text/plain"), F("Invalid power state"));
     return;
   }
@@ -3847,6 +4014,8 @@ void handleHealth() {
   flushStreamChunk(out);
   out += F(",\"button_hold_ms\":");
   out += config.button_hold_ms;
+  out += F(",\"button_debounce_ms\":");
+  out += config.button_debounce_ms;
   out += F(",\"buttons\":[");
   first = true;
   for (uint8_t i = 0; i < runtime_template.button_count; i++) {
@@ -4208,6 +4377,7 @@ void loop() {
   maintainBootRecovery();
   maintainWifi();
   maintainDevice();
+  server.handleClient();
   maintainMqtt();
 
   if (restartDue()) {
@@ -4215,5 +4385,5 @@ void loop() {
     ESP.restart();
   }
 
-  delay(1);
+  yield();
 }
