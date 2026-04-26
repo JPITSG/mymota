@@ -1,0 +1,5 @@
+.cache/
+.pio/
+firmware.map
+
+mymotaUpgrade.sh
