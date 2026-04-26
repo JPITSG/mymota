@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <ArduinoJson.h>
 #include <EEPROM.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266WiFi.h>
@@ -47,6 +48,7 @@ constexpr uint8_t kPhyModeFailsafe = WIFI_PHY_MODE_11G;
 constexpr uint8_t kBootRecoveryLimit = 5;
 constexpr size_t kTemplateSlotCount = 14;
 constexpr size_t kTemplateJsonMaxLen = 640;
+constexpr size_t kTemplateJsonDocCapacity = 1024;
 constexpr size_t kMqttHostMaxLen = 64;
 constexpr size_t kMqttTopicMaxLen = 150;
 constexpr uint16_t kMqttDefaultPort = 1883;
@@ -79,6 +81,7 @@ constexpr uint32_t kLedUpdateMs = 250;
 constexpr uint32_t kAdcUpdateMs = 2000;
 constexpr uint32_t kEnergyUpdateMs = 200;
 constexpr uint32_t kEnergyIntegrateMs = 1000;
+constexpr uint32_t kEnergyReportBootSettleMs = 5000;
 constexpr float kEnergyTotalOffsetMinKwh = 0.0f;
 constexpr float kEnergyTotalOffsetMaxKwh = 1000000.0f;
 constexpr uint8_t kLedAttachNone = 0;
@@ -455,6 +458,7 @@ uint8_t boot_recovery_count = 0;
 bool boot_recovery_armed = false;
 bool boot_recovery_factory_reset = false;
 bool relay_state[kMaxRelays]{};
+bool energy_report_boot_settled = false;
 float adc_temperature_c = NAN;
 uint16_t adc_raw = 0;
 
@@ -1573,158 +1577,69 @@ void decodeTemplateConfig() {
   }
 }
 
-const char *skipJsonSpaces(const char *p) {
-  while (*p == ' ' || *p == '\n' || *p == '\r' || *p == '\t') p++;
-  return p;
-}
-
-const char *findJsonValue(const String &json, const char *key) {
-  String needle = F("\"");
-  needle += key;
-  needle += F("\"");
-  const int pos = json.indexOf(needle);
-  if (pos < 0) return nullptr;
-  const char *p = json.c_str() + pos + needle.length();
-  p = skipJsonSpaces(p);
-  if (*p != ':') return nullptr;
-  return skipJsonSpaces(p + 1);
-}
-
-bool parseJsonStringValue(const String &json, const char *key, char *out, size_t out_size, bool required, String &error) {
-  const char *p = findJsonValue(json, key);
-  if (!p) {
-    if (required) {
-      error = F("Missing ");
-      error += key;
-    }
-    return !required;
-  }
-  if (*p != '"') {
-    error = F("Invalid string for ");
-    error += key;
-    return false;
-  }
-  p++;
-  size_t written = 0;
-  while (*p && *p != '"') {
-    char c = *p++;
-    if (c == '\\' && *p) {
-      c = *p++;
-    }
-    if (written + 1 < out_size) {
-      out[written++] = c;
-    }
-  }
-  if (*p != '"') {
-    error = F("Unterminated string for ");
-    error += key;
-    return false;
-  }
-  out[written] = '\0';
-  return true;
-}
-
-bool parseJsonUIntAt(const char *&p, uint32_t &value) {
-  p = skipJsonSpaces(p);
-  if (*p < '0' || *p > '9') return false;
-  uint32_t parsed = 0;
-  while (*p >= '0' && *p <= '9') {
-    parsed = (parsed * 10U) + static_cast<uint32_t>(*p - '0');
-    p++;
-  }
-  value = parsed;
-  return true;
-}
-
-bool parseJsonUIntValue(const String &json, const char *key, uint32_t &value, bool required, String &error) {
-  const char *p = findJsonValue(json, key);
-  if (!p) {
-    if (required) {
-      error = F("Missing ");
-      error += key;
-    }
-    return !required;
-  }
-  if (!parseJsonUIntAt(p, value)) {
-    error = F("Invalid number for ");
-    error += key;
-    return false;
-  }
-  return true;
-}
-
-bool parseTemplateGpioArray(const String &json, uint16_t *gpio, String &error) {
-  const char *p = findJsonValue(json, "GPIO");
-  if (!p) {
-    error = F("Missing GPIO");
-    return false;
-  }
-  if (*p != '[') {
-    error = F("Invalid GPIO array");
-    return false;
-  }
-  p++;
-  for (uint8_t i = 0; i < kTemplateSlotCount; i++) {
-    uint32_t value = 0;
-    if (!parseJsonUIntAt(p, value) || value > 65535U) {
-      error = F("Invalid GPIO value");
-      return false;
-    }
-    gpio[i] = static_cast<uint16_t>(value);
-    p = skipJsonSpaces(p);
-    if (i + 1 < kTemplateSlotCount) {
-      if (*p != ',') {
-        error = F("GPIO must contain 14 ESP8266 entries");
-        return false;
-      }
-      p++;
-    }
-  }
-  p = skipJsonSpaces(p);
-  if (*p != ']') {
-    error = F("GPIO must contain exactly 14 ESP8266 entries");
-    return false;
-  }
-  return true;
-}
-
 bool parseTemplateJson(const String &json, StoredConfig &target, String &error) {
   if (json.length() < 9 || json.length() > kTemplateJsonMaxLen) {
     error = F("Template JSON length is invalid");
     return false;
   }
-  if (json.indexOf('{') < 0 || json.indexOf('}') < 0) {
-    error = F("Template must be JSON");
+
+  DynamicJsonDocument doc(kTemplateJsonDocCapacity);
+  const DeserializationError json_error = deserializeJson(doc, json);
+  if (json_error) {
+    error = F("Template JSON parse failed: ");
+    error += json_error.c_str();
+    return false;
+  }
+  if (!doc.is<JsonObject>()) {
+    error = F("Template must be a JSON object");
     return false;
   }
 
-  char arch[16] = "";
-  if (!parseJsonStringValue(json, "ARCH", arch, sizeof(arch), false, error)) return false;
+  const char *arch = doc["ARCH"] | "";
   if (arch[0] && strcmp(arch, "ESP8266") && strcmp(arch, "ESP8285") && strcmp(arch, "ESP82XX")) {
     error = F("Template ARCH is not ESP8266/ESP8285");
     return false;
   }
 
-  char name[sizeof(target.template_name)] = "";
   uint16_t gpio[kTemplateSlotCount]{};
-  uint32_t base = 0;
-  uint32_t flag = 0;
-  if (!parseJsonStringValue(json, "NAME", name, sizeof(name), true, error)) return false;
+  const char *name = doc["NAME"] | "";
   if (name[0] == '\0') {
     error = F("Template NAME is empty");
     return false;
   }
-  if (!parseTemplateGpioArray(json, gpio, error)) return false;
-  if (!parseJsonUIntValue(json, "BASE", base, true, error)) return false;
-  if (!parseJsonUIntValue(json, "FLAG", flag, false, error)) return false;
-  if (base == 0 || base > 255) {
+  if (strlen(name) >= sizeof(target.template_name)) {
+    error = F("Template NAME is too long");
+    return false;
+  }
+
+  JsonArray gpio_values = doc["GPIO"].as<JsonArray>();
+  if (gpio_values.isNull() || gpio_values.size() != kTemplateSlotCount) {
+    error = F("GPIO must contain exactly 14 ESP8266 entries");
+    return false;
+  }
+  for (uint8_t i = 0; i < kTemplateSlotCount; i++) {
+    JsonVariant value = gpio_values[i];
+    if (!value.is<uint16_t>()) {
+      error = F("Invalid GPIO value");
+      return false;
+    }
+    gpio[i] = value.as<uint16_t>();
+  }
+
+  JsonVariant base_value = doc["BASE"];
+  if (!base_value.is<uint8_t>() || base_value.as<uint8_t>() == 0) {
     error = F("Template BASE is invalid");
+    return false;
+  }
+  JsonVariant flag_value = doc["FLAG"];
+  if (!flag_value.isNull() && !flag_value.is<uint32_t>()) {
+    error = F("Template FLAG is invalid");
     return false;
   }
 
   target.template_enabled = 1;
-  target.template_base = static_cast<uint16_t>(base);
-  target.template_flag = flag;
+  target.template_base = base_value.as<uint8_t>();
+  target.template_flag = flag_value.isNull() ? 0 : flag_value.as<uint32_t>();
   strlcpy(target.template_name, name, sizeof(target.template_name));
   memcpy(target.template_gpio, gpio, sizeof(target.template_gpio));
   return true;
@@ -2140,7 +2055,10 @@ bool mqttEnergyReportingEnabled() {
 
 bool mqttEnergyReportReady() {
   if (!interruptPinSupported(energy.cf1_pin)) return true;
-  return energy.cf1_voltage_pulse_length > 0 || millis() > 5000;
+  if (!energy_report_boot_settled && millis() >= kEnergyReportBootSettleMs) {
+    energy_report_boot_settled = true;
+  }
+  return energy.cf1_voltage_pulse_length > 0 || energy_report_boot_settled;
 }
 
 bool mqttEnergyPowerChangedEnough() {
