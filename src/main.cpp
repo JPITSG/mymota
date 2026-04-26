@@ -2957,7 +2957,24 @@ void handleScan() {
   page.reserve(2600);
   appendHeader(page, F("myMota Scan"));
   page += F("<section class='panel'><h2>Networks</h2>");
-  const int count = WiFi.scanNetworks(false, true);
+
+  int count = WiFi.scanComplete();
+  if (count == WIFI_SCAN_FAILED) {
+    WiFi.scanDelete();
+    WiFi.scanNetworksAsync([](int) {}, true);
+    count = WiFi.scanComplete();
+  }
+
+  if (count == WIFI_SCAN_RUNNING) {
+    page += F("<p>Scanning for Wi-Fi networks...</p>");
+    page += F("<p class='muted'>This page will refresh when results are ready.</p>");
+    page += F("<script>setTimeout(function(){location.reload()},1000)</script>");
+    page += F("<p><a class='btn secondary' href='/'>Back</a></p></section>");
+    appendFooter(page, false);
+    sendHtml(page);
+    return;
+  }
+
   if (count <= 0) {
     page += F("<p>No networks found.</p>");
   } else {
