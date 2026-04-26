@@ -2668,11 +2668,13 @@ void maintainMqtt() {
     return;
   }
 
-  const uint32_t now = millis();
+  uint32_t now = millis();
   expireMqttButtonQueue(now);
   if (!mqttEnsureConnected()) return;
 
+  now = millis();
   if (!mqttProcessInbound()) return;
+  now = millis();
 
   if ((last_mqtt_rx && now - last_mqtt_rx >= kMqttBrokerSilenceTimeoutMs) ||
       (mqtt_ping_pending && last_mqtt_ping && now - last_mqtt_ping >= kMqttBrokerSilenceTimeoutMs)) {
