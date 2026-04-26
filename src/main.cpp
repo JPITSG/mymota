@@ -438,6 +438,7 @@ uint32_t update_max_size = 0;
 uint32_t restart_at = 0;
 bool restart_pending = false;
 uint32_t disconnected_since = 0;
+bool disconnected_timer_active = false;
 uint32_t last_ap_attempt = 0;
 uint32_t last_led_update = 0;
 uint32_t last_adc_update = 0;
@@ -606,6 +607,17 @@ void scheduleRestart(uint32_t delay_ms) {
 
 bool restartDue() {
   return restart_pending && static_cast<int32_t>(millis() - restart_at) >= 0;
+}
+
+uint32_t makeBootId() {
+  uint32_t id = ESP.random();
+  id ^= ESP.getCycleCount();
+  id ^= micros();
+  id ^= (millis() << 16) | (millis() >> 16);
+  id ^= ESP.getChipId() * 2654435761UL;
+  id ^= ESP.getFreeHeap();
+  id ^= system_get_rtc_time();
+  return id ? id : (ESP.getChipId() ^ 0xa5a5a5a5UL);
 }
 
 uint32_t eepromFlashBase() {
@@ -1240,17 +1252,59 @@ const char *buttonActionPayload(uint8_t button, bool hold) {
   return hold ? config.button_hold_payload[button] : config.button_press_payload[button];
 }
 
+bool parseRelayStateToken(const char *token, size_t len, uint8_t &relay) {
+  if (len < 14 || strncmp(token, "{RELAY", 6) != 0) return false;
+  uint16_t number = 0;
+  size_t index = 6;
+  while (index < len && token[index] >= '0' && token[index] <= '9') {
+    number = (number * 10U) + static_cast<uint16_t>(token[index] - '0');
+    index++;
+  }
+  if (number == 0 || number > kMaxRelays) return false;
+  if (index + 7 != len || strncmp(token + index, "_STATE}", 7) != 0) return false;
+  relay = static_cast<uint8_t>(number - 1);
+  return true;
+}
+
+void appendRelayStateTokenValue(String &out, uint8_t relay) {
+  const bool available = relay < runtime_template.relay_count && hasPin(runtime_template.relays[relay]);
+  out += available ? (relay_state[relay] ? F("ON") : F("OFF")) : F("UNKNOWN");
+}
+
 String expandButtonActionText(const char *input, uint8_t button, bool hold) {
-  String out = input ? input : "";
-  out.replace(F("{BUTTONID}"), String(button + 1));
-  out.replace(F("{TYPE}"), buttonEventType(hold));
-  out.replace(F("{TOPIC}"), config.mqtt_topic);
-  for (uint8_t relay = 0; relay < kMaxRelays; relay++) {
-    String token = F("{RELAY");
-    token += String(relay + 1);
-    token += F("_STATE}");
-    const bool available = relay < runtime_template.relay_count && hasPin(runtime_template.relays[relay]);
-    out.replace(token, available ? (relay_state[relay] ? F("ON") : F("OFF")) : F("UNKNOWN"));
+  String out;
+  if (!input) return out;
+  out.reserve(strlen(input) + strlen(config.mqtt_topic) + 16);
+
+  const char *p = input;
+  while (*p) {
+    if (*p != '{') {
+      out += *p++;
+      continue;
+    }
+
+    const char *end = strchr(p, '}');
+    if (!end) {
+      out += *p++;
+      continue;
+    }
+
+    const size_t len = static_cast<size_t>(end - p + 1);
+    uint8_t relay = 0;
+    if (len == 10 && strncmp(p, "{BUTTONID}", len) == 0) {
+      out += String(button + 1);
+    } else if (len == 6 && strncmp(p, "{TYPE}", len) == 0) {
+      out += buttonEventType(hold);
+    } else if (len == 7 && strncmp(p, "{TOPIC}", len) == 0) {
+      out += config.mqtt_topic;
+    } else if (parseRelayStateToken(p, len, relay)) {
+      appendRelayStateTokenValue(out, relay);
+    } else {
+      for (const char *copy = p; copy <= end; copy++) {
+        out += *copy;
+      }
+    }
+    p = end + 1;
   }
   return out;
 }
@@ -1556,7 +1610,20 @@ void parseTemplateFunction(uint8_t pin, uint16_t code) {
   addUnsupportedTemplatePin(pin, code);
 }
 
+void detachEnergyInterrupts() {
+  if (!energy.present) return;
+  if (interruptPinSupported(runtime_template.energy_cf_pin)) {
+    detachInterrupt(digitalPinToInterrupt(runtime_template.energy_cf_pin));
+  }
+  if (runtime_template.energy_cf1_pin != runtime_template.energy_cf_pin &&
+      interruptPinSupported(runtime_template.energy_cf1_pin)) {
+    detachInterrupt(digitalPinToInterrupt(runtime_template.energy_cf1_pin));
+  }
+  energy.present = false;
+}
+
 void decodeTemplateConfig() {
+  detachEnergyInterrupts();
   memset(&runtime_template, 0, sizeof(runtime_template));
   for (uint8_t i = 0; i < kMaxRelays; i++) resetPinAssignment(runtime_template.relays[i]);
   for (uint8_t i = 0; i < kMaxButtons; i++) resetPinAssignment(runtime_template.buttons[i]);
@@ -1577,9 +1644,57 @@ void decodeTemplateConfig() {
   }
 }
 
+bool isJsonSpace(char c) {
+  return c == ' ' || c == '\n' || c == '\r' || c == '\t';
+}
+
+bool templateJsonHasSingleRootObject(const String &json) {
+  const char *p = json.c_str();
+  while (isJsonSpace(*p)) p++;
+  if (*p != '{') return false;
+
+  uint16_t depth = 0;
+  bool in_string = false;
+  bool escaped = false;
+  for (; *p; p++) {
+    const char c = *p;
+    if (in_string) {
+      if (escaped) {
+        escaped = false;
+      } else if (c == '\\') {
+        escaped = true;
+      } else if (c == '"') {
+        in_string = false;
+      }
+      continue;
+    }
+
+    if (c == '"') {
+      in_string = true;
+    } else if (c == '{' || c == '[') {
+      depth++;
+    } else if (c == '}' || c == ']') {
+      if (depth == 0) return false;
+      depth--;
+      if (depth == 0) {
+        p++;
+        break;
+      }
+    }
+  }
+
+  if (depth != 0 || in_string || escaped) return false;
+  while (isJsonSpace(*p)) p++;
+  return *p == '\0';
+}
+
 bool parseTemplateJson(const String &json, StoredConfig &target, String &error) {
   if (json.length() < 9 || json.length() > kTemplateJsonMaxLen) {
     error = F("Template JSON length is invalid");
+    return false;
+  }
+  if (!templateJsonHasSingleRootObject(json)) {
+    error = F("Template must be one complete JSON object");
     return false;
   }
 
@@ -4026,6 +4141,7 @@ void connectWifi() {
     }
     startAp();
     disconnected_since = millis();
+    disconnected_timer_active = true;
   }
 }
 
@@ -4054,10 +4170,12 @@ void maintainWifi() {
   }
   if (WiFi.status() == WL_CONNECTED) {
     disconnected_since = 0;
+    disconnected_timer_active = false;
     return;
   }
-  if (disconnected_since == 0) {
+  if (!disconnected_timer_active) {
     disconnected_since = millis();
+    disconnected_timer_active = true;
   }
   if (!ap_started && millis() - disconnected_since > kReconnectStartApMs) {
     startAp();
@@ -4076,8 +4194,7 @@ void setup() {
   decodeTemplateConfig();
   setupDevicePins();
   connectWifi();
-  boot_id = ESP.getCycleCount() ^ micros() ^ ESP.getChipId();
-  if (boot_id == 0) boot_id = ESP.getChipId();
+  boot_id = makeBootId();
   setupRoutes();
   server.begin();
 
