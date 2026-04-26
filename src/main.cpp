@@ -10,6 +10,8 @@ extern "C" {
 #include <user_interface.h>
 }
 
+extern "C" uint32_t _EEPROM_start;
+
 #ifndef MYMOTA_VERSION
 #define MYMOTA_VERSION "dev"
 #endif
@@ -32,11 +34,14 @@ constexpr uint16_t kConfigVersionV7 = 7;
 constexpr uint16_t kConfigVersionV8 = 8;
 constexpr uint16_t kConfigVersion = 9;
 constexpr size_t kEepromSize = 4096;
-constexpr size_t kBootRecoveryOffset = 4000;
+constexpr size_t kBootRecoveryOffset = 3072;
 constexpr uint32_t kConnectTimeoutMs = 20000;
 constexpr uint32_t kReconnectStartApMs = 90000;
 constexpr uint32_t kApRetryMs = 10000;
 constexpr uint32_t kBootRecoveryStableMs = 30000;
+constexpr uint32_t kBootRecoveryBootMarker = 0x4d594254;  // MYBT
+constexpr uint32_t kBootRecoveryStableMarker = kBootRecoveryMagic;
+constexpr uint32_t kBootRecoveryEmptyMarker = 0xffffffffUL;
 constexpr const char *kApPassword = "mymota-setup";
 constexpr uint8_t kPhyModeAuto = 0;
 constexpr uint8_t kPhyModeFailsafe = WIFI_PHY_MODE_11G;
@@ -327,16 +332,12 @@ struct StoredConfig {
   uint32_t crc;
 };
 
-struct BootRecoveryState {
-  uint32_t magic;
-  uint8_t boot_count;
-  uint8_t reserved[3];
-  uint32_t crc;
-};
+constexpr size_t kBootRecoveryLogWords = (kEepromSize - kBootRecoveryOffset) / sizeof(uint32_t);
 
 static_assert(sizeof(StoredConfig) <= kEepromSize, "StoredConfig exceeds EEPROM size");
 static_assert(sizeof(StoredConfig) <= kBootRecoveryOffset, "StoredConfig overlaps boot recovery state");
-static_assert(kBootRecoveryOffset + sizeof(BootRecoveryState) <= kEepromSize, "BootRecoveryState exceeds EEPROM size");
+static_assert(kBootRecoveryOffset % sizeof(uint32_t) == 0, "Boot recovery log must be word aligned");
+static_assert(kBootRecoveryLogWords >= kBootRecoveryLimit * 2, "Boot recovery log is too small");
 static_assert(sizeof(kTemplateSlotToPin) == kTemplateSlotCount, "Template pin map size mismatch");
 
 struct PinAssignment {
@@ -579,7 +580,7 @@ void setDefaultConfig() {
   config_ok = false;
 }
 
-bool commitConfig();
+bool commitConfig(bool force_commit = false);
 
 void scheduleRestart(uint32_t delay_ms) {
   restart_at = millis() + delay_ms;
@@ -590,52 +591,141 @@ bool restartDue() {
   return restart_pending && static_cast<int32_t>(millis() - restart_at) >= 0;
 }
 
-bool loadBootRecoveryState(BootRecoveryState &state) {
-  EEPROM.get(kBootRecoveryOffset, state);
-  return state.magic == kBootRecoveryMagic && state.crc == configCrc(state);
+uint32_t eepromFlashBase() {
+  return ((reinterpret_cast<uint32_t>(&_EEPROM_start) - 0x40200000UL) / kEepromSize) * kEepromSize;
 }
 
-bool saveBootRecoveryState(uint8_t boot_count) {
-  BootRecoveryState state{};
-  state.magic = kBootRecoveryMagic;
-  state.boot_count = boot_count;
-  state.crc = configCrc(state);
-  EEPROM.put(kBootRecoveryOffset, state);
-  const bool committed = EEPROM.commit();
-  if (committed) {
-    boot_recovery_count = boot_count;
-    boot_recovery_armed = boot_count > 0;
+// Boot recovery uses append-only marker writes so normal boots do not erase the
+// EEPROM flash sector. Compaction falls back to EEPROM.commit() only when full.
+uint32_t bootRecoveryMarkerAt(size_t index) {
+  uint32_t marker = kBootRecoveryEmptyMarker;
+  if (index < kBootRecoveryLogWords) {
+    EEPROM.get(kBootRecoveryOffset + index * sizeof(marker), marker);
   }
-  return committed;
+  return marker;
+}
+
+size_t bootRecoveryWriteIndex() {
+  for (size_t i = 0; i < kBootRecoveryLogWords; i++) {
+    if (bootRecoveryMarkerAt(i) == kBootRecoveryEmptyMarker) {
+      return i;
+    }
+  }
+  return kBootRecoveryLogWords;
+}
+
+uint8_t bootRecoveryFastBootCount() {
+  uint16_t count = 0;
+  for (size_t i = 0; i < kBootRecoveryLogWords; i++) {
+    const uint32_t marker = bootRecoveryMarkerAt(i);
+    if (marker == kBootRecoveryEmptyMarker) break;
+    if (marker == kBootRecoveryStableMarker) {
+      count = 0;
+    } else if (marker == kBootRecoveryBootMarker && count < 255) {
+      count++;
+    }
+  }
+  return static_cast<uint8_t>(count > 255 ? 255 : count);
+}
+
+void writeBootRecoveryLogShadowWord(size_t index, uint32_t marker) {
+  if (index >= kBootRecoveryLogWords) return;
+  const size_t offset = kBootRecoveryOffset + index * sizeof(marker);
+  uint8_t *shadow = const_cast<uint8_t *>(EEPROM.getConstDataPtr());
+  if (!shadow || offset + sizeof(marker) > EEPROM.length()) return;
+  memcpy(shadow + offset, &marker, sizeof(marker));
+}
+
+void clearBootRecoveryLogShadow() {
+  for (size_t i = 0; i < kBootRecoveryLogWords * sizeof(uint32_t); i++) {
+    EEPROM.write(kBootRecoveryOffset + i, 0xff);
+  }
+}
+
+bool compactBootRecoveryLog(uint8_t fast_boot_count) {
+  if (fast_boot_count >= kBootRecoveryLimit) {
+    fast_boot_count = kBootRecoveryLimit - 1;
+  }
+  clearBootRecoveryLogShadow();
+  for (uint8_t i = 0; i < fast_boot_count; i++) {
+    const uint32_t marker = kBootRecoveryBootMarker;
+    EEPROM.put(kBootRecoveryOffset + i * sizeof(marker), marker);
+  }
+  return EEPROM.commit();
+}
+
+bool rawWriteBootRecoveryMarker(size_t index, uint32_t marker) {
+  if (index >= kBootRecoveryLogWords) return false;
+  if (bootRecoveryMarkerAt(index) != kBootRecoveryEmptyMarker) return false;
+
+  const uint32_t offset = eepromFlashBase() + kBootRecoveryOffset + index * sizeof(marker);
+  uint32_t word = marker;
+  if (!ESP.flashWrite(offset, &word, sizeof(word))) return false;
+
+  uint32_t verify = kBootRecoveryEmptyMarker;
+  if (!ESP.flashRead(offset, &verify, sizeof(verify)) || verify != marker) return false;
+
+  writeBootRecoveryLogShadowWord(index, marker);
+  return true;
+}
+
+bool appendBootRecoveryMarker(uint32_t marker) {
+  size_t index = bootRecoveryWriteIndex();
+  if (index >= kBootRecoveryLogWords) {
+    if (marker == kBootRecoveryStableMarker) {
+      return compactBootRecoveryLog(0);
+    }
+    if (!compactBootRecoveryLog(bootRecoveryFastBootCount())) {
+      return false;
+    }
+    index = bootRecoveryWriteIndex();
+  }
+  if (rawWriteBootRecoveryMarker(index, marker)) {
+    return true;
+  }
+  EEPROM.put(kBootRecoveryOffset + index * sizeof(marker), marker);
+  return EEPROM.commit();
 }
 
 bool clearBootRecoveryState() {
-  return saveBootRecoveryState(0);
+  if (bootRecoveryFastBootCount() == 0) {
+    boot_recovery_count = 0;
+    boot_recovery_armed = false;
+    return true;
+  }
+  const bool saved = appendBootRecoveryMarker(kBootRecoveryStableMarker);
+  if (saved) {
+    boot_recovery_count = 0;
+    boot_recovery_armed = false;
+  }
+  return saved;
 }
 
 bool recordBootRecoveryStart() {
-  BootRecoveryState state{};
-  uint8_t boot_count = 0;
-  if (loadBootRecoveryState(state)) {
-    boot_count = state.boot_count;
-  }
+  uint8_t boot_count = bootRecoveryFastBootCount();
   if (boot_count < 255) {
     boot_count++;
   }
 
   if (boot_count >= kBootRecoveryLimit) {
+    boot_recovery_count = boot_count;
+    boot_recovery_armed = false;
     boot_recovery_factory_reset = true;
-    clearBootRecoveryState();
     return true;
   }
 
-  saveBootRecoveryState(boot_count);
+  if (!appendBootRecoveryMarker(kBootRecoveryBootMarker)) {
+    Serial.println(F("Could not persist fast power-cycle recovery marker"));
+  }
+  boot_recovery_count = boot_count;
+  boot_recovery_armed = boot_count > 0;
   return false;
 }
 
 bool factoryResetConfig() {
   setDefaultConfig();
-  return commitConfig();
+  clearBootRecoveryLogShadow();
+  return commitConfig(true);
 }
 
 void maintainBootRecovery() {
@@ -726,12 +816,22 @@ void normalizeConfigStrings() {
   }
 }
 
-bool commitConfig() {
+bool storedConfigMatchesCurrentConfig() {
+  StoredConfig stored{};
+  EEPROM.get(0, stored);
+  return memcmp(&stored, &config, sizeof(config)) == 0;
+}
+
+bool commitConfig(bool force_commit) {
   config.magic = kConfigMagic;
   config.version = kConfigVersion;
   config.size = sizeof(StoredConfig);
   normalizeConfigStrings();
   config.crc = configCrc(config);
+  if (!force_commit && storedConfigMatchesCurrentConfig()) {
+    config_ok = config.ssid[0] != '\0';
+    return true;
+  }
   EEPROM.put(0, config);
   const bool committed = EEPROM.commit();
   config_ok = committed && config.ssid[0] != '\0';
@@ -3840,10 +3940,8 @@ void connectWifi() {
   }
 
   if (WiFi.status() != WL_CONNECTED) {
-    if (config.phy_mode != kPhyModeAuto) {
-      saveWifiConfig(config.ssid, config.password, config.hostname, kPhyModeFailsafe);
-      prepareWifi();
-      if (connectWifiWithPhy(config.phy_mode, kConnectTimeoutMs)) {
+    if (config.phy_mode != kPhyModeAuto && config.phy_mode != kPhyModeFailsafe) {
+      if (connectWifiWithPhy(kPhyModeFailsafe, kConnectTimeoutMs)) {
         return;
       }
     }
