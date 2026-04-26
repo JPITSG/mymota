@@ -865,6 +865,48 @@ bool parseUint16Input(const String &input, uint16_t min_value, uint16_t max_valu
   return true;
 }
 
+bool parsePowerCommand(const String &input, uint8_t &relay, String &response_key) {
+  String cmd = input;
+  cmd.trim();
+  cmd.toLowerCase();
+  if (cmd == F("power")) {
+    relay = 0;
+    response_key = F("POWER");
+    return true;
+  }
+  if (!cmd.startsWith(F("power")) || cmd.length() == 5) {
+    return false;
+  }
+
+  uint16_t relay_number = 0;
+  for (size_t i = 5; i < cmd.length(); i++) {
+    const char c = cmd[i];
+    if (c < '0' || c > '9') return false;
+    relay_number = (relay_number * 10U) + static_cast<uint16_t>(c - '0');
+    if (relay_number > kMaxRelays) return false;
+  }
+  if (relay_number == 0) return false;
+  relay = static_cast<uint8_t>(relay_number - 1);
+  response_key = F("POWER");
+  response_key += String(relay_number);
+  return true;
+}
+
+bool parsePowerState(const String &input, bool &on) {
+  String state = input;
+  state.trim();
+  state.toLowerCase();
+  if (state == F("on")) {
+    on = true;
+    return true;
+  }
+  if (state == F("off")) {
+    on = false;
+    return true;
+  }
+  return false;
+}
+
 bool isValidMqttHost(const String &host) {
   if (host.length() > kMqttHostMaxLen) return false;
   for (size_t i = 0; i < host.length(); i++) {
@@ -1824,6 +1866,59 @@ void handlePowerSave() {
   server.send(303, F("text/plain"), "");
 }
 
+void handleCmnd() {
+  if (!server.hasArg("cmnd")) {
+    server.send(400, F("text/plain"), F("Missing cmnd"));
+    return;
+  }
+
+  String cmnd = server.arg("cmnd");
+  cmnd.trim();
+  int separator = -1;
+  for (size_t i = 0; i < cmnd.length(); i++) {
+    const char c = cmnd[i];
+    if (c == ' ' || c == '\t' || c == '\r' || c == '\n') {
+      separator = static_cast<int>(i);
+      break;
+    }
+  }
+  if (separator <= 0 || separator >= static_cast<int>(cmnd.length()) - 1) {
+    server.send(400, F("text/plain"), F("Invalid cmnd"));
+    return;
+  }
+
+  const String command = cmnd.substring(0, separator);
+  const String state_arg = cmnd.substring(separator + 1);
+  uint8_t relay = 0;
+  String response_key;
+  bool on = false;
+  if (!parsePowerCommand(command, relay, response_key)) {
+    server.send(400, F("text/plain"), F("Unsupported command"));
+    return;
+  }
+  if (!parsePowerState(state_arg, on)) {
+    server.send(400, F("text/plain"), F("Invalid power state"));
+    return;
+  }
+  if (relay >= kMaxRelays || !hasPin(runtime_template.relays[relay])) {
+    server.send(400, F("text/plain"), F("Invalid relay"));
+    return;
+  }
+
+  setRelay(relay, on);
+  updateDeviceLeds(true);
+
+  String out;
+  out.reserve(24);
+  out += F("{\"");
+  out += response_key;
+  out += F("\":\"");
+  out += (on ? F("ON") : F("OFF"));
+  out += F("\"}");
+  server.sendHeader(F("Cache-Control"), F("no-store"));
+  server.send(200, F("application/json"), out);
+}
+
 void handleReboot() {
   server.send(200, F("text/plain"), F("Rebooting\n"));
   restart_at = millis() + 500;
@@ -2105,6 +2200,7 @@ void setupRoutes() {
   server.on(F("/template"), HTTP_POST, handleTemplateSave);
   server.on(F("/mqtt"), HTTP_POST, handleMqttSave);
   server.on(F("/power"), HTTP_POST, handlePowerSave);
+  server.on(F("/cm"), HTTP_GET, handleCmnd);
   server.on(F("/reboot"), HTTP_GET, handleReboot);
   server.on(F("/health"), HTTP_GET, handleHealth);
   server.on(F("/update"), HTTP_POST, handleUpdateDone, handleUpdateUpload);
