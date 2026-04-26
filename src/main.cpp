@@ -79,8 +79,8 @@ constexpr size_t kButtonActionTargetMaxLen = 128;
 constexpr size_t kButtonActionPayloadMaxLen = 128;
 constexpr uint32_t kWebhookTimeoutMs = 2000;
 constexpr const char *kDefaultButtonMqttTopic = "stat/{TOPIC}/RESULT";
-constexpr const char *kDefaultButtonMqttPressPayload = "{\"Switch{BUTTONID}\":{\"Action\":\"TOGGLE\"}}";
-constexpr const char *kDefaultButtonMqttHoldPayload = "{\"Switch{BUTTONID}\":{\"Action\":\"HOLD\"}}";
+constexpr const char *kDefaultButtonMqttPressPayload = "{\"Switch{BUTTONID}\":{\"Action\":\"{TYPE}\"}}";
+constexpr const char *kDefaultButtonMqttHoldPayload = "{\"Switch{BUTTONID}\":{\"Action\":\"{TYPE}\"}}";
 
 constexpr uint16_t kTplNone = 0;
 constexpr uint16_t kTplUser = 1;
@@ -1079,7 +1079,7 @@ float energyMqttChangePercent() {
 }
 
 const char *buttonEventType(bool hold) {
-  return hold ? "hold" : "press";
+  return hold ? "HOLD" : "TOGGLE";
 }
 
 const char *buttonActionTarget(uint8_t button, bool hold) {
@@ -2381,7 +2381,11 @@ void maintainDevice() {
 void appendHeader(String &page, const __FlashStringHelper *title, bool show_spinner = false) {
   page += F("<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>");
   page += F("<title>");
-  page += title;
+  page += F("myMota");
+  if (config_ok && config.hostname[0] != '\0') {
+    page += F(" &middot; ");
+    page += htmlEscape(config.hostname);
+  }
   page += F("</title><style>:root{--bg:#f6f7f9;--panel:#fff;--line:#d8dee8;--text:#17202a;--muted:#687386;--ok:#177245;--bad:#a23a36;--accent:#1f7a5f;--accent2:#205c8a}");
   page += F("*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,sans-serif;font-size:15px;line-height:1.4}");
   page += F(".top{background:#17202a;color:#fff;border-bottom:4px solid var(--accent);padding:18px 16px}.topin{max-width:1080px;margin:0 auto;display:flex;align-items:end;justify-content:space-between;gap:12px;flex-wrap:wrap}");
@@ -2736,10 +2740,10 @@ void appendButtonSettings(String &page) {
   page += F("'></label></div>");
   page += F("<div class='note'><p><strong>Action placeholders</strong></p><div class='tokens'>");
   page += F("<div><code>{BUTTONID}</code><span class='hint'>button number, starting at 1</span></div>");
-  page += F("<div><code>{TYPE}</code><span class='hint'>press or hold</span></div>");
+  page += F("<div><code>{TYPE}</code><span class='hint'>TOGGLE on press, HOLD on hold</span></div>");
   page += F("<div><code>{TOPIC}</code><span class='hint'>current MQTT topic</span></div>");
   page += F("<div><code>{RELAYX_STATE}</code><span class='hint'>relay state, for example {RELAY1_STATE}</span></div>");
-  page += F("</div><p class='hint'>MQTT broadcast sends a topic and payload through the configured broker. The default values match the switch action format used by tasmota.js: <code>stat/{TOPIC}/RESULT</code> with a <code>Switch{BUTTONID}</code> payload using <code>TOGGLE</code> for press and <code>HOLD</code> for hold.</p></div>");
+  page += F("</div><p class='hint'>MQTT broadcast sends a topic and payload through the configured broker. The default values match the switch action format used by tasmota.js: <code>stat/{TOPIC}/RESULT</code> with a <code>Switch{BUTTONID}</code> payload using <code>{TYPE}</code>.</p></div>");
 
   for (uint8_t i = 0; i < runtime_template.button_count; i++) {
     if (!hasPin(runtime_template.buttons[i])) continue;
@@ -2880,7 +2884,8 @@ void handleRoot() {
 
   page += F("<section class='panel'><h2>Firmware</h2><form method='post' action='/update' enctype='multipart/form-data'>");
   page += F("<input type='file' name='firmware' accept='.bin,.bin.gz' required><br><button type='submit'>Upload firmware</button></form>");
-  page += F("<p><a class='btn secondary' href='/reboot'>Reboot</a></p></section></div>");
+  page += F("<p><a class='btn secondary' href='/reboot'>Reboot</a></p>");
+  page += F("<form method='post' action='/factory-reset' onsubmit=\"return confirm('Factory reset will delete Wi-Fi, template, MQTT, button, LED, and energy settings. Continue?')\"><button class='danger' type='submit'>Factory reset</button></form></section></div>");
   appendFooter(page);
   sendHtml(page);
 }
@@ -3372,6 +3377,24 @@ void handleReboot() {
   restart_at = millis() + 500;
 }
 
+void handleFactoryReset() {
+  if (!factoryResetConfig()) {
+    server.send(500, F("text/plain"), F("Could not factory reset settings"));
+    return;
+  }
+  clearBootRecoveryState();
+  mqttStop();
+
+  String page;
+  page.reserve(900);
+  appendHeader(page, F("myMota Factory Reset"));
+  page += F("<p class='ok'>Factory reset complete. Rebooting.</p>");
+  page += F("<p>All saved settings have been cleared. After reboot, use the setup AP if the device does not return on this address.</p>");
+  appendFooter(page, false, true);
+  sendHtml(page);
+  restart_at = millis() + 800;
+}
+
 void handleHealth() {
   String out;
   out.reserve(2500);
@@ -3742,6 +3765,7 @@ void setupRoutes() {
   server.on(F("/power"), HTTP_POST, handlePowerSave);
   server.on(F("/cm"), HTTP_GET, handleCmnd);
   server.on(F("/reboot"), HTTP_GET, handleReboot);
+  server.on(F("/factory-reset"), HTTP_POST, handleFactoryReset);
   server.on(F("/health"), HTTP_GET, handleHealth);
   server.on(F("/update"), HTTP_POST, handleUpdateDone, handleUpdateUpload);
   server.onNotFound(handleNotFound);
