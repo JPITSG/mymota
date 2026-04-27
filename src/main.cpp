@@ -4377,6 +4377,29 @@ bool apiSettingsIndexedArg(uint8_t input_number, const char *primary_suffix, con
   return apiSettingsGetArg(primary, fallback, out);
 }
 
+bool apiSettingsIndexedArgPresent(uint8_t input_number, const char *primary_suffix, const char *fallback_suffix) {
+  String primary = F("input");
+  primary += input_number;
+  primary += primary_suffix;
+  if (server.hasArg(primary)) return true;
+
+  String fallback = F("input");
+  fallback += input_number;
+  fallback += fallback_suffix;
+  return server.hasArg(fallback);
+}
+
+bool apiSettingsGetHasUpdateArgs() {
+  if (server.hasArg(F("input")) || server.hasArg(F("id"))) return true;
+  for (uint8_t input_number = 1; input_number <= kMaxButtons; input_number++) {
+    if (apiSettingsIndexedArgPresent(input_number, "_mqtt_topic", "_topic") ||
+        apiSettingsIndexedArgPresent(input_number, "_mqtt_payload", "_payload")) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool applyApiSettingsGetArgs(StoredConfig &target, SettingsImportStats &stats) {
   bool saw_setting_arg = false;
 
@@ -8172,6 +8195,20 @@ void sendApiSettingsError(uint16_t status, const __FlashStringHelper *message) {
   server.send(status, F("application/json"), out);
 }
 
+bool allocateApiSettingsConfigs(StoredConfig *&before, StoredConfig *&candidate) {
+  before = new StoredConfig(config);
+  candidate = before ? new StoredConfig(*before) : nullptr;
+  if (!before || !candidate) {
+    delete before;
+    delete candidate;
+    before = nullptr;
+    candidate = nullptr;
+    sendApiSettingsError(500, F("Could not allocate API settings"));
+    return false;
+  }
+  return true;
+}
+
 void finishApiSettingsUpdate(const StoredConfig &before, const StoredConfig &candidate, const SettingsImportStats &stats) {
   if (stats.applied == 0) {
     String out;
@@ -8217,19 +8254,28 @@ void finishApiSettingsUpdate(const StoredConfig &before, const StoredConfig &can
 }
 
 void handleApiSettingsGet() {
-  StoredConfig before = config;
-  StoredConfig candidate = config;
-  SettingsImportStats stats = {0, 0, String()};
-  if (applyApiSettingsGetArgs(candidate, stats)) {
-    finishApiSettingsUpdate(before, candidate, stats);
+  if (!apiSettingsGetHasUpdateArgs()) {
+    String out;
+    out.reserve(1800);
+    appendApiSettingsJson(out);
+    server.sendHeader(F("Cache-Control"), F("no-store"));
+    server.send(200, F("application/json"), out);
     return;
   }
 
-  String out;
-  out.reserve(1800);
-  appendApiSettingsJson(out);
-  server.sendHeader(F("Cache-Control"), F("no-store"));
-  server.send(200, F("application/json"), out);
+  StoredConfig *before = nullptr;
+  StoredConfig *candidate = nullptr;
+  if (!allocateApiSettingsConfigs(before, candidate)) return;
+
+  SettingsImportStats stats = {0, 0, String()};
+  if (applyApiSettingsGetArgs(*candidate, stats)) {
+    finishApiSettingsUpdate(*before, *candidate, stats);
+    delete before;
+    delete candidate;
+    return;
+  }
+  delete before;
+  delete candidate;
 }
 
 void handleApiSettingsUpdate() {
@@ -8253,12 +8299,16 @@ void handleApiSettingsUpdate() {
     return;
   }
 
-  StoredConfig before = config;
-  StoredConfig candidate = config;
-  SettingsImportStats stats = {0, 0, String()};
-  applyApiInputSettings(root, candidate, stats);
+  StoredConfig *before = nullptr;
+  StoredConfig *candidate = nullptr;
+  if (!allocateApiSettingsConfigs(before, candidate)) return;
 
-  finishApiSettingsUpdate(before, candidate, stats);
+  SettingsImportStats stats = {0, 0, String()};
+  applyApiInputSettings(root, *candidate, stats);
+
+  finishApiSettingsUpdate(*before, *candidate, stats);
+  delete before;
+  delete candidate;
 }
 
 void appendSettingsImportSummary(String &page, const SettingsImportStats &stats) {
