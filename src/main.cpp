@@ -213,6 +213,8 @@ const char kTemplateShelly25Json[] PROGMEM =
   "{\"NAME\":\"Shelly 2.5\",\"GPIO\":[320,0,0,0,224,193,0,0,640,192,608,225,3456,4736],\"FLAG\":0,\"BASE\":18}";
 const char kTemplateShelly1Json[] PROGMEM =
   "{\"NAME\":\"Shelly 1\",\"GPIO\":[1,1,0,1,224,192,0,0,0,0,0,0,0,0],\"FLAG\":0,\"BASE\":46}";
+const char kTemplateShelly1LJson[] PROGMEM =
+  "{\"NAME\":\"Shelly 1L\",\"GPIO\":[320,0,0,0,192,224,0,0,0,0,193,0,0,4736],\"FLAG\":0,\"BASE\":18}";
 
 enum Ade7953Register : uint16_t {
   kAde7953DisNoLoad = 0x001,
@@ -5963,6 +5965,8 @@ void appendTemplateForm(String &page) {
   page += F("'>NOUS A1T 16A</option><option data-json='");
   page += htmlEscape(String(FPSTR(kTemplateShelly1Json)));
   page += F("'>Shelly 1</option><option data-json='");
+  page += htmlEscape(String(FPSTR(kTemplateShelly1LJson)));
+  page += F("'>Shelly 1L</option><option data-json='");
   page += htmlEscape(String(FPSTR(kTemplateShelly25Json)));
   page += F("'>Shelly 2.5</option><option data-json='");
   page += htmlEscape(String(FPSTR(kTemplateShellyPlugSJson)));
