@@ -39,7 +39,9 @@ constexpr uint16_t kConfigVersionV8 = 8;
 constexpr uint16_t kConfigVersionV9 = 9;
 constexpr uint16_t kConfigVersionV10 = 10;
 constexpr uint16_t kConfigVersionV11 = 11;
-constexpr uint16_t kConfigVersion = 12;
+constexpr uint16_t kConfigVersionV12 = 12;
+constexpr uint16_t kConfigVersionV13 = 13;
+constexpr uint16_t kConfigVersion = 14;
 constexpr size_t kEepromSize = 4096;
 constexpr size_t kFlashSectorSize = 4096;
 constexpr uint8_t kEnergyJournalSectorCount = 2;
@@ -70,10 +72,20 @@ constexpr uint32_t kMqttIoTimeoutMs = 250;
 constexpr uint32_t kMqttInboundReadTimeoutMs = 20;
 constexpr uint32_t kMqttBrokerSilenceTimeoutMs = static_cast<uint32_t>(kMqttProtocolKeepaliveSec) * 2000UL;
 constexpr uint32_t kMqttConnackMaxRemainingLength = 2;
+constexpr uint32_t kMqttSubackMaxRemainingLength = 16;
+constexpr uint32_t kMqttInboundMaxRemainingLength = 512;
 constexpr uint8_t kMqttInboundPacketLimit = 4;
+constexpr uint16_t kMqttCommandPacketId = 1;
+constexpr size_t kMqttCommandTopicMaxLen = 5 + kMqttTopicMaxLen + 2;
+constexpr size_t kMqttInboundTopicMaxLen = kMqttCommandTopicMaxLen + 32;
+constexpr size_t kMqttInboundPayloadMaxLen = 96;
 constexpr uint16_t kMqttEnergyIntervalMax = 65535U;
 constexpr float kMqttEnergyChangeMaxPercent = 1000.0f;
 constexpr uint8_t kMqttPacketConnack = 0x20;
+constexpr uint8_t kMqttPacketPublish = 0x30;
+constexpr uint8_t kMqttPacketPuback = 0x40;
+constexpr uint8_t kMqttPacketSubscribe = 0x82;
+constexpr uint8_t kMqttPacketSuback = 0x90;
 constexpr uint8_t kMqttPacketPingreq = 0xc0;
 constexpr uint8_t kMqttPacketPingresp = 0xd0;
 constexpr uint8_t kInvalidPin = 0xff;
@@ -82,6 +94,8 @@ constexpr uint8_t kMaxRelays = 8;
 constexpr uint8_t kMaxButtons = 4;
 constexpr uint8_t kMaxLeds = 4;
 constexpr uint8_t kMaxLedOutputs = kMaxLeds + 1;
+constexpr uint8_t kMaxLightPwms = 2;
+constexpr uint8_t kMaxRotaries = 1;
 constexpr uint16_t kButtonDebounceDefaultMs = 50;
 constexpr uint16_t kButtonDebounceMinMs = 5;
 constexpr uint16_t kButtonDebounceMaxMs = 200;
@@ -89,6 +103,21 @@ constexpr uint16_t kButtonHoldDefaultMs = 500;
 constexpr uint16_t kButtonHoldMinMs = 1;
 constexpr uint16_t kButtonHoldMaxMs = 60000;
 constexpr uint32_t kLedUpdateMs = 250;
+constexpr uint16_t kLightPwmRange = 1023;
+constexpr uint16_t kLightPwmFrequency = 1000;
+constexpr uint8_t kLightDimmerOff = 0;
+constexpr uint8_t kLightDimmerMin = 1;
+constexpr uint8_t kLightDimmerMax = 100;
+constexpr uint8_t kLightDimmerDefault = 50;
+constexpr uint8_t kLightPowerOnDimmerDefault = 50;
+constexpr uint16_t kLightCtMin = 153;
+constexpr uint16_t kLightCtMax = 500;
+constexpr uint16_t kLightCtDefault = 326;
+constexpr uint32_t kLightPersistDelayMs = 2000;
+constexpr uint32_t kRotaryHandlerMs = 50;
+constexpr uint8_t kRotaryOffset = 128;
+constexpr uint8_t kRotaryMaxSteps = 10;
+constexpr uint8_t kRotaryMiDeskStepScale = 3;
 constexpr uint32_t kAdcUpdateMs = 2000;
 constexpr uint32_t kEnergyUpdateMs = 200;
 constexpr uint32_t kEnergyIntegrateMs = 1000;
@@ -138,6 +167,10 @@ constexpr uint8_t kMqttConnectTcpFailed = 2;
 constexpr uint8_t kMqttConnectWriteFailed = 3;
 constexpr uint8_t kMqttConnectConnackTimeout = 4;
 constexpr uint8_t kMqttConnectConnackRejected = 5;
+constexpr uint8_t kMqttConnectSubscribeFailed = 6;
+constexpr uint8_t kMqttLightPendingDimmer = 0x01;
+constexpr uint8_t kMqttLightPendingCt = 0x02;
+constexpr uint8_t kMqttLightPendingAll = kMqttLightPendingDimmer | kMqttLightPendingCt;
 constexpr uint8_t kPowerStateOff = 0;
 constexpr uint8_t kPowerStateOn = 1;
 constexpr uint8_t kPowerStateToggle = 2;
@@ -154,6 +187,8 @@ constexpr uint16_t kTplRel1 = 224;
 constexpr uint16_t kTplRel1Inv = 256;
 constexpr uint16_t kTplLed1 = 288;
 constexpr uint16_t kTplLed1Inv = 320;
+constexpr uint16_t kTplPwm1 = 416;
+constexpr uint16_t kTplPwm1Inv = 448;
 constexpr uint16_t kTplLedLnk = 544;
 constexpr uint16_t kTplLedLnkInv = 576;
 constexpr uint16_t kTplI2cScl = 608;
@@ -163,9 +198,13 @@ constexpr uint16_t kTplNrgSelInv = 2624;
 constexpr uint16_t kTplNrgCf1 = 2656;
 constexpr uint16_t kTplHlwCf = 2688;
 constexpr uint16_t kTplHjlCf = 2720;
+constexpr uint16_t kTplRot1A = 3264;
+constexpr uint16_t kTplRot1B = 3296;
 constexpr uint16_t kTplAde7953Irq = 3456;
 constexpr uint16_t kTplAdcTemp = 4736;
 
+const char kTemplateMiDeskLampJson[] PROGMEM =
+  "{\"NAME\":\"Mi Desk Lamp\",\"GPIO\":[0,0,32,0,416,417,0,0,3264,3296,0,0,0,0],\"FLAG\":0,\"BASE\":66}";
 const char kTemplateShellyPlugSJson[] PROGMEM =
   "{\"NAME\":\"Shelly Plug S\",\"GPIO\":[320,1,576,1,1,2720,0,0,2624,32,2656,224,1,4736],\"FLAG\":0,\"BASE\":45}";
 const char kTemplateNousA1TJson[] PROGMEM =
@@ -500,7 +539,7 @@ struct StoredConfigV11 {
   uint32_t crc;
 };
 
-struct StoredConfig {
+struct StoredConfigV12 {
   uint32_t magic;
   uint16_t version;
   uint16_t size;
@@ -538,6 +577,90 @@ struct StoredConfig {
   uint32_t crc;
 };
 
+struct StoredConfigV13 {
+  uint32_t magic;
+  uint16_t version;
+  uint16_t size;
+  char ssid[33];
+  char password[65];
+  char hostname[33];
+  uint8_t phy_mode;
+  uint8_t template_enabled;
+  uint16_t template_base;
+  uint32_t template_flag;
+  char template_name[33];
+  uint16_t template_gpio[kTemplateSlotCount];
+  uint16_t mqtt_port;
+  uint16_t mqtt_keepalive;
+  char mqtt_host[kMqttHostMaxLen + 1];
+  char mqtt_topic[kMqttTopicMaxLen + 1];
+  float energy_total_offset_kwh;
+  uint8_t led_attach[kMaxLedOutputs];
+  uint16_t button_hold_ms;
+  uint8_t button_press_action[kMaxButtons];
+  uint8_t button_hold_action[kMaxButtons];
+  uint16_t energy_mqtt_interval;
+  uint16_t energy_mqtt_change_percent_x10;
+  char button_press_target[kMaxButtons][kButtonActionTargetMaxLen + 1];
+  char button_press_payload[kMaxButtons][kButtonActionPayloadMaxLen + 1];
+  char button_hold_target[kMaxButtons][kButtonActionTargetMaxLen + 1];
+  char button_hold_payload[kMaxButtons][kButtonActionPayloadMaxLen + 1];
+  uint16_t button_debounce_ms;
+  uint8_t input_mode[kMaxButtons];
+  uint8_t input_relay[kMaxButtons];
+  uint8_t input_on_level[kMaxButtons];
+  uint8_t reserved[1];
+  uint8_t button_press_relay[kMaxButtons];
+  uint8_t button_hold_relay[kMaxButtons];
+  uint8_t light_power;
+  uint8_t light_dimmer;
+  uint16_t light_ct;
+  uint32_t crc;
+};
+
+struct StoredConfig {
+  uint32_t magic;
+  uint16_t version;
+  uint16_t size;
+  char ssid[33];
+  char password[65];
+  char hostname[33];
+  uint8_t phy_mode;
+  uint8_t template_enabled;
+  uint16_t template_base;
+  uint32_t template_flag;
+  char template_name[33];
+  uint16_t template_gpio[kTemplateSlotCount];
+  uint16_t mqtt_port;
+  uint16_t mqtt_keepalive;
+  char mqtt_host[kMqttHostMaxLen + 1];
+  char mqtt_topic[kMqttTopicMaxLen + 1];
+  float energy_total_offset_kwh;
+  uint8_t led_attach[kMaxLedOutputs];
+  uint16_t button_hold_ms;
+  uint8_t button_press_action[kMaxButtons];
+  uint8_t button_hold_action[kMaxButtons];
+  uint16_t energy_mqtt_interval;
+  uint16_t energy_mqtt_change_percent_x10;
+  char button_press_target[kMaxButtons][kButtonActionTargetMaxLen + 1];
+  char button_press_payload[kMaxButtons][kButtonActionPayloadMaxLen + 1];
+  char button_hold_target[kMaxButtons][kButtonActionTargetMaxLen + 1];
+  char button_hold_payload[kMaxButtons][kButtonActionPayloadMaxLen + 1];
+  uint16_t button_debounce_ms;
+  uint8_t input_mode[kMaxButtons];
+  uint8_t input_relay[kMaxButtons];
+  uint8_t input_on_level[kMaxButtons];
+  uint8_t reserved[1];
+  uint8_t button_press_relay[kMaxButtons];
+  uint8_t button_hold_relay[kMaxButtons];
+  uint8_t light_power;
+  uint8_t light_dimmer;
+  uint16_t light_ct;
+  uint8_t light_on_dimmer;
+  uint8_t light_reserved[3];
+  uint32_t crc;
+};
+
 constexpr size_t kBootRecoveryLogWords = (kEepromSize - kBootRecoveryOffset) / sizeof(uint32_t);
 
 static_assert(sizeof(StoredConfig) <= kEepromSize, "StoredConfig exceeds EEPROM size");
@@ -570,9 +693,14 @@ struct RuntimeTemplate {
   uint8_t input_kind[kMaxButtons];
   PinAssignment leds[kMaxLeds];
   PinAssignment link_led;
+  PinAssignment light_pwm[kMaxLightPwms];
+  PinAssignment rotary_a[kMaxRotaries];
+  PinAssignment rotary_b[kMaxRotaries];
   uint8_t relay_count;
   uint8_t button_count;
   uint8_t led_count;
+  uint8_t pwm_count;
+  uint8_t rotary_count;
   uint8_t i2c_scl_pin;
   uint8_t i2c_sda_pin;
   uint8_t ade7953_irq_pin;
@@ -586,6 +714,24 @@ struct RuntimeTemplate {
   uint8_t unsupported_count;
   uint8_t unsupported_pin[8];
   uint16_t unsupported_code[8];
+};
+
+struct LightState {
+  bool present;
+  bool power;
+  uint8_t dimmer;
+  uint16_t ct;
+  bool config_dirty;
+  uint32_t config_save_at;
+};
+
+struct RotaryEncoderState {
+  bool present;
+  PinAssignment a;
+  PinAssignment b;
+  volatile uint8_t state;
+  volatile int16_t position;
+  bool changed_while_pressed;
 };
 
 struct EnergyChannelState {
@@ -657,6 +803,8 @@ WiFiClient mqtt_client;
 StoredConfig config{};
 RuntimeTemplate runtime_template{};
 ButtonState button_state[kMaxButtons]{};
+LightState light{};
+RotaryEncoderState rotary_encoder{};
 EnergyState energy{};
 
 bool config_ok = false;
@@ -674,6 +822,7 @@ uint32_t last_wifi_begin_attempt = 0;
 bool sta_connected_once = false;
 uint32_t last_ap_attempt = 0;
 uint32_t last_led_update = 0;
+uint32_t last_rotary_handler = 0;
 uint32_t last_adc_update = 0;
 uint32_t next_mqtt_reconnect = 0;
 uint32_t last_mqtt_io = 0;
@@ -685,6 +834,7 @@ uint32_t last_mqtt_connect_attempt = 0;
 uint32_t last_mqtt_connect_duration = 0;
 float last_mqtt_energy_power = NAN;
 uint16_t mqtt_pending_relay_mask = 0;
+uint8_t mqtt_pending_light_mask = 0;
 struct MqttButtonPending {
   uint32_t queued_at;
   char topic[kMqttButtonTopicMaxLen + 1];
@@ -700,6 +850,7 @@ uint8_t boot_recovery_count = 0;
 bool boot_recovery_armed = false;
 bool boot_recovery_factory_reset = false;
 bool relay_state[kMaxRelays]{};
+bool rotary_suppress_button[kMaxButtons]{};
 bool energy_report_boot_settled = false;
 bool energy_journal_loaded = false;
 uint8_t energy_journal_sector = 0;
@@ -722,7 +873,12 @@ uint32_t perf_last_loop_max_us = 0;
 bool hasPin(const PinAssignment &assignment);
 bool mqttEnergyReportingEnabled();
 bool relayAvailable(uint8_t relay);
+bool lightAvailableIn(const RuntimeTemplate &rt);
+bool defaultButtonRelayTarget(uint8_t button, uint8_t &relay);
 bool parseUint16Input(const String &input, uint16_t min_value, uint16_t max_value, uint16_t &out);
+bool executeDeviceCommand(const char *raw, size_t cmd_len, const char *arg, size_t arg_len, String &out, String &error);
+void scheduleMqttLightPublish(uint8_t mask);
+void toggleLightPower(bool persist = true);
 
 void recordLoopPerf(uint32_t started_us, uint32_t ended_us) {
   const uint32_t now_ms = millis();
@@ -820,6 +976,18 @@ void setDefaultMqttConfig() {
 void setDefaultEnergyMqttConfig() {
   config.energy_mqtt_interval = 0;
   config.energy_mqtt_change_percent_x10 = 0;
+}
+
+void setDefaultLightConfig(StoredConfig &target) {
+  target.light_power = 0;
+  target.light_dimmer = kLightDimmerOff;
+  target.light_ct = kLightCtDefault;
+  target.light_on_dimmer = kLightPowerOnDimmerDefault;
+  memset(target.light_reserved, 0, sizeof(target.light_reserved));
+}
+
+void setDefaultLightConfig() {
+  setDefaultLightConfig(config);
 }
 
 uint8_t defaultLedAttachment(uint8_t led) {
@@ -946,6 +1114,7 @@ void setDefaultConfig() {
   setDefaultEnergyMqttConfig();
   setDefaultLedConfig();
   setDefaultButtonConfig();
+  setDefaultLightConfig();
   config.crc = configCrc(config);
   config_ok = false;
 }
@@ -1304,6 +1473,7 @@ void clearTemplateConfig(StoredConfig &target) {
   memset(target.template_gpio, 0, sizeof(target.template_gpio));
   setDefaultLedConfig(target);
   setDefaultButtonConfig(target);
+  setDefaultLightConfig(target);
 }
 
 void clearTemplateConfig() {
@@ -1341,6 +1511,22 @@ void normalizeConfigStrings() {
   if (config.energy_mqtt_change_percent_x10 > static_cast<uint16_t>(kMqttEnergyChangeMaxPercent * 10.0f)) {
     config.energy_mqtt_change_percent_x10 = 0;
   }
+  config.light_power = config.light_power ? 1 : 0;
+  if (config.light_dimmer > kLightDimmerMax) {
+    config.light_dimmer = kLightDimmerDefault;
+  }
+  if (config.light_on_dimmer < kLightDimmerMin || config.light_on_dimmer > kLightDimmerMax) {
+    config.light_on_dimmer = kLightPowerOnDimmerDefault;
+  }
+  if (!config.light_power) {
+    config.light_dimmer = kLightDimmerOff;
+  } else if (config.light_dimmer < kLightDimmerMin) {
+    config.light_dimmer = config.light_on_dimmer;
+  }
+  if (config.light_ct < kLightCtMin || config.light_ct > kLightCtMax) {
+    config.light_ct = kLightCtDefault;
+  }
+  memset(config.light_reserved, 0, sizeof(config.light_reserved));
   for (uint8_t i = 0; i < kMaxLedOutputs; i++) {
     if (!isLedAttachmentEncoding(config.led_attach[i])) {
       config.led_attach[i] = defaultLedAttachment(i);
@@ -1464,6 +1650,47 @@ bool loadConfig() {
     return config_ok;
   }
 
+  if (header.version == kConfigVersionV13 && header.size == sizeof(StoredConfigV13)) {
+    StoredConfigV13 *old_config = new StoredConfigV13;
+    if (!old_config) {
+      setDefaultConfig();
+      return false;
+    }
+    EEPROM.get(0, *old_config);
+    if (old_config->crc != configCrc(*old_config)) {
+      delete old_config;
+      setDefaultConfig();
+      return false;
+    }
+    memset(&config, 0, sizeof(config));
+    memcpy(&config, old_config, offsetof(StoredConfigV13, crc));
+    config.light_on_dimmer = config.light_dimmer;
+    memset(config.light_reserved, 0, sizeof(config.light_reserved));
+    delete old_config;
+    commitConfig();
+    return config_ok;
+  }
+
+  if (header.version == kConfigVersionV12 && header.size == sizeof(StoredConfigV12)) {
+    StoredConfigV12 *old_config = new StoredConfigV12;
+    if (!old_config) {
+      setDefaultConfig();
+      return false;
+    }
+    EEPROM.get(0, *old_config);
+    if (old_config->crc != configCrc(*old_config)) {
+      delete old_config;
+      setDefaultConfig();
+      return false;
+    }
+    memset(&config, 0, sizeof(config));
+    memcpy(&config, old_config, offsetof(StoredConfigV12, crc));
+    setDefaultLightConfig();
+    delete old_config;
+    commitConfig();
+    return config_ok;
+  }
+
   if (header.version == kConfigVersionV11 && header.size == sizeof(StoredConfigV11)) {
     StoredConfigV11 *old_config = new StoredConfigV11;
     if (!old_config) {
@@ -1479,6 +1706,7 @@ bool loadConfig() {
     memset(&config, 0, sizeof(config));
     memcpy(&config, old_config, offsetof(StoredConfigV11, crc));
     setDefaultButtonRelayConfig();
+    setDefaultLightConfig();
     delete old_config;
     commitConfig();
     return config_ok;
@@ -1500,6 +1728,7 @@ bool loadConfig() {
     memcpy(&config, old_config, offsetof(StoredConfigV10, crc));
     setDefaultButtonRelayConfig();
     setDefaultInputConfig();
+    setDefaultLightConfig();
     delete old_config;
     commitConfig();
     return config_ok;
@@ -1850,6 +2079,7 @@ void resetMqttRuntimeState() {
   last_mqtt_connect_result = kMqttConnectIdle;
   last_mqtt_energy_power = NAN;
   mqtt_pending_relay_mask = 0;
+  mqtt_pending_light_mask = 0;
   mqtt_button_queue_head = 0;
   mqtt_button_queue_count = 0;
   mqtt_ping_pending = false;
@@ -2031,6 +2261,12 @@ bool readButtonRelayTargetInput(uint8_t button, const char *prefix, uint8_t acti
         relays[button] = static_cast<uint8_t>(relay_value);
       }
     }
+    return true;
+  }
+
+  uint8_t default_relay = 0;
+  if (!defaultButtonRelayTarget(button, default_relay) && lightAvailableIn(runtime_template)) {
+    relays[button] = kButtonRelayUnset;
     return true;
   }
 
@@ -2253,6 +2489,13 @@ bool relayAvailable(uint8_t relay) {
   return relay < runtime_template.relay_count && hasPin(runtime_template.relays[relay]);
 }
 
+bool lightAvailableIn(const RuntimeTemplate &rt) {
+  for (uint8_t i = 0; i < rt.pwm_count && i < kMaxLightPwms; i++) {
+    if (hasPin(rt.light_pwm[i])) return true;
+  }
+  return false;
+}
+
 bool defaultButtonRelayTarget(uint8_t button, uint8_t &relay) {
   if (button < runtime_template.relay_count && hasPin(runtime_template.relays[button])) {
     relay = button;
@@ -2299,7 +2542,7 @@ bool buttonActionAvailable(uint8_t button, uint8_t action) {
   if (action == kButtonActionNone) return true;
   if (action == kButtonActionRelayToggle) {
     uint8_t relay = 0;
-    return defaultButtonRelayTarget(button, relay);
+    return defaultButtonRelayTarget(button, relay) || lightAvailableIn(runtime_template);
   }
   if (action == kButtonActionMqtt || action == kButtonActionWebhook) return true;
   return false;
@@ -2386,6 +2629,16 @@ void parseTemplateFunction(RuntimeTemplate &target, uint8_t pin, uint16_t code) 
     return;
   }
 
+  if (base == kTplPwm1 || base == kTplPwm1Inv) {
+    if (index >= kMaxLightPwms) {
+      addUnsupportedTemplatePin(target, pin, code);
+      return;
+    }
+    target.light_pwm[index] = {pin, base == kTplPwm1Inv, false};
+    if (target.pwm_count <= index) target.pwm_count = index + 1;
+    return;
+  }
+
   if (base == kTplLed1 || base == kTplLed1Inv) {
     if (index >= kMaxLeds) {
       addUnsupportedTemplatePin(target, pin, code);
@@ -2436,6 +2689,20 @@ void parseTemplateFunction(RuntimeTemplate &target, uint8_t pin, uint16_t code) 
     return;
   }
 
+  if (base == kTplRot1A || base == kTplRot1B) {
+    if (index >= kMaxRotaries || !interruptPinSupported(pin)) {
+      addUnsupportedTemplatePin(target, pin, code);
+      return;
+    }
+    if (base == kTplRot1A) {
+      target.rotary_a[index] = {pin, false, false};
+    } else {
+      target.rotary_b[index] = {pin, false, false};
+    }
+    if (target.rotary_count <= index) target.rotary_count = index + 1;
+    return;
+  }
+
   if (base == kTplAde7953Irq) {
     target.ade7953_irq_pin = pin;
     target.ade7953_model = index;
@@ -2471,6 +2738,11 @@ void resetRuntimeTemplate(RuntimeTemplate &target) {
   for (uint8_t i = 0; i < kMaxRelays; i++) resetPinAssignment(target.relays[i]);
   for (uint8_t i = 0; i < kMaxButtons; i++) resetPinAssignment(target.buttons[i]);
   for (uint8_t i = 0; i < kMaxLeds; i++) resetPinAssignment(target.leds[i]);
+  for (uint8_t i = 0; i < kMaxLightPwms; i++) resetPinAssignment(target.light_pwm[i]);
+  for (uint8_t i = 0; i < kMaxRotaries; i++) {
+    resetPinAssignment(target.rotary_a[i]);
+    resetPinAssignment(target.rotary_b[i]);
+  }
   resetPinAssignment(target.link_led);
   target.i2c_scl_pin = kInvalidPin;
   target.i2c_sda_pin = kInvalidPin;
@@ -2733,6 +3005,19 @@ bool parsePowerState(const char *p, size_t len, uint8_t &state) {
   return false;
 }
 
+bool commandEquals(const char *p, size_t len, const char *name) {
+  return len == strlen(name) && strncasecmp(p, name, len) == 0;
+}
+
+String commandArgument(const char *p, size_t len) {
+  String out;
+  out.reserve(len);
+  for (size_t i = 0; i < len; i++) {
+    out += p[i];
+  }
+  return out;
+}
+
 bool isValidMqttHost(const String &host) {
   if (host.length() > kMqttHostMaxLen) return false;
   for (size_t i = 0; i < host.length(); i++) {
@@ -2940,7 +3225,7 @@ bool buttonActionAvailableIn(const RuntimeTemplate &rt, uint8_t button, uint8_t 
   if (action == kButtonActionNone || action == kButtonActionMqtt || action == kButtonActionWebhook) return true;
   if (action == kButtonActionRelayToggle) {
     uint8_t relay = 0;
-    return defaultButtonRelayTargetIn(rt, button, relay);
+    return defaultButtonRelayTargetIn(rt, button, relay) || lightAvailableIn(rt);
   }
   return false;
 }
@@ -2964,6 +3249,13 @@ bool energyConfigDiffers(const StoredConfig &a, const StoredConfig &b) {
   return a.energy_total_offset_kwh != b.energy_total_offset_kwh ||
          a.energy_mqtt_interval != b.energy_mqtt_interval ||
          a.energy_mqtt_change_percent_x10 != b.energy_mqtt_change_percent_x10;
+}
+
+bool lightConfigDiffers(const StoredConfig &a, const StoredConfig &b) {
+  return a.light_power != b.light_power ||
+         a.light_dimmer != b.light_dimmer ||
+         a.light_ct != b.light_ct ||
+         a.light_on_dimmer != b.light_on_dimmer;
 }
 
 bool ledConfigDiffers(const StoredConfig &a, const StoredConfig &b) {
@@ -3041,6 +3333,14 @@ void appendSettingsExportJson(String &out) {
   out += config.energy_mqtt_interval;
   out += F(",\"report_change_percent\":");
   out += String(energyMqttChangePercent(), 1);
+  out += F("},\"light\":{\"power\":");
+  out += config.light_power ? F("true") : F("false");
+  out += F(",\"dimmer\":");
+  out += config.light_dimmer;
+  out += F(",\"ct\":");
+  out += config.light_ct;
+  out += F(",\"on_dimmer\":");
+  out += config.light_on_dimmer;
   out += F("},\"leds\":[");
   for (uint8_t i = 0; i < kMaxLedOutputs; i++) {
     if (i) out += ',';
@@ -3195,6 +3495,57 @@ void importSettingsEnergy(JsonObjectConst root, StoredConfig &target, SettingsIm
       recordSettingsApplied(stats);
     } else {
       recordSettingsSkipped(stats, F("energy.report_change_percent"));
+    }
+  }
+}
+
+void importSettingsLight(JsonObjectConst root, StoredConfig &target, const RuntimeTemplate &rt, SettingsImportStats &stats) {
+  JsonVariantConst light_value = root["light"];
+  if (light_value.isNull()) return;
+  JsonObjectConst light_settings = light_value.as<JsonObjectConst>();
+  if (light_settings.isNull()) {
+    recordSettingsSkipped(stats, F("light"));
+    return;
+  }
+  if (!lightAvailableIn(rt)) {
+    recordSettingsSkipped(stats, F("light"));
+    return;
+  }
+
+  if (light_settings.containsKey("power")) {
+    JsonVariantConst power_value = light_settings["power"];
+    if (power_value.is<bool>()) {
+      target.light_power = power_value.as<bool>() ? 1 : 0;
+      recordSettingsApplied(stats);
+    } else {
+      recordSettingsSkipped(stats, F("light.power"));
+    }
+  }
+  if (light_settings.containsKey("dimmer")) {
+    uint16_t dimmer = kLightDimmerDefault;
+    if (settingsReadUint16(light_settings["dimmer"], kLightDimmerOff, kLightDimmerMax, dimmer)) {
+      target.light_dimmer = static_cast<uint8_t>(dimmer);
+      recordSettingsApplied(stats);
+    } else {
+      recordSettingsSkipped(stats, F("light.dimmer"));
+    }
+  }
+  if (light_settings.containsKey("ct")) {
+    uint16_t ct = kLightCtDefault;
+    if (settingsReadUint16(light_settings["ct"], kLightCtMin, kLightCtMax, ct)) {
+      target.light_ct = ct;
+      recordSettingsApplied(stats);
+    } else {
+      recordSettingsSkipped(stats, F("light.ct"));
+    }
+  }
+  if (light_settings.containsKey("on_dimmer")) {
+    uint16_t on_dimmer = kLightPowerOnDimmerDefault;
+    if (settingsReadUint16(light_settings["on_dimmer"], kLightDimmerMin, kLightDimmerMax, on_dimmer)) {
+      target.light_on_dimmer = static_cast<uint8_t>(on_dimmer);
+      recordSettingsApplied(stats);
+    } else {
+      recordSettingsSkipped(stats, F("light.on_dimmer"));
     }
   }
 }
@@ -3447,6 +3798,7 @@ const __FlashStringHelper *mqttConnectResultName(uint8_t result) {
     case kMqttConnectWriteFailed: return F("connect_write_failed");
     case kMqttConnectConnackTimeout: return F("connack_timeout");
     case kMqttConnectConnackRejected: return F("connack_rejected");
+    case kMqttConnectSubscribeFailed: return F("subscribe_failed");
     default: return F("idle");
   }
 }
@@ -3511,6 +3863,21 @@ bool mqttReadByteUntil(uint8_t &value, uint32_t deadline_ms) {
   return true;
 }
 
+bool mqttReadBytesUntil(uint8_t *buffer, uint32_t length, uint32_t deadline_ms) {
+  for (uint32_t i = 0; i < length; i++) {
+    if (!mqttReadByteUntil(buffer[i], deadline_ms)) return false;
+  }
+  return true;
+}
+
+bool mqttSkipBytesUntil(uint32_t length, uint32_t deadline_ms) {
+  uint8_t ignored = 0;
+  for (uint32_t i = 0; i < length; i++) {
+    if (!mqttReadByteUntil(ignored, deadline_ms)) return false;
+  }
+  return true;
+}
+
 bool mqttReadRemainingLengthUntil(uint32_t &length, uint32_t max_length, uint32_t deadline_ms) {
   length = 0;
   uint32_t multiplier = 1;
@@ -3553,6 +3920,15 @@ String mqttClientId() {
   return "mymota_" + chipIdHex();
 }
 
+String mqttCommandTopicFilter() {
+  String topic;
+  topic.reserve(strlen(config.mqtt_topic) + 8);
+  topic += F("cmnd/");
+  topic += config.mqtt_topic;
+  topic += F("/#");
+  return topic;
+}
+
 void mqttStop() {
   mqtt_client.stop();
   last_mqtt_io = 0;
@@ -3572,6 +3948,50 @@ void queueMqttConnectHeal() {
     last_mqtt_energy_publish = 0;
     last_mqtt_energy_power = NAN;
   }
+
+  if (light.present) {
+    mqtt_pending_light_mask |= kMqttLightPendingAll;
+  }
+}
+
+bool mqttReadSuback(uint16_t packet_id, uint32_t deadline_ms) {
+  uint8_t packet_type = 0;
+  uint32_t remaining = 0;
+  if (!mqttReadByteUntil(packet_type, deadline_ms)) return false;
+  if (packet_type != kMqttPacketSuback) return false;
+  if (!mqttReadRemainingLengthUntil(remaining, kMqttSubackMaxRemainingLength, deadline_ms)) return false;
+  if (remaining < 3) return false;
+
+  uint8_t id_bytes[2];
+  if (!mqttReadBytesUntil(id_bytes, sizeof(id_bytes), deadline_ms)) return false;
+  remaining -= sizeof(id_bytes);
+  const uint16_t received_id = (static_cast<uint16_t>(id_bytes[0]) << 8) | id_bytes[1];
+  if (received_id != packet_id) {
+    if (remaining) mqttSkipBytesUntil(remaining, deadline_ms);
+    return false;
+  }
+
+  uint8_t return_code = 0x80;
+  if (!mqttReadByteUntil(return_code, deadline_ms)) return false;
+  remaining--;
+  if (remaining && !mqttSkipBytesUntil(remaining, deadline_ms)) return false;
+  return return_code != 0x80;
+}
+
+bool mqttSubscribeCommandTopic() {
+  const String filter = mqttCommandTopicFilter();
+  if (filter.length() == 0 || filter.length() > kMqttCommandTopicMaxLen) return false;
+
+  const uint32_t remaining_length = 2U + 2U + filter.length() + 1U;
+  const bool ok = mqttWriteByte(kMqttPacketSubscribe) &&
+                  mqttWriteRemainingLength(remaining_length) &&
+                  mqttWriteByte(static_cast<uint8_t>(kMqttCommandPacketId >> 8)) &&
+                  mqttWriteByte(static_cast<uint8_t>(kMqttCommandPacketId & 0xffU)) &&
+                  mqttWriteString(filter.c_str()) &&
+                  mqttWriteByte(0x00);
+  if (!ok) return false;
+  last_mqtt_io = millis();
+  return mqttReadSuback(kMqttCommandPacketId, millis() + kMqttConnackTimeoutMs);
 }
 
 bool mqttConnect() {
@@ -3647,6 +4067,11 @@ bool mqttConnect() {
   last_mqtt_rx = last_mqtt_io;
   last_mqtt_ping = 0;
   mqtt_ping_pending = false;
+  if (!mqttSubscribeCommandTopic()) {
+    mqttStop();
+    recordMqttConnectResult(kMqttConnectSubscribeFailed, started);
+    return false;
+  }
   recordMqttConnectResult(kMqttConnectOk, started);
   queueMqttConnectHeal();
   return true;
@@ -3680,6 +4105,130 @@ bool mqttPublish(const char *topic, const char *payload) {
   }
   last_mqtt_io = millis();
   return true;
+}
+
+bool mqttPublishCommandResult(const String &payload) {
+  if (payload.length() == 0) return true;
+  String topic;
+  topic.reserve(strlen(config.mqtt_topic) + 14);
+  topic += F("stat/");
+  topic += config.mqtt_topic;
+  topic += F("/RESULT");
+  return mqttPublish(topic.c_str(), payload.c_str());
+}
+
+void scheduleMqttLightPublish(uint8_t mask) {
+  if (!light.present || !mqttConfigured()) return;
+  mqtt_pending_light_mask |= (mask & kMqttLightPendingAll);
+}
+
+bool mqttPublishLightState(uint8_t mask) {
+  if (!light.present) return true;
+  mask &= kMqttLightPendingAll;
+  if (!mask) return true;
+
+  String payload;
+  payload.reserve(32);
+  payload += '{';
+  bool needs_comma = false;
+  if (mask & kMqttLightPendingDimmer) {
+    payload += F("\"Dimmer\":");
+    payload += light.dimmer;
+    needs_comma = true;
+  }
+  if (mask & kMqttLightPendingCt) {
+    if (needs_comma) payload += ',';
+    payload += F("\"CT\":");
+    payload += light.ct;
+  }
+  payload += '}';
+
+  const bool ok = mqttPublishCommandResult(payload);
+  if (ok) {
+    last_mqtt_state_publish = millis();
+  }
+  return ok;
+}
+
+bool mqttCommandFromTopic(const char *topic, size_t topic_len, const char *&command, size_t &command_len) {
+  constexpr size_t prefix_len = 5;
+  if (!topic || topic_len <= prefix_len) return false;
+  if (strncmp(topic, "cmnd/", prefix_len) != 0) return false;
+
+  const size_t configured_len = strlen(config.mqtt_topic);
+  if (configured_len == 0) return false;
+  if (topic_len <= prefix_len + configured_len + 1) return false;
+  if (memcmp(topic + prefix_len, config.mqtt_topic, configured_len) != 0) return false;
+  if (topic[prefix_len + configured_len] != '/') return false;
+
+  command = topic + prefix_len + configured_len + 1;
+  command_len = topic_len - prefix_len - configured_len - 1;
+  return command_len > 0;
+}
+
+bool mqttSendPuback(uint16_t packet_id) {
+  const bool ok = mqttWriteByte(kMqttPacketPuback) &&
+                  mqttWriteByte(0x02) &&
+                  mqttWriteByte(static_cast<uint8_t>(packet_id >> 8)) &&
+                  mqttWriteByte(static_cast<uint8_t>(packet_id & 0xffU));
+  if (ok) {
+    last_mqtt_io = millis();
+  }
+  return ok;
+}
+
+bool mqttProcessPublish(uint8_t packet_type, uint32_t remaining, uint32_t deadline) {
+  const uint8_t qos = (packet_type >> 1) & 0x03U;
+  if (qos == 3 || remaining < 2) return false;
+  if (remaining > kMqttInboundMaxRemainingLength) {
+    return mqttSkipBytesUntil(remaining, deadline);
+  }
+
+  uint8_t topic_len_bytes[2];
+  if (!mqttReadBytesUntil(topic_len_bytes, sizeof(topic_len_bytes), deadline)) return false;
+  remaining -= sizeof(topic_len_bytes);
+  const uint16_t topic_len = (static_cast<uint16_t>(topic_len_bytes[0]) << 8) | topic_len_bytes[1];
+  if (topic_len == 0 || topic_len > remaining) return false;
+  if (topic_len > kMqttInboundTopicMaxLen) {
+    return mqttSkipBytesUntil(remaining, deadline);
+  }
+
+  char topic[kMqttInboundTopicMaxLen + 1];
+  if (!mqttReadBytesUntil(reinterpret_cast<uint8_t *>(topic), topic_len, deadline)) return false;
+  topic[topic_len] = '\0';
+  remaining -= topic_len;
+
+  uint16_t packet_id = 0;
+  if (qos > 0) {
+    if (remaining < 2) return false;
+    uint8_t id_bytes[2];
+    if (!mqttReadBytesUntil(id_bytes, sizeof(id_bytes), deadline)) return false;
+    remaining -= sizeof(id_bytes);
+    packet_id = (static_cast<uint16_t>(id_bytes[0]) << 8) | id_bytes[1];
+  }
+
+  if (qos > 1 || remaining > kMqttInboundPayloadMaxLen) {
+    if (!mqttSkipBytesUntil(remaining, deadline)) return false;
+    if (qos == 1 && !mqttSendPuback(packet_id)) return false;
+    return true;
+  }
+
+  char payload[kMqttInboundPayloadMaxLen + 1];
+  if (remaining && !mqttReadBytesUntil(reinterpret_cast<uint8_t *>(payload), remaining, deadline)) return false;
+  payload[remaining] = '\0';
+
+  if (qos == 1 && !mqttSendPuback(packet_id)) return false;
+
+  const char *command = nullptr;
+  size_t command_len = 0;
+  if (!mqttCommandFromTopic(topic, topic_len, command, command_len)) return true;
+
+  String response;
+  String error;
+  if (!executeDeviceCommand(command, command_len, payload, remaining, response, error)) {
+    return true;
+  }
+  return mqttPublishCommandResult(response);
 }
 
 String mqttRelayTopic(uint8_t relay) {
@@ -3827,13 +4376,20 @@ bool mqttProcessInboundPacket() {
   const uint32_t deadline = millis() + kMqttInboundReadTimeoutMs;
 
   if (!mqttReadByteUntil(packet_type, deadline)) return false;
-  if (packet_type != kMqttPacketPingresp) return false;
-  if (!mqttReadRemainingLengthUntil(remaining, 0, deadline)) return false;
-  if (remaining != 0) return false;
+  if (!mqttReadRemainingLengthUntil(remaining, kMqttInboundMaxRemainingLength, deadline)) return false;
 
-  last_mqtt_ping = 0;
-  mqtt_ping_pending = false;
-  return true;
+  if (packet_type == kMqttPacketPingresp) {
+    if (remaining != 0) return false;
+    last_mqtt_ping = 0;
+    mqtt_ping_pending = false;
+    return true;
+  }
+
+  if ((packet_type & 0xf0U) == kMqttPacketPublish) {
+    return mqttProcessPublish(packet_type, remaining, deadline);
+  }
+
+  return mqttSkipBytesUntil(remaining, deadline);
 }
 
 bool mqttProcessInbound() {
@@ -3895,6 +4451,13 @@ void maintainMqtt() {
   }
   now = millis();
 
+  if (mqtt_pending_light_mask && light.present) {
+    const uint8_t mask = mqtt_pending_light_mask;
+    if (!mqttPublishLightState(mask)) return;
+    mqtt_pending_light_mask &= ~mask;
+  }
+  now = millis();
+
   while (mqtt_button_queue_count > 0) {
     MqttButtonPending &slot = mqtt_button_queue[mqtt_button_queue_head];
     if (mqttButtonQueueExpired(slot, now)) {
@@ -3906,10 +4469,11 @@ void maintainMqtt() {
   }
   now = millis();
 
-  if (config.mqtt_keepalive > 0 && runtime_template.relay_count > 0) {
+  if (config.mqtt_keepalive > 0 && (runtime_template.relay_count > 0 || light.present)) {
     const uint32_t interval_ms = static_cast<uint32_t>(config.mqtt_keepalive) * 1000UL;
     if (now - last_mqtt_state_publish >= interval_ms) {
-      mqttPublishAllRelayStates();
+      if (runtime_template.relay_count > 0 && !mqttPublishAllRelayStates()) return;
+      if (light.present && !mqttPublishLightState(kMqttLightPendingAll)) return;
     }
   }
 
@@ -4180,6 +4744,211 @@ void setupEnergyMonitor() {
 
 void updateDeviceLeds(bool force);
 
+uint8_t sanitizeLightDimmerValue(uint16_t value) {
+  if (value < kLightDimmerMin) return kLightDimmerMin;
+  if (value > kLightDimmerMax) return kLightDimmerMax;
+  return static_cast<uint8_t>(value);
+}
+
+uint16_t sanitizeLightCtValue(uint16_t value) {
+  if (value < kLightCtMin) return kLightCtMin;
+  if (value > kLightCtMax) return kLightCtMax;
+  return value;
+}
+
+void loadLightStateFromConfig() {
+  light.power = config.light_power != 0;
+  light.dimmer = light.power ? sanitizeLightDimmerValue(config.light_dimmer) : kLightDimmerOff;
+  light.ct = sanitizeLightCtValue(config.light_ct);
+  light.config_dirty = false;
+  light.config_save_at = 0;
+}
+
+uint16_t lightBrightnessDuty() {
+  if (!light.present || !light.power) return 0;
+  return static_cast<uint16_t>(((static_cast<uint32_t>(light.dimmer) * kLightPwmRange) + 50U) / 100U);
+}
+
+uint16_t lightPwmDuty(uint8_t index) {
+  const uint16_t brightness = lightBrightnessDuty();
+  if (brightness == 0 || runtime_template.pwm_count <= 1) return brightness;
+
+  const uint16_t ct = sanitizeLightCtValue(light.ct);
+  const uint16_t ct_range = kLightCtMax - kLightCtMin;
+  const uint16_t warm = static_cast<uint16_t>(
+    ((static_cast<uint32_t>(ct - kLightCtMin) * brightness) + (ct_range / 2U)) / ct_range
+  );
+  return index == 0 ? static_cast<uint16_t>(brightness - warm) : warm;
+}
+
+void writeLightPwm(uint8_t index, uint16_t duty) {
+  if (index >= kMaxLightPwms || !hasPin(runtime_template.light_pwm[index])) return;
+  if (duty > kLightPwmRange) duty = kLightPwmRange;
+  if (runtime_template.light_pwm[index].inverted) {
+    duty = kLightPwmRange - duty;
+  }
+  analogWrite(runtime_template.light_pwm[index].pin, duty);
+}
+
+void updateLightOutputs() {
+  if (!light.present) return;
+  for (uint8_t i = 0; i < runtime_template.pwm_count && i < kMaxLightPwms; i++) {
+    if (!hasPin(runtime_template.light_pwm[i])) continue;
+    writeLightPwm(i, lightPwmDuty(i));
+  }
+}
+
+void scheduleLightConfigPersist() {
+  if (!light.present) return;
+  config.light_power = light.power ? 1 : 0;
+  config.light_dimmer = light.dimmer;
+  config.light_ct = light.ct;
+  light.config_dirty = true;
+  light.config_save_at = millis() + kLightPersistDelayMs;
+}
+
+bool persistLightConfig(bool force = false) {
+  if (!light.config_dirty) return true;
+  if (!force && static_cast<int32_t>(millis() - light.config_save_at) < 0) return true;
+  config.light_power = light.power ? 1 : 0;
+  config.light_dimmer = light.dimmer;
+  config.light_ct = light.ct;
+  if (!commitConfig()) return false;
+  light.config_dirty = false;
+  return true;
+}
+
+void setLightPower(bool on, bool persist = true) {
+  if (!light.present) return;
+  const bool changed = light.power != on;
+  const uint8_t on_dimmer = sanitizeLightDimmerValue(config.light_on_dimmer);
+  const uint8_t target_dimmer = on ? on_dimmer : kLightDimmerOff;
+  const bool dimmer_changed = light.dimmer != target_dimmer;
+  light.power = on;
+  light.dimmer = target_dimmer;
+  updateLightOutputs();
+  if (changed || dimmer_changed) scheduleMqttLightPublish(kMqttLightPendingDimmer);
+  if (persist && (changed || dimmer_changed)) scheduleLightConfigPersist();
+}
+
+void toggleLightPower(bool persist) {
+  setLightPower(!light.power, persist);
+}
+
+void setLightDimmer(uint16_t dimmer, bool persist = true) {
+  if (!light.present) return;
+  if (dimmer == 0) {
+    setLightPower(false, persist);
+    return;
+  }
+  const uint8_t sanitized = sanitizeLightDimmerValue(dimmer);
+  const bool changed = light.dimmer != sanitized || !light.power;
+  light.power = true;
+  light.dimmer = sanitized;
+  updateLightOutputs();
+  if (changed) scheduleMqttLightPublish(kMqttLightPendingDimmer);
+  if (persist && changed) scheduleLightConfigPersist();
+}
+
+void setLightCt(uint16_t ct, bool persist = true) {
+  if (!light.present) return;
+  const uint16_t sanitized = sanitizeLightCtValue(ct);
+  const bool changed = light.ct != sanitized;
+  light.ct = sanitized;
+  updateLightOutputs();
+  if (changed) scheduleMqttLightPublish(kMqttLightPendingCt);
+  if (persist && changed) scheduleLightConfigPersist();
+}
+
+bool deferButtonPressForRotary(uint8_t button) {
+  return button == 0 && light.present && rotary_encoder.present;
+}
+
+const int8_t kRotaryStatePos[16] = {0, 1, -1, 2, -1, 0, -2, 1, 1, -2, 0, -1, 2, -1, 1, 0};
+
+void IRAM_ATTR rotaryInterrupt() {
+  if (!rotary_encoder.present) return;
+  uint8_t state = rotary_encoder.state & 3U;
+  if (digitalRead(rotary_encoder.a.pin)) state |= 4U;
+  if (digitalRead(rotary_encoder.b.pin)) state |= 8U;
+  rotary_encoder.position += kRotaryStatePos[state];
+  rotary_encoder.state = state >> 2;
+}
+
+void setupLightRuntime() {
+  memset(&light, 0, sizeof(light));
+  light.present = lightAvailableIn(runtime_template);
+  loadLightStateFromConfig();
+  if (!light.present) return;
+
+  analogWriteRange(kLightPwmRange);
+  analogWriteFreq(kLightPwmFrequency);
+  for (uint8_t i = 0; i < runtime_template.pwm_count && i < kMaxLightPwms; i++) {
+    if (!hasPin(runtime_template.light_pwm[i])) continue;
+    pinMode(runtime_template.light_pwm[i].pin, OUTPUT);
+    writeLightPwm(i, 0);
+  }
+  updateLightOutputs();
+}
+
+void setupRotaryEncoder() {
+  memset(&rotary_encoder, 0, sizeof(rotary_encoder));
+  resetPinAssignment(rotary_encoder.a);
+  resetPinAssignment(rotary_encoder.b);
+  if (runtime_template.rotary_count == 0) return;
+  if (!hasPin(runtime_template.rotary_a[0]) || !hasPin(runtime_template.rotary_b[0])) return;
+  if (!interruptPinSupported(runtime_template.rotary_a[0].pin) ||
+      !interruptPinSupported(runtime_template.rotary_b[0].pin)) {
+    return;
+  }
+
+  rotary_encoder.a = runtime_template.rotary_a[0];
+  rotary_encoder.b = runtime_template.rotary_b[0];
+  pinMode(rotary_encoder.a.pin, rotary_encoder.a.no_pullup ? INPUT : INPUT_PULLUP);
+  pinMode(rotary_encoder.b.pin, rotary_encoder.b.no_pullup ? INPUT : INPUT_PULLUP);
+  rotary_encoder.state = (digitalRead(rotary_encoder.a.pin) ? 1U : 0U) |
+                         (digitalRead(rotary_encoder.b.pin) ? 2U : 0U);
+  rotary_encoder.position = 0;
+  rotary_encoder.changed_while_pressed = false;
+  rotary_encoder.present = true;
+  attachInterrupt(digitalPinToInterrupt(rotary_encoder.a.pin), rotaryInterrupt, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(rotary_encoder.b.pin), rotaryInterrupt, CHANGE);
+}
+
+void maintainRotary() {
+  if (!rotary_encoder.present || !light.present) return;
+  const uint32_t now = millis();
+  if (now - last_rotary_handler < kRotaryHandlerMs) return;
+  last_rotary_handler = now;
+
+  noInterrupts();
+  const int16_t delta = rotary_encoder.position;
+  rotary_encoder.position = 0;
+  interrupts();
+  if (delta == 0) return;
+
+  const bool button_pressed = runtime_template.button_count > 0 && button_state[0].stable_pressed;
+  if (button_pressed) {
+    const int32_t next_ct = static_cast<int32_t>(light.ct) +
+      (static_cast<int32_t>(delta) * (350 / (kRotaryMaxSteps * kRotaryMiDeskStepScale)));
+    setLightCt(static_cast<uint16_t>(next_ct < 0 ? 0 : next_ct), true);
+    rotary_encoder.changed_while_pressed = true;
+    rotary_suppress_button[0] = true;
+  } else {
+    if (!light.power && delta > 0) {
+      setLightPower(true, true);
+      return;
+    }
+    const int32_t next_dimmer = static_cast<int32_t>(light.dimmer) +
+      (static_cast<int32_t>(delta) * (100 / (kRotaryMaxSteps * kRotaryMiDeskStepScale)));
+    setLightDimmer(static_cast<uint16_t>(next_dimmer < 0 ? 0 : next_dimmer), true);
+  }
+}
+
+void maintainLight() {
+  persistLightConfig(false);
+}
+
 void setRelay(uint8_t relay, bool on) {
   if (relay >= kMaxRelays || !hasPin(runtime_template.relays[relay])) return;
   const bool changed = relay_state[relay] != on;
@@ -4278,6 +5047,10 @@ bool runButtonAction(uint8_t button, uint8_t action, bool hold) {
       toggleRelay(relay);
       return true;
     }
+    if (light.present) {
+      toggleLightPower();
+      return true;
+    }
   } else if (action == kButtonActionMqtt) {
     mqttQueueButtonAction(button, hold);
   } else if (action == kButtonActionWebhook) {
@@ -4348,12 +5121,15 @@ void maintainButtons() {
         if (raw) {
           button_state[i].pressed_at = now;
           button_state[i].hold_emitted = false;
-          if (config.button_hold_action[i] == kButtonActionNone) {
+          rotary_suppress_button[i] = false;
+          if (config.button_hold_action[i] == kButtonActionNone && !deferButtonPressForRotary(i)) {
             led_handled = runButtonAction(i, config.button_press_action[i], false);
             button_state[i].hold_emitted = true;
           }
         } else {
-          if (!button_state[i].hold_emitted) {
+          if (rotary_suppress_button[i]) {
+            rotary_suppress_button[i] = false;
+          } else if (!button_state[i].hold_emitted) {
             led_handled = runButtonAction(i, config.button_press_action[i], false);
           }
           button_state[i].hold_emitted = false;
@@ -4365,6 +5141,12 @@ void maintainButtons() {
         button_state[i].stable_pressed &&
         !button_state[i].hold_emitted &&
         now - button_state[i].pressed_at >= config.button_hold_ms) {
+      if (rotary_suppress_button[i]) {
+        continue;
+      }
+      if (config.button_hold_action[i] == kButtonActionNone && deferButtonPressForRotary(i)) {
+        continue;
+      }
       button_state[i].hold_emitted = true;
       if (!runButtonAction(i, config.button_hold_action[i], true)) {
         updateDeviceLeds(true);
@@ -4478,6 +5260,8 @@ void maintainEnergy() {
 }
 
 void setupDevicePins() {
+  setupLightRuntime();
+
   for (uint8_t i = 0; i < kMaxRelays; i++) {
     relay_state[i] = false;
     if (!hasPin(runtime_template.relays[i])) continue;
@@ -4507,13 +5291,16 @@ void setupDevicePins() {
     }
   }
 
+  setupRotaryEncoder();
   setupEnergyMonitor();
   maintainAdc();
   updateDeviceLeds(true);
 }
 
 void maintainDevice() {
+  maintainRotary();
   maintainButtons();
+  maintainLight();
   maintainEnergy();
   maintainAdc();
   updateDeviceLeds();
@@ -4530,15 +5317,15 @@ void appendHeader(String &page, const __FlashStringHelper *title, bool show_spin
   page += F("</title><style>:root{--bg:#f6f7f9;--panel:#fff;--line:#d8dee8;--text:#17202a;--muted:#687386;--ok:#177245;--bad:#a23a36;--accent:#1f7a5f;--accent2:#205c8a}");
   page += F("*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:Arial,sans-serif;font-size:15px;line-height:1.4}");
   page += F(".top{background:#17202a;color:#fff;border-bottom:4px solid var(--accent);padding:18px 16px}.topin{max-width:1080px;margin:0 auto;display:flex;align-items:end;justify-content:space-between;gap:12px;flex-wrap:wrap}");
-  page += F(".brand{font-size:28px;font-weight:700;letter-spacing:0}.brand span{color:#7dd3aa}.sub{color:#c7d0dc;font-size:13px}.meta{display:flex;align-items:center;gap:8px}");
+  page += F(".brand{font-size:28px;font-weight:700;letter-spacing:0;color:inherit;text-decoration:none}.brand span{color:#7dd3aa}.sub{color:#c7d0dc;font-size:13px}.meta{display:flex;align-items:center;gap:8px}");
   page += F(".spin{width:13px;height:13px;border:2px solid rgba(255,255,255,.35);border-top-color:#7dd3aa;border-radius:50%;opacity:.55}.spin.active{opacity:1;animation:rot .7s linear infinite}@keyframes rot{to{transform:rotate(360deg)}}main{max-width:1080px;margin:18px auto 28px;padding:0 14px}");
   page += F(".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;box-shadow:0 1px 2px rgba(0,0,0,.04)}.wide{grid-column:1/-1}");
-  page += F(".panel h2{font-size:17px;margin:0 0 12px}.kv{display:grid;grid-template-columns:minmax(110px,42%) 1fr;gap:8px 12px}.kv span,.hint{color:var(--muted)}.kv div{min-width:0}");
+  page += F(".panel h2{font-size:17px;margin:0 0 12px}.panel-title{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 12px}.panel-title h2{margin:0}.kv{display:grid;grid-template-columns:minmax(110px,42%) 1fr;gap:8px 12px}.kv span,.hint{color:var(--muted)}.kv div{min-width:0}");
   page += F("code{background:#eef2f6;border:1px solid #dce3ea;border-radius:4px;padding:1px 4px;word-break:break-word}.pill{display:inline-block;border-radius:999px;padding:2px 8px;background:#eef2f6;color:#364152}.pill.ok{background:var(--ok);color:#fff}.pill.bad{background:var(--bad);color:#fff}.panel h2 .pill{font-size:13px;font-weight:400;vertical-align:1px}.ok{color:var(--ok)}.bad{color:var(--bad)}.muted{color:var(--muted)}");
-  page += F(".note{background:#eef2f6;border:1px solid #dce3ea;border-radius:6px;padding:10px;margin:10px 0}.note p{margin:0 0 7px}.tokens{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px}.tokens div{display:flex;flex-direction:column;gap:3px}.button-block{border-top:1px solid var(--line);margin-top:12px;padding-top:12px}.action-extra,.mode-extra{display:none}.action-extra.show,.mode-extra.show{display:block}.hidden{display:none}");
+  page += F(".note{background:#eef2f6;border:1px solid #dce3ea;border-radius:6px;padding:10px;margin:10px 0}.note p{margin:0 0 7px}.tokens{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px}.tokens div{display:flex;flex-direction:column;gap:3px}.help{position:relative;margin-left:auto}.help-q{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border:1px solid var(--line);border-radius:50%;background:#eef2f6;color:var(--accent2);font-size:14px;font-weight:700;cursor:help}.help-box{display:none;position:absolute;right:0;top:30px;z-index:30;width:520px;max-width:calc(100vw - 48px);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;box-shadow:0 8px 24px rgba(0,0,0,.18);color:var(--text);font-size:14px;font-weight:400;line-height:1.4}.help:hover .help-box,.help:focus-within .help-box{display:block}.help-box p{margin:0 0 8px}.button-block{border-top:1px solid var(--line);margin-top:12px;padding-top:12px}.action-extra,.mode-extra{display:none}.action-extra.show,.mode-extra.show{display:block}.hidden{display:none}");
   page += F("form{margin:0}.row{margin:10px 0}label{display:block;font-weight:600;color:#344054}input,button,select,textarea{font:inherit}input,select,textarea{width:100%;margin-top:4px;padding:9px;border:1px solid #b9c4d0;border-radius:6px;background:#fff}textarea{min-height:92px;resize:vertical}");
   page += F("button,.btn{display:inline-block;margin:4px 4px 0 0;padding:8px 12px;border:1px solid var(--accent);border-radius:6px;background:var(--accent);color:#fff;text-decoration:none;cursor:pointer}.secondary{background:#fff;color:var(--accent2);border-color:#9eb7cf}.danger{background:#fff;color:var(--bad);border-color:#d4aaa7}.inline{display:inline}.actions{display:flex;flex-wrap:wrap;gap:6px}.inline button{margin:0 4px 0 0}.list{margin:0;padding-left:18px}@media(max-width:520px){.kv{grid-template-columns:1fr}.brand{font-size:24px}}</style></head><body>");
-  page += F("<header class='top'><div class='topin'><div><div class='brand'>my<span>Mota</span></div><div class='sub'>ESP8266/ESP8285 firmware</div></div><div class='sub meta'><span>");
+  page += F("<header class='top'><div class='topin'><div><a class='brand' href='/'>my<span>Mota</span></a><div class='sub'>ESP8266/ESP8285 firmware</div></div><div class='sub meta'><span>");
   page += F(MYMOTA_VERSION);
   page += F(" / ");
   page += F(MYMOTA_TARGET);
@@ -4563,18 +5350,20 @@ void appendFooter(String &page, bool live_poll = true, bool reboot_wait = false)
   page += F("p('live-wifi',d.wifi?'connected':'disconnected',d.wifi?'pill ok':'pill bad');t('live-ssid',d.wifi_ssid||'n/a');t('live-ip',d.ip||'n/a');t('live-rssi',d.rssi==null?'n/a':d.rssi+' dBm');");
   page += F("p('live-mqtt',d.mqtt.enabled?(d.mqtt.connected?'connected':'disconnected'):'not configured',d.mqtt.enabled?(d.mqtt.connected?'pill ok':'pill bad'):'pill');");
   page += F("if(d.mqtt){t('live-mqtt-pending',d.mqtt.pending);t('live-mqtt-result',d.mqtt.last_connect_result);t('live-mqtt-connect-ms',d.mqtt.last_connect_ms+' ms');t('live-mqtt-attempt',d.mqtt.last_attempt_ms_ago==null?'n/a':d.mqtt.last_attempt_ms_ago+' ms ago');}");
+  page += F("if(d.light){p('live-light-power',d.light.power?'on':'off',d.light.power?'pill ok':'pill bad');t('live-light-dimmer',d.light.dimmer+'%');t('live-light-ct',d.light.ct+' mired');t('live-light-on-dimmer',d.light.on_dimmer+'%');}");
   page += F("if(d.power){for(var i=0;i<d.power.length;i++){if(d.power[i]!==null)p('live-relay-'+i,d.power[i]?'on':'off',d.power[i]?'pill ok':'pill bad');}}");
   page += F("if(d.buttons){for(var b=0;b<d.buttons.length;b++){if(d.buttons[b])p('live-button-'+b,d.buttons[b].state||(d.buttons[b].pressed?'pressed':'released'),d.buttons[b].pressed?'pill ok':'pill bad');}}");
   page += F("if(d.leds){for(var l=0;l<d.leds.length;l++){if(d.leds[l])p('live-led-'+l,d.leds[l].on?'on':'off',d.leds[l].on?'pill ok':'pill bad');}}");
   page += F("if(d.energy){t('live-energy-power',fmt(d.energy.power,1,' W'));t('live-energy-voltage',fmt(d.energy.voltage,1,' V'));t('live-energy-current',fmt(d.energy.current,3,' A'));t('live-energy-total',fmt(d.energy.total_kwh,4,' kWh'));t('live-energy-offset',fmt(d.energy.offset_kwh,4,' kWh'));if(d.energy.channels){for(var e=0;e<d.energy.channels.length;e++){t('live-energy-ch'+e+'-power',fmt(d.energy.channels[e].power,1,' W'));t('live-energy-ch'+e+'-current',fmt(d.energy.channels[e].current,3,' A'));}}}");
   page += F("t('live-temp',d.temperature_c==null?'n/a':Number(d.temperature_c).toFixed(1)+' C');t('live-adc-raw',d.adc_raw==null?'n/a':d.adc_raw);");
   page += F("}).catch(function(){});}");
-  page += F("function ba(s){var k=s.getAttribute('data-key'),v=s.value,b=document.getElementById('extra-'+k);if(!b)return;var t=b.querySelector('.target-input'),p=b.querySelector('.payload-input'),rr=b.querySelector('.relay-row'),tr=b.querySelector('.target-row'),pr=b.querySelector('.payload-row'),tl=b.querySelector('.target-label'),h=b.querySelector('.action-hint');b.className=(v=='1'||v=='2'||v=='3')?'action-extra show':'action-extra';if(rr)rr.className=v=='1'?'row relay-row':'row relay-row hidden';if(tr)tr.className=(v=='2'||v=='3')?'row target-row':'row target-row hidden';if(pr)pr.className=(v=='2')?'row payload-row':'row payload-row hidden';if(v=='1'){if(h)h.textContent='Toggles the selected relay.';}else if(v=='2'){if(t&&(!t.value||t.value.indexOf('http://')==0))t.value=t.getAttribute('data-default-topic');if(p&&!p.value)p.value=p.getAttribute('data-default-payload');if(tl)tl.textContent='MQTT topic';if(h)h.textContent='Publishes this topic and payload through the configured MQTT broker.';}else if(v=='3'){if(tl)tl.textContent='Webhook URL';if(h)h.textContent='Executes an HTTP GET request; only http:// URLs are supported.';}}");
+  page += F("function ba(s){var k=s.getAttribute('data-key'),v=s.value,b=document.getElementById('extra-'+k);if(!b)return;var t=b.querySelector('.target-input'),p=b.querySelector('.payload-input'),rr=b.querySelector('.relay-row'),tr=b.querySelector('.target-row'),pr=b.querySelector('.payload-row'),tl=b.querySelector('.target-label'),h=b.querySelector('.action-hint');b.className=(v=='1'||v=='2'||v=='3')?'action-extra show':'action-extra';if(rr)rr.className=v=='1'?'row relay-row':'row relay-row hidden';if(tr)tr.className=(v=='2'||v=='3')?'row target-row':'row target-row hidden';if(pr)pr.className=(v=='2')?'row payload-row':'row payload-row hidden';if(v=='1'){if(h)h.textContent='Toggles the configured output.';}else if(v=='2'){if(t&&(!t.value||t.value.indexOf('http://')==0))t.value=t.getAttribute('data-default-topic');if(p&&!p.value)p.value=p.getAttribute('data-default-payload');if(tl)tl.textContent='MQTT topic';if(h)h.textContent='Publishes this topic and payload through the configured MQTT broker.';}else if(v=='3'){if(tl)tl.textContent='Webhook URL';if(h)h.textContent='Executes an HTTP GET request; only http:// URLs are supported.';}}");
   page += F("function im(s){var k=s.getAttribute('data-input'),v=s.value,b=document.getElementById('input-button-'+k),w=document.getElementById('input-switch-'+k);if(b)b.className=v=='0'?'mode-extra show':'mode-extra';if(w)w.className=v=='1'?'mode-extra show':'mode-extra';}");
   page += F("function ts(){var s=document.getElementById('known-template'),t=document.getElementById('template-json');if(!s||!t)return;var v=t.value.trim(),m=0;for(var i=1;i<s.options.length;i++){if(s.options[i].getAttribute('data-json')==v){m=i;break;}}s.selectedIndex=m;}");
   page += F("function tp(s){var o=s.options[s.selectedIndex],t=document.getElementById('template-json');if(o&&t&&o.getAttribute('data-json')){t.value=o.getAttribute('data-json');ts();}}");
   page += F("function sf(i){var t=document.getElementById('settings-json');if(!i.files||!i.files[0]||!t)return;var r=new FileReader();r.onload=function(){t.value=String(r.result||'');};r.readAsText(i.files[0]);}");
-  page += F("function bi(){var a=document.querySelectorAll('.button-action');for(var i=0;i<a.length;i++){a[i].onchange=function(){ba(this)};ba(a[i]);}var m=document.querySelectorAll('.input-mode');for(var j=0;j<m.length;j++){m[j].onchange=function(){im(this)};im(m[j]);}var t=document.getElementById('template-json');if(t){t.oninput=ts;t.onchange=ts;}ts();}bi();");
+  page += F("function lu(i){var e=i.getAttribute('data-live'),s=i.getAttribute('data-suffix')||'';if(e)t(e,i.value+s);}function la(i){lu(i);var fd=new FormData();fd.append(i.name,i.value);fd.append('_inline','1');fetch('/light',{method:'POST',body:fd,cache:'no-store'}).then(function(r){if(!r.ok)return r.text().then(function(x){throw Error(x||r.statusText)});live();}).catch(function(x){alert(x.message||x);});}");
+  page += F("function bi(){var a=document.querySelectorAll('.button-action');for(var i=0;i<a.length;i++){a[i].onchange=function(){ba(this)};ba(a[i]);}var m=document.querySelectorAll('.input-mode');for(var j=0;j<m.length;j++){m[j].onchange=function(){im(this)};im(m[j]);}var l=document.querySelectorAll('.light-auto');for(var k=0;k<l.length;k++){l[k].oninput=function(){lu(this)};l[k].onchange=function(){la(this)};}var t=document.getElementById('template-json');if(t){t.oninput=ts;t.onchange=ts;}ts();}bi();");
   page += F("document.addEventListener('click',function(e){var b=e.target;while(b&&b.tagName!='BUTTON'&&b.tagName!='INPUT')b=b.parentNode;if(!b||!b.form)return;var t=(b.type||'').toLowerCase();if(t=='submit'||t=='image')b.form._s=b;},true);");
   page += F("document.addEventListener('submit',function(e){var f=e.target;if(!f||f.getAttribute('data-inline')!='1')return;e.preventDefault();var fd=new FormData(f),b=e.submitter||f._s;if(b&&b.name)fd.append(b.name,b.value);fd.append('_inline','1');fetch(f.getAttribute('action')||location.pathname,{method:(f.method||'POST').toUpperCase(),body:fd,cache:'no-store'}).then(function(r){if(!r.ok)return r.text().then(function(x){throw Error(x||r.statusText)});live();}).catch(function(x){alert(x.message||x);});},true);");
   if (live_poll) {
@@ -4729,7 +5518,28 @@ void appendTemplateStatus(String &page) {
     page += String(runtime_template.button_count);
     page += F("</code> inputs <code>");
     page += String(runtime_template.led_count);
-    page += F("</code> LEDs</div>");
+    page += F("</code> LEDs <code>");
+    page += String(runtime_template.pwm_count);
+    page += F("</code> PWM</div>");
+    if (light.present) {
+      page += F("<span>Light</span><div>");
+      for (uint8_t i = 0; i < runtime_template.pwm_count && i < kMaxLightPwms; i++) {
+        if (!hasPin(runtime_template.light_pwm[i])) continue;
+        if (i) page += F(", ");
+        page += i == 0 ? F("cold ") : F("warm ");
+        page += F("<code>");
+        page += pinName(runtime_template.light_pwm[i].pin);
+        page += F("</code>");
+      }
+      page += F("</div>");
+    }
+    if (rotary_encoder.present) {
+      page += F("<span>Rotary</span><div>A <code>");
+      page += pinName(rotary_encoder.a.pin);
+      page += F("</code>, B <code>");
+      page += pinName(rotary_encoder.b.pin);
+      page += F("</code></div>");
+    }
     if (runtime_template.i2c_scl_pin != kInvalidPin || runtime_template.i2c_sda_pin != kInvalidPin) {
       page += F("<span>I2C</span><div>SCL <code>");
       page += pinName(runtime_template.i2c_scl_pin);
@@ -4792,8 +5602,40 @@ void appendTemplateStatus(String &page) {
 }
 
 void appendDeviceControls(String &page) {
-  if (!runtime_template.enabled || (runtime_template.relay_count == 0 && !energy.present)) return;
+  if (!runtime_template.enabled || (runtime_template.relay_count == 0 && !energy.present && !light.present)) return;
   page += F("<section class='panel'><h2>Device</h2>");
+  if (light.present) {
+    page += F("<div class='row'><strong>Light</strong> ");
+    page += F("<span id='live-light-power' class='");
+    page += light.power ? F("pill ok'>on") : F("pill bad'>off");
+    page += F("</span><div class='kv'><span>Dimmer</span><div><code id='live-light-dimmer'>");
+    page += String(light.dimmer);
+    page += F("%</code></div><span>Color temp</span><div><code id='live-light-ct'>");
+    page += String(light.ct);
+    page += F(" mired</code></div><span>ON dimmer</span><div><code id='live-light-on-dimmer'>");
+    page += String(config.light_on_dimmer);
+    page += F("%</code></div></div>");
+    page += F("<form class='inline' data-inline='1' method='post' action='/light'><span class='actions'><button name='power' value='toggle'>Toggle</button><button name='power' value='on'>On</button><button class='secondary' name='power' value='off'>Off</button></span></form>");
+    page += F("<div class='row'><label>Dimmer<br><input class='light-auto' data-live='live-light-dimmer' data-suffix='%' name='dimmer' type='range' min='");
+    page += String(kLightDimmerOff);
+    page += F("' max='");
+    page += String(kLightDimmerMax);
+    page += F("' step='1' value='");
+    page += String(light.dimmer);
+    page += F("'></label></div><div class='row'><label>Color temperature<br><input class='light-auto' data-live='live-light-ct' data-suffix=' mired' name='ct' type='range' min='");
+    page += String(kLightCtMin);
+    page += F("' max='");
+    page += String(kLightCtMax);
+    page += F("' step='1' value='");
+    page += String(light.ct);
+    page += F("'></label></div><div class='row'><label>ON dimmer<br><input class='light-auto' data-live='live-light-on-dimmer' data-suffix='%' name='on_dimmer' type='number' min='");
+    page += String(kLightDimmerMin);
+    page += F("' max='");
+    page += String(kLightDimmerMax);
+    page += F("' step='1' value='");
+    page += String(config.light_on_dimmer);
+    page += F("'></label></div></div>");
+  }
   for (uint8_t i = 0; i < runtime_template.relay_count; i++) {
     if (!hasPin(runtime_template.relays[i])) continue;
     page += F("<div class='row'><strong>Relay ");
@@ -4960,7 +5802,10 @@ void appendButtonActionSelect(String &page, uint8_t button, const char *name, ui
   page += F("'>");
   appendButtonActionOption(page, kButtonActionNone, F("Nothing"), selected);
   if (buttonActionAvailable(button, kButtonActionRelayToggle)) {
-    appendButtonActionOption(page, kButtonActionRelayToggle, F("Relay toggle"), selected);
+    uint8_t relay = 0;
+    appendButtonActionOption(page, kButtonActionRelayToggle,
+                             defaultButtonRelayTarget(button, relay) ? F("Relay toggle") : F("Light toggle"),
+                             selected);
   }
   appendButtonActionOption(page, kButtonActionMqtt, F("MQTT broadcast"), selected);
   appendButtonActionOption(page, kButtonActionWebhook, F("Webhook exec"), selected);
@@ -4969,20 +5814,26 @@ void appendButtonActionSelect(String &page, uint8_t button, const char *name, ui
 
 void appendButtonActionExtra(String &page, uint8_t button, const char *name, bool hold) {
   uint8_t selected_relay = 0;
-  buttonRelayTarget(button, hold, selected_relay);
+  const bool has_relay_target = buttonRelayTarget(button, hold, selected_relay);
   page += F("<div id='extra-");
   page += name;
   page += String(button);
-  page += F("' class='action-extra'><div class='row relay-row'><label>Target relay<br><select name='");
-  page += name;
-  page += F("_relay");
-  page += String(button);
-  page += F("'>");
-  for (uint8_t relay = 0; relay < runtime_template.relay_count; relay++) {
-    if (!hasPin(runtime_template.relays[relay])) continue;
-    appendInputRelayOption(page, relay, selected_relay);
+  page += F("' class='action-extra'>");
+  if (has_relay_target) {
+    page += F("<div class='row relay-row'><label>Target relay<br><select name='");
+    page += name;
+    page += F("_relay");
+    page += String(button);
+    page += F("'>");
+    for (uint8_t relay = 0; relay < runtime_template.relay_count; relay++) {
+      if (!hasPin(runtime_template.relays[relay])) continue;
+      appendInputRelayOption(page, relay, selected_relay);
+    }
+    page += F("</select></label></div>");
+  } else {
+    page += F("<div class='row relay-row'><span class='hint'>Toggles the light output.</span></div>");
   }
-  page += F("</select></label></div><div class='row target-row'><label><span class='target-label'>MQTT topic</span><br><input class='target-input' name='");
+  page += F("<div class='row target-row'><label><span class='target-label'>MQTT topic</span><br><input class='target-input' name='");
   page += name;
   page += F("_target");
   page += String(button);
@@ -5008,7 +5859,12 @@ void appendButtonActionExtra(String &page, uint8_t button, const char *name, boo
 void appendButtonSettings(String &page) {
   if (!runtime_template.enabled || !hasConfigurableButtons()) return;
 
-  page += F("<section class='panel'><h2>Inputs</h2><form data-inline='1' method='post' action='/buttons'>");
+  page += F("<section class='panel'><div class='panel-title'><h2>Inputs</h2><div class='help' tabindex='0'><span class='help-q'>?</span><div class='help-box'><p><strong>Action placeholders</strong></p><div class='tokens'>");
+  page += F("<div><code>{BUTTONID}</code><span class='hint'>input number, starting at 1</span></div>");
+  page += F("<div><code>{TYPE}</code><span class='hint'>TOGGLE on press, HOLD on hold</span></div>");
+  page += F("<div><code>{TOPIC}</code><span class='hint'>current MQTT topic</span></div>");
+  page += F("<div><code>{RELAYX_STATE}</code><span class='hint'>relay state, for example {RELAY1_STATE}</span></div>");
+  page += F("</div><p class='hint'>MQTT broadcast sends a topic and payload through the configured broker. The default values match the switch action format used by tasmota.js: <code>stat/{TOPIC}/RESULT</code> with a <code>Switch{BUTTONID}</code> payload using <code>{TYPE}</code>.</p></div></div></div><form data-inline='1' method='post' action='/buttons'>");
   page += F("<div class='row'><label>Hold time ms<br><input name='hold_ms' type='number' min='");
   page += String(kButtonHoldMinMs);
   page += F("' max='");
@@ -5022,13 +5878,6 @@ void appendButtonSettings(String &page) {
   page += F("' step='1' value='");
   page += String(config.button_debounce_ms);
   page += F("'></label></div>");
-  page += F("<div class='note'><p><strong>Action placeholders</strong></p><div class='tokens'>");
-  page += F("<div><code>{BUTTONID}</code><span class='hint'>input number, starting at 1</span></div>");
-  page += F("<div><code>{TYPE}</code><span class='hint'>TOGGLE on press, HOLD on hold</span></div>");
-  page += F("<div><code>{TOPIC}</code><span class='hint'>current MQTT topic</span></div>");
-  page += F("<div><code>{RELAYX_STATE}</code><span class='hint'>relay state, for example {RELAY1_STATE}</span></div>");
-  page += F("</div><p class='hint'>MQTT broadcast sends a topic and payload through the configured broker. The default values match the switch action format used by tasmota.js: <code>stat/{TOPIC}/RESULT</code> with a <code>Switch{BUTTONID}</code> payload using <code>{TYPE}</code>.</p></div>");
-
   for (uint8_t i = 0; i < runtime_template.button_count; i++) {
     if (!hasPin(runtime_template.buttons[i])) continue;
     const uint8_t mode = effectiveInputMode(i);
@@ -5061,7 +5910,10 @@ void appendButtonSettings(String &page) {
     page += String(i);
     page += F("'>");
     appendInputModeOption(page, kInputModeButton, F("Button actions"), mode);
-    appendInputModeOption(page, kInputModeSwitch, F("Switch follows relay"), mode);
+    uint8_t unused_relay = 0;
+    if (defaultButtonRelayTarget(i, unused_relay)) {
+      appendInputModeOption(page, kInputModeSwitch, F("Switch follows relay"), mode);
+    }
     page += F("</select></label></div>");
 
     page += F("<div id='input-switch-");
@@ -5104,14 +5956,16 @@ void appendTemplateForm(String &page) {
   page += F("<section class='panel wide'><h2>Template</h2><form method='post' action='/template'>");
   page += F("<div class='row'><label>Known template<br><select id='known-template' onchange='tp(this)'><option value=''>Select a template</option>");
   page += F("<option data-json='");
-  page += htmlEscape(String(FPSTR(kTemplateShellyPlugSJson)));
-  page += F("'>Shelly Plug S</option><option data-json='");
+  page += htmlEscape(String(FPSTR(kTemplateMiDeskLampJson)));
+  page += F("'>Mi Desk Lamp</option><option data-json='");
   page += htmlEscape(String(FPSTR(kTemplateNousA1TJson)));
   page += F("'>NOUS A1T 16A</option><option data-json='");
+  page += htmlEscape(String(FPSTR(kTemplateShelly1Json)));
+  page += F("'>Shelly 1</option><option data-json='");
   page += htmlEscape(String(FPSTR(kTemplateShelly25Json)));
   page += F("'>Shelly 2.5</option><option data-json='");
-  page += htmlEscape(String(FPSTR(kTemplateShelly1Json)));
-  page += F("'>Shelly 1</option></select></label></div>");
+  page += htmlEscape(String(FPSTR(kTemplateShellyPlugSJson)));
+  page += F("'>Shelly Plug S</option></select></label></div>");
   page += F("<div class='row'><label>Tasmota ESP8266 template JSON<br><textarea id='template-json' name='template' rows='5' maxlength='");
   page += String(kTemplateJsonMaxLen);
   page += F("'>");
@@ -5209,7 +6063,7 @@ void handleRoot() {
   page += F("<section class='panel'><h2>Firmware</h2><form method='post' action='/update' enctype='multipart/form-data'>");
   page += F("<input type='file' name='firmware' accept='.bin,.bin.gz' required><br><button type='submit'>Upload firmware</button></form>");
   page += F("<p><a class='btn secondary' href='/reboot'>Reboot</a></p>");
-  page += F("<form method='post' action='/factory-reset' onsubmit=\"return confirm('Factory reset will delete Wi-Fi, template, MQTT, input, LED, and energy settings. Continue?')\"><button class='danger' type='submit'>Factory reset</button></form></section>");
+  page += F("<form method='post' action='/factory-reset' onsubmit=\"return confirm('Factory reset will delete Wi-Fi, template, MQTT, input, LED, light, and energy settings. Continue?')\"><button class='danger' type='submit'>Factory reset</button></form></section>");
   flushStreamChunk(page);
 
   appendSettingsForm(page);
@@ -5725,6 +6579,175 @@ void handlePowerSave() {
   server.send(303, F("text/plain"), "");
 }
 
+void handleLightSave() {
+  if (!light.present) {
+    server.send(400, F("text/plain"), F("No light output is configured"));
+    return;
+  }
+
+  if (server.hasArg("power")) {
+    const String state = server.arg("power");
+    if (state == "on") {
+      setLightPower(true);
+    } else if (state == "off") {
+      setLightPower(false);
+    } else if (state == "toggle") {
+      toggleLightPower();
+    } else {
+      server.send(400, F("text/plain"), F("Invalid light power state"));
+      return;
+    }
+  }
+
+  if (server.hasArg("dimmer")) {
+    uint16_t dimmer = 0;
+    if (!parseUint16Input(server.arg("dimmer"), kLightDimmerOff, kLightDimmerMax, dimmer)) {
+      server.send(400, F("text/plain"), F("Invalid dimmer"));
+      return;
+    }
+    setLightDimmer(dimmer);
+  }
+
+  if (server.hasArg("ct")) {
+    uint16_t ct = 0;
+    if (!parseUint16Input(server.arg("ct"), kLightCtMin, kLightCtMax, ct)) {
+      server.send(400, F("text/plain"), F("Invalid color temperature"));
+      return;
+    }
+    setLightCt(ct);
+  }
+
+  if (server.hasArg("on_dimmer")) {
+    uint16_t on_dimmer = 0;
+    if (!parseUint16Input(server.arg("on_dimmer"), kLightDimmerMin, kLightDimmerMax, on_dimmer)) {
+      server.send(400, F("text/plain"), F("Invalid ON dimmer"));
+      return;
+    }
+    config.light_on_dimmer = static_cast<uint8_t>(on_dimmer);
+    if (!commitConfig()) {
+      server.send(500, F("text/plain"), F("Could not save light settings"));
+      return;
+    }
+  }
+
+  if (server.hasArg("_inline")) {
+    server.send(204, F("text/plain"), "");
+    return;
+  }
+
+  server.sendHeader(F("Location"), F("/"), true);
+  server.send(303, F("text/plain"), "");
+}
+
+bool executeDeviceCommand(const char *raw, size_t cmd_len, const char *arg, size_t arg_len, String &out, String &error) {
+  if (!raw || !arg || cmd_len == 0) {
+    error = F("Invalid cmnd");
+    return false;
+  }
+
+  while (arg_len > 0) {
+    const char c = arg[0];
+    if (c != ' ' && c != '\t' && c != '\r' && c != '\n') break;
+    arg++;
+    arg_len--;
+  }
+  while (arg_len > 0) {
+    const char c = arg[arg_len - 1];
+    if (c != ' ' && c != '\t' && c != '\r' && c != '\n') break;
+    arg_len--;
+  }
+
+  uint8_t relay = 0;
+  char response_key[12];
+  if (parsePowerCommand(raw, cmd_len, relay, response_key, sizeof(response_key))) {
+    bool on = false;
+    if (relay < kMaxRelays && hasPin(runtime_template.relays[relay])) {
+      if (arg_len == 0) {
+        on = relay_state[relay];
+      } else {
+        uint8_t state = kPowerStateOff;
+        if (!parsePowerState(arg, arg_len, state)) {
+          error = F("Invalid power state");
+          return false;
+        }
+        on = state == kPowerStateToggle ? !relay_state[relay] : state == kPowerStateOn;
+        setRelay(relay, on);
+        updateDeviceLeds(true);
+      }
+    } else if (relay == 0 && light.present) {
+      if (arg_len == 0) {
+        on = light.power;
+      } else {
+        uint8_t state = kPowerStateOff;
+        if (!parsePowerState(arg, arg_len, state)) {
+          error = F("Invalid power state");
+          return false;
+        }
+        on = state == kPowerStateToggle ? !light.power : state == kPowerStateOn;
+        setLightPower(on);
+      }
+    } else {
+      error = F("Invalid relay");
+      return false;
+    }
+
+    out.reserve(24);
+    out += F("{\"");
+    out += response_key;
+    out += F("\":\"");
+    out += (on ? F("ON") : F("OFF"));
+    out += F("\"}");
+    return true;
+  }
+
+  if (commandEquals(raw, cmd_len, "dimmer")) {
+    if (!light.present) {
+      error = F("No light output is configured");
+      return false;
+    }
+    if (arg_len > 0) {
+      String value = commandArgument(arg, arg_len);
+      value.trim();
+      uint16_t dimmer = 0;
+      if (!parseUint16Input(value, kLightDimmerOff, kLightDimmerMax, dimmer)) {
+        error = F("Invalid dimmer");
+        return false;
+      }
+      setLightDimmer(dimmer);
+    }
+    out.reserve(20);
+    out += F("{\"Dimmer\":");
+    out += light.dimmer;
+    out += F("}");
+    return true;
+  }
+
+  if (commandEquals(raw, cmd_len, "ct") || commandEquals(raw, cmd_len, "colortemperature")) {
+    if (!light.present) {
+      error = F("No light output is configured");
+      return false;
+    }
+    if (arg_len > 0) {
+      String value = commandArgument(arg, arg_len);
+      value.trim();
+      uint16_t ct = 0;
+      if (!parseUint16Input(value, kLightCtMin, kLightCtMax, ct)) {
+        error = F("Invalid color temperature");
+        return false;
+      }
+      setLightCt(ct);
+    }
+    out.reserve(16);
+    out += F("{\"CT\":");
+    out += light.ct;
+    out += F("}");
+    return true;
+  }
+
+  error = F("Unsupported command");
+  return false;
+}
+
 void handleCmnd() {
   if (!server.hasArg("cmnd")) {
     server.send(400, F("text/plain"), F("Missing cmnd"));
@@ -5759,39 +6782,18 @@ void handleCmnd() {
     if (c != ' ' && c != '\t' && c != '\r' && c != '\n') break;
     state_start++;
   }
-  if (cmd_len == 0 || state_start >= total_len) {
+  if (cmd_len == 0) {
     server.send(400, F("text/plain"), F("Invalid cmnd"));
     return;
   }
-  const size_t state_len = total_len - state_start;
-
-  uint8_t relay = 0;
-  char response_key[12];
-  if (!parsePowerCommand(raw, cmd_len, relay, response_key, sizeof(response_key))) {
-    server.send(400, F("text/plain"), F("Unsupported command"));
-    return;
-  }
-  uint8_t state = kPowerStateOff;
-  if (!parsePowerState(raw + state_start, state_len, state)) {
-    server.send(400, F("text/plain"), F("Invalid power state"));
-    return;
-  }
-  if (relay >= kMaxRelays || !hasPin(runtime_template.relays[relay])) {
-    server.send(400, F("text/plain"), F("Invalid relay"));
-    return;
-  }
-
-  const bool on = state == kPowerStateToggle ? !relay_state[relay] : state == kPowerStateOn;
-  setRelay(relay, on);
-  updateDeviceLeds(true);
+  const size_t state_len = state_start < total_len ? total_len - state_start : 0;
 
   String out;
-  out.reserve(24);
-  out += F("{\"");
-  out += response_key;
-  out += F("\":\"");
-  out += (on ? F("ON") : F("OFF"));
-  out += F("\"}");
+  String error;
+  if (!executeDeviceCommand(raw, cmd_len, raw + state_start, state_len, out, error)) {
+    server.send(400, F("text/plain"), error);
+    return;
+  }
   server.sendHeader(F("Cache-Control"), F("no-store"));
   server.send(200, F("application/json"), out);
 }
@@ -5903,6 +6905,7 @@ void handleSettingsImport() {
   decodeTemplateConfigInto(candidate, candidate_runtime);
   importSettingsMqtt(root, candidate, stats);
   importSettingsEnergy(root, candidate, stats);
+  importSettingsLight(root, candidate, candidate_runtime, stats);
   importSettingsLeds(root, candidate, candidate_runtime, stats);
   importSettingsInputs(root, candidate, candidate_runtime, stats);
 
@@ -5921,6 +6924,7 @@ void handleSettingsImport() {
   const bool template_changed = templatesDiffer(before, candidate);
   const bool mqtt_changed = mqttConfigDiffers(before, candidate);
   const bool energy_changed = energyConfigDiffers(before, candidate);
+  const bool light_changed = lightConfigDiffers(before, candidate);
   const bool led_changed = ledConfigDiffers(before, candidate);
   const bool input_changed = inputConfigDiffers(before, candidate);
 
@@ -5949,6 +6953,10 @@ void handleSettingsImport() {
   if (energy_changed) {
     last_mqtt_energy_publish = 0;
     last_mqtt_energy_power = NAN;
+  }
+  if (light_changed) {
+    loadLightStateFromConfig();
+    updateLightOutputs();
   }
   if (led_changed || input_changed) updateDeviceLeds(true);
 
@@ -6054,7 +7062,34 @@ void handleHealth() {
     out += F(",\"unsupported\":");
     out += runtime_template.unsupported_count;
   }
-  out += F("},\"power\":[");
+  out += F("},\"light\":");
+  if (light.present) {
+    out += F("{\"power\":");
+    out += light.power ? F("true") : F("false");
+    out += F(",\"dimmer\":");
+    out += light.dimmer;
+    out += F(",\"ct\":");
+    out += light.ct;
+    out += F(",\"on_dimmer\":");
+    out += config.light_on_dimmer;
+    out += F(",\"pwm\":[");
+    for (uint8_t i = 0; i < runtime_template.pwm_count && i < kMaxLightPwms; i++) {
+      if (i) out += F(",");
+      if (!hasPin(runtime_template.light_pwm[i])) {
+        out += F("null");
+      } else {
+        out += F("{\"pin\":");
+        out += runtime_template.light_pwm[i].pin;
+        out += F(",\"duty\":");
+        out += lightPwmDuty(i);
+        out += F("}");
+      }
+    }
+    out += F("]}");
+  } else {
+    out += F("null");
+  }
+  out += F(",\"power\":[");
   bool first = true;
   for (uint8_t i = 0; i < runtime_template.relay_count; i++) {
     if (!first) out += ',';
@@ -6271,6 +7306,7 @@ void handleUpdateUpload() {
     update_mqtt_paused = true;
     update_error = UPDATE_ERROR_OK;
     update_max_size = 0;
+    persistLightConfig(true);
     persistEnergyTotal(true);
     mqttStop();
     WiFiUDP::stopAll();
@@ -6476,6 +7512,7 @@ void setupRoutes() {
   server.on(F("/leds"), HTTP_POST, handleLedSave);
   server.on(F("/buttons"), HTTP_POST, handleButtonSave);
   server.on(F("/power"), HTTP_POST, handlePowerSave);
+  server.on(F("/light"), HTTP_POST, handleLightSave);
   server.on(F("/cm"), HTTP_GET, handleCmnd);
   server.on(F("/reboot"), HTTP_GET, handleReboot);
   server.on(F("/factory-reset"), HTTP_POST, handleFactoryReset);
@@ -6546,6 +7583,7 @@ void loop() {
   maintainMqtt();
 
   if (restartDue()) {
+    persistLightConfig(true);
     persistEnergyTotal(true);
     delay(50);
     ESP.restart();
