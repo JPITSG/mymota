@@ -28,6 +28,7 @@ namespace {
 constexpr uint32_t kConfigMagic = 0x4d594d4f;  // MYMO
 constexpr uint32_t kBootRecoveryMagic = 0x4d595246;  // MYRF
 constexpr uint32_t kEnergyJournalMagic = 0x4d59454a;  // MYEJ
+constexpr uint32_t kGracefulRelaySnapshotMagic = 0x4d595253;  // MYRS
 constexpr uint16_t kConfigVersionV1 = 1;
 constexpr uint16_t kConfigVersionV2 = 2;
 constexpr uint16_t kConfigVersionV3 = 3;
@@ -56,6 +57,8 @@ constexpr uint32_t kBootRecoveryStableMs = 30000;
 constexpr uint32_t kBootRecoveryBootMarker = 0x4d594254;  // MYBT
 constexpr uint32_t kBootRecoveryStableMarker = kBootRecoveryMagic;
 constexpr uint32_t kBootRecoveryEmptyMarker = 0xffffffffUL;
+constexpr uint16_t kGracefulRelaySnapshotVersion = 1;
+constexpr uint32_t kGracefulRelaySnapshotRtcBlock = 64;
 constexpr uint8_t kPhyModeAuto = 0;
 constexpr uint8_t kPhyModeFailsafe = WIFI_PHY_MODE_11G;
 constexpr uint8_t kBootRecoveryLimit = 5;
@@ -971,7 +974,20 @@ struct EnergyJournalRecord {
   uint32_t reserved;
 };
 
+struct GracefulRelaySnapshot {
+  uint32_t magic;
+  uint16_t version;
+  uint16_t size;
+  uint32_t chip_id;
+  uint16_t relay_mask;
+  uint8_t relay_count;
+  uint8_t reserved;
+  uint32_t relay_signature;
+  uint32_t crc;
+};
+
 static_assert(sizeof(EnergyJournalRecord) % sizeof(uint32_t) == 0, "Energy journal records must be word aligned");
+static_assert(sizeof(GracefulRelaySnapshot) % sizeof(uint32_t) == 0, "Graceful relay snapshots must be word aligned");
 
 ESP8266WebServer server(80);
 WiFiClient mqtt_client;
@@ -992,6 +1008,7 @@ uint8_t update_error = UPDATE_ERROR_OK;
 uint32_t update_max_size = 0;
 uint32_t restart_at = 0;
 bool restart_pending = false;
+bool restart_preserve_relays = false;
 uint32_t disconnected_since = 0;
 bool disconnected_timer_active = false;
 uint32_t last_wifi_begin_attempt = 0;
@@ -1030,6 +1047,8 @@ uint8_t boot_recovery_count = 0;
 bool boot_recovery_armed = false;
 bool boot_recovery_factory_reset = false;
 bool relay_state[kMaxRelays]{};
+bool graceful_relay_restore_valid = false;
+uint16_t graceful_relay_restore_mask = 0;
 bool relay_enforcement_pending[kMaxRelays]{};
 uint32_t relay_enforcement_due[kMaxRelays]{};
 bool rotary_suppress_button[kMaxButtons]{};
@@ -1121,6 +1140,86 @@ uint32_t configCrc(const ConfigT &cfg) {
     hash = fnv1aUpdate(hash, crc_byte ? 0 : data[i]);
   }
   return hash;
+}
+
+uint32_t relayTemplateSignature() {
+  uint32_t hash = 2166136261UL;
+  hash = fnv1aUpdate(hash, runtime_template.relay_count);
+  for (uint8_t i = 0; i < kMaxRelays; i++) {
+    const PinAssignment &relay = runtime_template.relays[i];
+    hash = fnv1aUpdate(hash, relay.pin);
+    hash = fnv1aUpdate(hash, relay.inverted ? 1 : 0);
+    hash = fnv1aUpdate(hash, relay.no_pullup ? 1 : 0);
+    hash = fnv1aUpdate(hash, hasPin(relay) ? 1 : 0);
+  }
+  return hash;
+}
+
+uint16_t relayStateMask() {
+  uint16_t mask = 0;
+  for (uint8_t i = 0; i < runtime_template.relay_count && i < kMaxRelays; i++) {
+    if (!hasPin(runtime_template.relays[i]) || !relay_state[i]) continue;
+    mask |= (1U << i);
+  }
+  return mask;
+}
+
+bool readGracefulRelaySnapshot(GracefulRelaySnapshot &snapshot) {
+  memset(&snapshot, 0, sizeof(snapshot));
+  return system_rtc_mem_read(kGracefulRelaySnapshotRtcBlock, &snapshot, sizeof(snapshot));
+}
+
+bool writeGracefulRelaySnapshot(const GracefulRelaySnapshot &snapshot) {
+  GracefulRelaySnapshot writable = snapshot;
+  return system_rtc_mem_write(kGracefulRelaySnapshotRtcBlock,
+                              &writable,
+                              sizeof(snapshot));
+}
+
+bool clearGracefulRelaySnapshot() {
+  GracefulRelaySnapshot snapshot{};
+  return writeGracefulRelaySnapshot(snapshot);
+}
+
+bool gracefulRelaySnapshotValid(const GracefulRelaySnapshot &snapshot) {
+  if (snapshot.magic != kGracefulRelaySnapshotMagic) return false;
+  if (snapshot.version != kGracefulRelaySnapshotVersion) return false;
+  if (snapshot.size != sizeof(GracefulRelaySnapshot)) return false;
+  if (snapshot.chip_id != ESP.getChipId()) return false;
+  if (snapshot.relay_count != runtime_template.relay_count) return false;
+  if (snapshot.relay_signature != relayTemplateSignature()) return false;
+  return snapshot.crc == configCrc(snapshot);
+}
+
+void loadGracefulRelaySnapshot() {
+  graceful_relay_restore_valid = false;
+  graceful_relay_restore_mask = 0;
+
+  const struct rst_info *reset_info = system_get_rst_info();
+  const bool soft_restart = reset_info && reset_info->reason == REASON_SOFT_RESTART;
+  GracefulRelaySnapshot snapshot{};
+  if (soft_restart && readGracefulRelaySnapshot(snapshot) && gracefulRelaySnapshotValid(snapshot)) {
+    graceful_relay_restore_mask = snapshot.relay_mask;
+    graceful_relay_restore_valid = true;
+  }
+  clearGracefulRelaySnapshot();
+}
+
+bool saveGracefulRelaySnapshot() {
+  if (runtime_template.relay_count == 0) {
+    return clearGracefulRelaySnapshot();
+  }
+
+  GracefulRelaySnapshot snapshot{};
+  snapshot.magic = kGracefulRelaySnapshotMagic;
+  snapshot.version = kGracefulRelaySnapshotVersion;
+  snapshot.size = sizeof(GracefulRelaySnapshot);
+  snapshot.chip_id = ESP.getChipId();
+  snapshot.relay_mask = relayStateMask();
+  snapshot.relay_count = runtime_template.relay_count;
+  snapshot.relay_signature = relayTemplateSignature();
+  snapshot.crc = configCrc(snapshot);
+  return writeGracefulRelaySnapshot(snapshot);
 }
 
 uint8_t sanitizePhyMode(uint8_t mode) {
@@ -1321,9 +1420,10 @@ void setDefaultConfig() {
 
 bool commitConfig(bool force_commit = false);
 
-void scheduleRestart(uint32_t delay_ms) {
+void scheduleRestart(uint32_t delay_ms, bool preserve_relays = false) {
   restart_at = millis() + delay_ms;
   restart_pending = true;
+  restart_preserve_relays = preserve_relays;
 }
 
 bool restartDue() {
@@ -6185,6 +6285,25 @@ void toggleRelay(uint8_t relay) {
   setRelay(relay, !relay_state[relay]);
 }
 
+bool gracefulRelayRestoreState(uint8_t relay) {
+  return graceful_relay_restore_valid &&
+         relay < kMaxRelays &&
+         relay < runtime_template.relay_count &&
+         (graceful_relay_restore_mask & (1U << relay));
+}
+
+void applyGracefulRelayRestore() {
+  if (!graceful_relay_restore_valid) return;
+  for (uint8_t i = 0; i < runtime_template.relay_count && i < kMaxRelays; i++) {
+    if (!hasPin(runtime_template.relays[i])) continue;
+    const bool on = gracefulRelayRestoreState(i);
+    relay_state[i] = on;
+    writeAssignedPin(runtime_template.relays[i], on);
+  }
+  graceful_relay_restore_valid = false;
+  graceful_relay_restore_mask = 0;
+}
+
 void applyRelayOnBootEnforcement() {
   for (uint8_t i = 0; i < runtime_template.relay_count && i < kMaxRelays; i++) {
     if (!relayAvailable(i) || !config.relay_on_boot[i]) continue;
@@ -6538,11 +6657,11 @@ void setupDevicePins() {
   memset(relay_enforcement_due, 0, sizeof(relay_enforcement_due));
 
   for (uint8_t i = 0; i < kMaxRelays; i++) {
-    relay_state[i] = false;
+    relay_state[i] = gracefulRelayRestoreState(i);
     if (!hasPin(runtime_template.relays[i])) continue;
-    writeAssignedPin(runtime_template.relays[i], false);
+    writeAssignedPin(runtime_template.relays[i], relay_state[i]);
     pinMode(runtime_template.relays[i].pin, OUTPUT);
-    writeAssignedPin(runtime_template.relays[i], false);
+    writeAssignedPin(runtime_template.relays[i], relay_state[i]);
   }
 
   for (uint8_t i = 0; i < kMaxLedOutputs; i++) {
@@ -6567,6 +6686,7 @@ void setupDevicePins() {
       }
     }
   }
+  applyGracefulRelayRestore();
   applyRelayOnBootEnforcement();
 
   setupRotaryEncoder();
@@ -7560,7 +7680,7 @@ void handleWifiSave() {
   page += F("<p class='muted'>If Wi-Fi or IP changed, reconnect to the device manually.</p>");
   appendFooter(page, false, true);
   sendHtml(page);
-  scheduleRestart(1200);
+  scheduleRestart(1200, true);
 }
 
 void handleTemplateSave() {
@@ -8393,7 +8513,7 @@ void handleReboot() {
   page += F("<p>The page will return to the dashboard when the device is reachable again.</p>");
   appendFooter(page, false, true);
   sendHtml(page);
-  scheduleRestart(500);
+  scheduleRestart(500, true);
 }
 
 void handleFactoryReset() {
@@ -9074,7 +9194,7 @@ void handleUpdateDone() {
     page += F("<p>The page will return to the dashboard when the device is reachable again.</p>");
     appendFooter(page, false, true);
     sendHtml(page);
-    scheduleRestart(1200);
+    scheduleRestart(1200, true);
     return;
   }
 
@@ -9357,6 +9477,7 @@ void setup() {
   loadConfig();
   loadEnergyJournal();
   decodeTemplateConfig();
+  loadGracefulRelaySnapshot();
   setupDevicePins();
   connectWifi();
   boot_id = makeBootId();
@@ -9381,6 +9502,11 @@ void loop() {
   maintainMqtt();
 
   if (restartDue()) {
+    if (restart_preserve_relays) {
+      saveGracefulRelaySnapshot();
+    } else {
+      clearGracefulRelaySnapshot();
+    }
     persistLightConfig(true);
     persistEnergyTotal(true);
     delay(50);
