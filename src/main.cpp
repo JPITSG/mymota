@@ -127,15 +127,21 @@ constexpr uint32_t kShellyDimmerStaleMs = 5000;
 constexpr uint32_t kShellyDimmerResponseTimeoutMs = 200;
 constexpr uint8_t kShellyDimmerBufferSize = 64;
 constexpr uint8_t kShellyDimmerMaxPayloadSize = 17;
+constexpr uint8_t kShellyDimmerEdgeAuto = 0;
+constexpr uint8_t kShellyDimmerEdgeTrailing = 1;
+constexpr uint8_t kShellyDimmerEdgeLeading = 2;
+constexpr uint8_t kShellyDimmerEdgeDefault = kShellyDimmerEdgeAuto;
+constexpr uint8_t kShellyDimmerRangeMinDefault = 0;
+constexpr uint8_t kShellyDimmerRangeMaxDefault = 100;
+constexpr uint8_t kShellyDimmerRangeMaxLimit = 255;
 constexpr uint8_t kShellyDimmerStartByte = 0x01;
 constexpr uint8_t kShellyDimmerEndByte = 0x04;
 constexpr uint8_t kShellyDimmerSwitchCmd = 0x01;
 constexpr uint8_t kShellyDimmerPollCmd = 0x10;
 constexpr uint8_t kShellyDimmerVersionCmd = 0x11;
 constexpr uint8_t kShellyDimmerSettingsCmd = 0x20;
-constexpr uint8_t kShellyDimmerDefaultEdgeMode = 2;
-constexpr uint16_t kShellyDimmerDefaultWarmupBrightness = 100;
-constexpr uint16_t kShellyDimmerDefaultWarmupMs = 20;
+constexpr uint16_t kShellyDimmerDefaultWarmupBrightness = 0;
+constexpr uint16_t kShellyDimmerDefaultWarmupMs = 0;
 constexpr uint32_t kAdcUpdateMs = 2000;
 constexpr uint32_t kEnergyUpdateMs = 200;
 constexpr uint32_t kEnergyIntegrateMs = 1000;
@@ -732,7 +738,9 @@ struct StoredConfig {
   uint8_t light_dimmer;
   uint16_t light_ct;
   uint8_t light_on_dimmer;
-  uint8_t light_reserved[3];
+  uint8_t shelly_dimmer_edge;
+  uint8_t shelly_dimmer_range_min;
+  uint8_t shelly_dimmer_range_max;
   uint8_t relay_on_boot[kMaxRelays];
   uint8_t relay_time_enabled[kMaxRelays];
   uint16_t relay_time_seconds[kMaxRelays];
@@ -1095,7 +1103,9 @@ void setDefaultLightConfig(StoredConfig &target) {
   target.light_dimmer = kLightDimmerOff;
   target.light_ct = kLightCtDefault;
   target.light_on_dimmer = kLightPowerOnDimmerDefault;
-  memset(target.light_reserved, 0, sizeof(target.light_reserved));
+  target.shelly_dimmer_edge = kShellyDimmerEdgeDefault;
+  target.shelly_dimmer_range_min = kShellyDimmerRangeMinDefault;
+  target.shelly_dimmer_range_max = kShellyDimmerRangeMaxDefault;
 }
 
 void setDefaultLightConfig() {
@@ -1650,7 +1660,14 @@ void normalizeConfigStrings() {
   if (config.light_ct < kLightCtMin || config.light_ct > kLightCtMax) {
     config.light_ct = kLightCtDefault;
   }
-  memset(config.light_reserved, 0, sizeof(config.light_reserved));
+  if (config.shelly_dimmer_edge > kShellyDimmerEdgeLeading) {
+    config.shelly_dimmer_edge = kShellyDimmerEdgeDefault;
+  }
+  if (config.shelly_dimmer_range_max == 0 ||
+      config.shelly_dimmer_range_min >= config.shelly_dimmer_range_max) {
+    config.shelly_dimmer_range_min = kShellyDimmerRangeMinDefault;
+    config.shelly_dimmer_range_max = kShellyDimmerRangeMaxDefault;
+  }
   for (uint8_t i = 0; i < kMaxLedOutputs; i++) {
     if (!isLedAttachmentEncoding(config.led_attach[i])) {
       config.led_attach[i] = defaultLedAttachment(i);
@@ -1799,6 +1816,9 @@ bool loadConfig() {
     }
     memset(&config, 0, sizeof(config));
     memcpy(&config, old_config, offsetof(StoredConfigV14, crc));
+    config.shelly_dimmer_edge = kShellyDimmerEdgeDefault;
+    config.shelly_dimmer_range_min = kShellyDimmerRangeMinDefault;
+    config.shelly_dimmer_range_max = kShellyDimmerRangeMaxDefault;
     setDefaultRelayEnforcementConfig();
     delete old_config;
     commitConfig();
@@ -1820,7 +1840,9 @@ bool loadConfig() {
     memset(&config, 0, sizeof(config));
     memcpy(&config, old_config, offsetof(StoredConfigV13, crc));
     config.light_on_dimmer = config.light_dimmer;
-    memset(config.light_reserved, 0, sizeof(config.light_reserved));
+    config.shelly_dimmer_edge = kShellyDimmerEdgeDefault;
+    config.shelly_dimmer_range_min = kShellyDimmerRangeMinDefault;
+    config.shelly_dimmer_range_max = kShellyDimmerRangeMaxDefault;
     setDefaultRelayEnforcementConfig();
     delete old_config;
     commitConfig();
@@ -2311,6 +2333,35 @@ float reportedEnergyTotalKwh() {
 
 float energyMqttChangePercent() {
   return static_cast<float>(config.energy_mqtt_change_percent_x10) / 10.0f;
+}
+
+const __FlashStringHelper *shellyDimmerEdgeName(uint8_t edge) {
+  switch (edge) {
+    case kShellyDimmerEdgeTrailing: return F("trailing");
+    case kShellyDimmerEdgeLeading: return F("leading");
+    default: return F("auto");
+  }
+}
+
+bool parseShellyDimmerEdgeName(String name, uint8_t &edge) {
+  name.trim();
+  name.toLowerCase();
+  if (name == F("auto") || name == F("default") || name == F("firmware")) {
+    edge = kShellyDimmerEdgeAuto;
+  } else if (name == F("trailing") || name == F("trailing_edge")) {
+    edge = kShellyDimmerEdgeTrailing;
+  } else if (name == F("leading") || name == F("leading_edge")) {
+    edge = kShellyDimmerEdgeLeading;
+  } else {
+    return false;
+  }
+  return true;
+}
+
+uint16_t shellyDimmerSettingsEdgePayload() {
+  if (config.shelly_dimmer_edge == kShellyDimmerEdgeTrailing) return 2;
+  if (config.shelly_dimmer_edge == kShellyDimmerEdgeLeading) return 1;
+  return 0;
 }
 
 const char *buttonEventType(bool hold) {
@@ -3258,6 +3309,35 @@ String commandArgument(const char *p, size_t len) {
   return out;
 }
 
+bool parseDimmerRangeCommandArgument(const char *p, size_t len, uint8_t &range_min, uint8_t &range_max) {
+  String value = commandArgument(p, len);
+  value.trim();
+  if (value.length() == 0) return false;
+
+  int split = value.indexOf(',');
+  if (split < 0) split = value.indexOf(' ');
+  String min_text = split < 0 ? value : value.substring(0, split);
+  String max_text = split < 0 ? String(config.shelly_dimmer_range_max) : value.substring(split + 1);
+  min_text.trim();
+  max_text.trim();
+
+  uint16_t parsed_min = 0;
+  uint16_t parsed_max = 0;
+  if (!parseUint16Input(min_text, 0, kShellyDimmerRangeMaxLimit, parsed_min) ||
+      !parseUint16Input(max_text, 0, kShellyDimmerRangeMaxLimit, parsed_max)) {
+    return false;
+  }
+  if (parsed_min > parsed_max) {
+    const uint16_t swapped = parsed_min;
+    parsed_min = parsed_max;
+    parsed_max = swapped;
+  }
+  if (parsed_min == parsed_max || parsed_max == 0) return false;
+  range_min = static_cast<uint8_t>(parsed_min);
+  range_max = static_cast<uint8_t>(parsed_max);
+  return true;
+}
+
 bool isValidMqttHost(const String &host) {
   if (host.length() > kMqttHostMaxLen) return false;
   for (size_t i = 0; i < host.length(); i++) {
@@ -3495,7 +3575,10 @@ bool lightConfigDiffers(const StoredConfig &a, const StoredConfig &b) {
   return a.light_power != b.light_power ||
          a.light_dimmer != b.light_dimmer ||
          a.light_ct != b.light_ct ||
-         a.light_on_dimmer != b.light_on_dimmer;
+         a.light_on_dimmer != b.light_on_dimmer ||
+         a.shelly_dimmer_edge != b.shelly_dimmer_edge ||
+         a.shelly_dimmer_range_min != b.shelly_dimmer_range_min ||
+         a.shelly_dimmer_range_max != b.shelly_dimmer_range_max;
 }
 
 bool ledConfigDiffers(const StoredConfig &a, const StoredConfig &b) {
@@ -3587,6 +3670,15 @@ void appendSettingsExportJson(String &out) {
   out += config.light_ct;
   out += F(",\"on_dimmer\":");
   out += config.light_on_dimmer;
+  if (runtime_template.shelly_dimmer) {
+    out += F(",\"shelly_dimmer\":{\"edge\":\"");
+    out += shellyDimmerEdgeName(config.shelly_dimmer_edge);
+    out += F("\",\"range_min\":");
+    out += String(config.shelly_dimmer_range_min);
+    out += F(",\"range_max\":");
+    out += String(config.shelly_dimmer_range_max);
+    out += F("}");
+  }
   out += F("},\"leds\":[");
   for (uint8_t i = 0; i < kMaxLedOutputs; i++) {
     if (i) out += ',';
@@ -3803,6 +3895,49 @@ void importSettingsLight(JsonObjectConst root, StoredConfig &target, const Runti
       recordSettingsApplied(stats);
     } else {
       recordSettingsSkipped(stats, F("light.on_dimmer"));
+    }
+  }
+  if (light_settings.containsKey("shelly_dimmer")) {
+    if (!rt.shelly_dimmer) {
+      recordSettingsSkipped(stats, F("light.shelly_dimmer"));
+      return;
+    }
+    JsonObjectConst shelly_settings = light_settings["shelly_dimmer"].as<JsonObjectConst>();
+    if (shelly_settings.isNull()) {
+      recordSettingsSkipped(stats, F("light.shelly_dimmer"));
+      return;
+    }
+
+    if (shelly_settings.containsKey("edge")) {
+      String edge_name;
+      uint8_t edge = kShellyDimmerEdgeDefault;
+      if (settingsReadString(shelly_settings["edge"], edge_name, 16) &&
+          parseShellyDimmerEdgeName(edge_name, edge)) {
+        target.shelly_dimmer_edge = edge;
+        recordSettingsApplied(stats);
+      } else {
+        recordSettingsSkipped(stats, F("light.shelly_dimmer.edge"));
+      }
+    }
+
+    const bool has_range_min = shelly_settings.containsKey("range_min");
+    const bool has_range_max = shelly_settings.containsKey("range_max");
+    if (has_range_min || has_range_max) {
+      uint16_t range_min = target.shelly_dimmer_range_min;
+      uint16_t range_max = target.shelly_dimmer_range_max;
+      const bool range_min_ok = !has_range_min ||
+        settingsReadUint16(shelly_settings["range_min"], 0, kShellyDimmerRangeMaxLimit - 1, range_min);
+      const bool range_max_ok = !has_range_max ||
+        settingsReadUint16(shelly_settings["range_max"], 1, kShellyDimmerRangeMaxLimit, range_max);
+      if (range_min_ok && range_max_ok && range_min < range_max) {
+        target.shelly_dimmer_range_min = static_cast<uint8_t>(range_min);
+        target.shelly_dimmer_range_max = static_cast<uint8_t>(range_max);
+        if (has_range_min) recordSettingsApplied(stats);
+        if (has_range_max) recordSettingsApplied(stats);
+      } else {
+        if (has_range_min) recordSettingsSkipped(stats, F("light.shelly_dimmer.range_min"));
+        if (has_range_max) recordSettingsSkipped(stats, F("light.shelly_dimmer.range_max"));
+      }
     }
   }
 }
@@ -5094,8 +5229,18 @@ void updateDeviceLeds(bool force);
 
 uint16_t shellyDimmerTargetBrightness() {
   if (!light.present || !light.power) return 0;
-  const uint8_t dimmer = light.dimmer > kLightDimmerMax ? kLightDimmerMax : light.dimmer;
-  return static_cast<uint16_t>(dimmer * 10U);
+  const uint16_t dimmer = light.dimmer > kLightDimmerMax ? kLightDimmerMax : light.dimmer;
+  if (dimmer == 0) return 0;
+  uint16_t range_min = config.shelly_dimmer_range_min;
+  uint16_t range_max = config.shelly_dimmer_range_max;
+  if (range_max == 0 || range_min >= range_max) {
+    range_min = kShellyDimmerRangeMinDefault;
+    range_max = kShellyDimmerRangeMaxDefault;
+  }
+  return static_cast<uint16_t>(
+    (range_min * 10U) +
+    (((static_cast<uint32_t>(range_max - range_min) * 10U * dimmer) + 50U) / 100U)
+  );
 }
 
 uint16_t shellyDimmerChecksum(const uint8_t *buf, uint8_t len) {
@@ -5263,7 +5408,7 @@ bool shellyDimmerSendVersion() {
 bool shellyDimmerSendSettings() {
   uint8_t payload[10];
   const uint16_t brightness = shellyDimmerTargetBrightness();
-  const uint16_t edge_mode = kShellyDimmerDefaultEdgeMode;
+  const uint16_t edge_mode = shellyDimmerSettingsEdgePayload();
   const uint16_t fade_rate = 0;
   payload[0] = brightness & 0xff;
   payload[1] = brightness >> 8;
@@ -6036,7 +6181,7 @@ void appendFooter(String &page, bool live_poll = true, bool reboot_wait = false)
   page += F("p('live-wifi',d.wifi?'connected':'disconnected',d.wifi?'pill ok':'pill bad');t('live-ssid',d.wifi_ssid||'n/a');t('live-ip',d.ip||'n/a');t('live-rssi',d.rssi==null?'n/a':d.rssi+' dBm');");
   page += F("p('live-mqtt',d.mqtt.enabled?(d.mqtt.connected?'connected':'disconnected'):'not configured',d.mqtt.enabled?(d.mqtt.connected?'pill ok':'pill bad'):'pill');");
   page += F("if(d.mqtt){t('live-mqtt-pending',d.mqtt.pending);t('live-mqtt-result',d.mqtt.last_connect_result);t('live-mqtt-connect-ms',d.mqtt.last_connect_ms+' ms');t('live-mqtt-attempt',d.mqtt.last_attempt_ms_ago==null?'n/a':d.mqtt.last_attempt_ms_ago+' ms ago');}");
-  page += F("if(d.light){p('live-light-power',d.light.power?'on':'off',d.light.power?'pill ok':'pill bad');t('live-light-dimmer',d.light.dimmer+'%');t('live-light-ct',d.light.ct+' mired');t('live-light-on-dimmer',d.light.on_dimmer+'%');sv('dimmer',d.light.dimmer);sv('ct',d.light.ct);}");
+  page += F("if(d.light){p('live-light-power',d.light.power?'on':'off',d.light.power?'pill ok':'pill bad');t('live-light-dimmer',d.light.dimmer+'%');t('live-light-ct',d.light.ct+' mired');t('live-light-on-dimmer',d.light.on_dimmer+'%');sv('dimmer',d.light.dimmer);sv('ct',d.light.ct);if(d.light.shelly_dimmer){var sd=d.light.shelly_dimmer;t('live-shelly-edge',sd.edge||'auto');t('live-shelly-range-min',sd.range_min);t('live-shelly-range-max',sd.range_max);sv('shelly_edge',sd.edge||'auto');sv('shelly_range_min',sd.range_min);sv('shelly_range_max',sd.range_max);}}");
   page += F("if(d.power){for(var i=0;i<d.power.length;i++){if(d.power[i]!==null)p('live-relay-'+i,d.power[i]?'on':'off',d.power[i]?'pill ok':'pill bad');}}");
   page += F("if(d.buttons){for(var b=0;b<d.buttons.length;b++){if(d.buttons[b])p('live-button-'+b,d.buttons[b].state||(d.buttons[b].pressed?'pressed':'released'),d.buttons[b].pressed?'pill ok':'pill bad');}}");
   page += F("if(d.leds){for(var l=0;l<d.leds.length;l++){if(d.leds[l])p('live-led-'+l,d.leds[l].on?'on':'off',d.leds[l].on?'pill ok':'pill bad');}}");
@@ -6328,6 +6473,12 @@ void appendDeviceControls(String &page) {
       page += String(shelly_dimmer.version_minor);
       page += F("</code> hw <code>");
       page += String(shelly_dimmer.hw_version);
+      page += F("</code></div><span>Edge mode</span><div><code id='live-shelly-edge'>");
+      page += shellyDimmerEdgeName(config.shelly_dimmer_edge);
+      page += F("</code></div><span>Hardware range</span><div><code id='live-shelly-range-min'>");
+      page += String(config.shelly_dimmer_range_min);
+      page += F("</code> to <code id='live-shelly-range-max'>");
+      page += String(config.shelly_dimmer_range_max);
       page += F("</code></div>");
     }
     page += F("<span>ON dimmer</span><div><code id='live-light-on-dimmer'>");
@@ -6356,7 +6507,25 @@ void appendDeviceControls(String &page) {
     page += String(kLightDimmerMax);
     page += F("' step='1' value='");
     page += String(config.light_on_dimmer);
-    page += F("'></label></div></div>");
+    page += F("'></label></div>");
+    if (runtime_template.shelly_dimmer) {
+      page += F("<div class='button-block'><strong>Shelly dimmer</strong><div class='row'><label>Edge mode<br><select class='light-auto' data-live='live-shelly-edge' name='shelly_edge'><option value='auto'");
+      if (config.shelly_dimmer_edge == kShellyDimmerEdgeAuto) page += F(" selected");
+      page += F(">Auto</option><option value='trailing'");
+      if (config.shelly_dimmer_edge == kShellyDimmerEdgeTrailing) page += F(" selected");
+      page += F(">Trailing edge</option><option value='leading'");
+      if (config.shelly_dimmer_edge == kShellyDimmerEdgeLeading) page += F(" selected");
+      page += F(">Leading edge</option></select></label></div><div class='row'><label>Range minimum<br><input class='light-auto' data-live='live-shelly-range-min' name='shelly_range_min' type='number' min='0' max='");
+      page += String(kShellyDimmerRangeMaxLimit - 1);
+      page += F("' step='1' value='");
+      page += String(config.shelly_dimmer_range_min);
+      page += F("'></label></div><div class='row'><label>Range maximum<br><input class='light-auto' data-live='live-shelly-range-max' name='shelly_range_max' type='number' min='1' max='");
+      page += String(kShellyDimmerRangeMaxLimit);
+      page += F("' step='1' value='");
+      page += String(config.shelly_dimmer_range_max);
+      page += F("'></label></div></div>");
+    }
+    page += F("</div>");
   }
   for (uint8_t i = 0; i < runtime_template.relay_count; i++) {
     if (!hasPin(runtime_template.relays[i])) continue;
@@ -7430,6 +7599,8 @@ void handleLightSave() {
     server.send(400, F("text/plain"), F("No light output is configured"));
     return;
   }
+  bool light_settings_changed = false;
+  bool shelly_settings_changed = false;
 
   if (server.hasArg("power")) {
     const String state = server.arg("power");
@@ -7469,10 +7640,62 @@ void handleLightSave() {
       server.send(400, F("text/plain"), F("Invalid ON dimmer"));
       return;
     }
-    config.light_on_dimmer = static_cast<uint8_t>(on_dimmer);
+    const uint8_t next_on_dimmer = static_cast<uint8_t>(on_dimmer);
+    if (config.light_on_dimmer != next_on_dimmer) {
+      config.light_on_dimmer = next_on_dimmer;
+      light_settings_changed = true;
+    }
+  }
+
+  if (runtime_template.shelly_dimmer && server.hasArg("shelly_edge")) {
+    uint8_t edge = kShellyDimmerEdgeDefault;
+    if (!parseShellyDimmerEdgeName(server.arg("shelly_edge"), edge)) {
+      server.send(400, F("text/plain"), F("Invalid Shelly edge mode"));
+      return;
+    }
+    if (config.shelly_dimmer_edge != edge) {
+      config.shelly_dimmer_edge = edge;
+      light_settings_changed = true;
+      shelly_settings_changed = true;
+    }
+  }
+
+  if (runtime_template.shelly_dimmer && server.hasArg("shelly_range_min")) {
+    uint16_t range_min = 0;
+    if (!parseUint16Input(server.arg("shelly_range_min"), 0, kShellyDimmerRangeMaxLimit - 1, range_min) ||
+        range_min >= config.shelly_dimmer_range_max) {
+      server.send(400, F("text/plain"), F("Invalid Shelly range minimum"));
+      return;
+    }
+    if (config.shelly_dimmer_range_min != range_min) {
+      config.shelly_dimmer_range_min = static_cast<uint8_t>(range_min);
+      light_settings_changed = true;
+      shelly_settings_changed = true;
+    }
+  }
+
+  if (runtime_template.shelly_dimmer && server.hasArg("shelly_range_max")) {
+    uint16_t range_max = 0;
+    if (!parseUint16Input(server.arg("shelly_range_max"), 1, kShellyDimmerRangeMaxLimit, range_max) ||
+        range_max <= config.shelly_dimmer_range_min) {
+      server.send(400, F("text/plain"), F("Invalid Shelly range maximum"));
+      return;
+    }
+    if (config.shelly_dimmer_range_max != range_max) {
+      config.shelly_dimmer_range_max = static_cast<uint8_t>(range_max);
+      light_settings_changed = true;
+      shelly_settings_changed = true;
+    }
+  }
+
+  if (light_settings_changed) {
     if (!commitConfig()) {
       server.send(500, F("text/plain"), F("Could not save light settings"));
       return;
+    }
+    if (shelly_settings_changed) {
+      shellyDimmerSendSettings();
+      updateLightOutputs();
     }
   }
 
@@ -7564,6 +7787,64 @@ bool executeDeviceCommand(const char *raw, size_t cmd_len, const char *arg, size
     out.reserve(20);
     out += F("{\"Dimmer\":");
     out += light.dimmer;
+    out += F("}");
+    return true;
+  }
+
+  if (commandEquals(raw, cmd_len, "dimmerrange")) {
+    if (!runtime_template.shelly_dimmer) {
+      error = F("No Shelly dimmer is configured");
+      return false;
+    }
+    if (arg_len > 0) {
+      uint8_t range_min = config.shelly_dimmer_range_min;
+      uint8_t range_max = config.shelly_dimmer_range_max;
+      if (!parseDimmerRangeCommandArgument(arg, arg_len, range_min, range_max)) {
+        error = F("Invalid dimmer range");
+        return false;
+      }
+      config.shelly_dimmer_range_min = range_min;
+      config.shelly_dimmer_range_max = range_max;
+      if (!commitConfig()) {
+        error = F("Could not save dimmer range");
+        return false;
+      }
+      shellyDimmerSendSettings();
+      updateLightOutputs();
+    }
+    out.reserve(42);
+    out += F("{\"DimmerRange\":{\"Min\":");
+    out += String(config.shelly_dimmer_range_min);
+    out += F(",\"Max\":");
+    out += String(config.shelly_dimmer_range_max);
+    out += F("}}");
+    return true;
+  }
+
+  if (commandEquals(raw, cmd_len, "shdleadingedge")) {
+    if (!runtime_template.shelly_dimmer) {
+      error = F("No Shelly dimmer is configured");
+      return false;
+    }
+    if (arg_len > 0) {
+      String value = commandArgument(arg, arg_len);
+      value.trim();
+      uint16_t leading_edge = 0;
+      if (!parseUint16Input(value, 0, 1, leading_edge)) {
+        error = F("Invalid Shelly edge mode");
+        return false;
+      }
+      config.shelly_dimmer_edge = leading_edge ? kShellyDimmerEdgeLeading : kShellyDimmerEdgeTrailing;
+      if (!commitConfig()) {
+        error = F("Could not save Shelly edge mode");
+        return false;
+      }
+      shellyDimmerSendSettings();
+      updateLightOutputs();
+    }
+    out.reserve(24);
+    out += F("{\"ShdLeadingEdge\":");
+    out += String(config.shelly_dimmer_edge == kShellyDimmerEdgeLeading ? 1 : 0);
     out += F("}");
     return true;
   }
@@ -7805,6 +8086,9 @@ void handleSettingsImport() {
   }
   if (light_changed) {
     loadLightStateFromConfig();
+    if (runtime_template.shelly_dimmer) {
+      shellyDimmerSendSettings();
+    }
     updateLightOutputs();
   }
   if (relay_enforcement_changed) refreshRelayEnforcementRuntime(true);
@@ -7949,6 +8233,12 @@ void handleHealth() {
       out += shelly_dimmer.actual_brightness;
       out += F(",\"requested_brightness\":");
       out += shelly_dimmer.requested_brightness == 0xffffU ? 0 : shelly_dimmer.requested_brightness;
+      out += F(",\"edge\":\"");
+      out += shellyDimmerEdgeName(config.shelly_dimmer_edge);
+      out += F("\",\"range_min\":");
+      out += String(config.shelly_dimmer_range_min);
+      out += F(",\"range_max\":");
+      out += String(config.shelly_dimmer_range_max);
       out += F(",\"last_rx_ms_ago\":");
       if (shelly_dimmer.last_rx_ms == 0) {
         out += F("null");
