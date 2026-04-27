@@ -174,6 +174,11 @@ constexpr uint8_t kMqttConnectSubscribeFailed = 6;
 constexpr uint8_t kMqttLightPendingDimmer = 0x01;
 constexpr uint8_t kMqttLightPendingCt = 0x02;
 constexpr uint8_t kMqttLightPendingAll = kMqttLightPendingDimmer | kMqttLightPendingCt;
+constexpr uint8_t kMqttEnergyReportReasonNone = 0;
+constexpr uint8_t kMqttEnergyReportReasonInitial = 1;
+constexpr uint8_t kMqttEnergyReportReasonInterval = 2;
+constexpr uint8_t kMqttEnergyReportReasonPowerChange = 3;
+constexpr uint8_t kMqttEnergyReportReasonIntervalPowerChange = 4;
 constexpr uint8_t kPowerStateOff = 0;
 constexpr uint8_t kPowerStateOn = 1;
 constexpr uint8_t kPowerStateToggle = 2;
@@ -884,6 +889,7 @@ uint32_t last_mqtt_energy_publish = 0;
 uint32_t last_mqtt_connect_attempt = 0;
 uint32_t last_mqtt_connect_duration = 0;
 float last_mqtt_energy_power = NAN;
+uint8_t last_mqtt_energy_report_reason = kMqttEnergyReportReasonNone;
 uint16_t mqtt_pending_relay_mask = 0;
 uint8_t mqtt_pending_light_mask = 0;
 struct MqttButtonPending {
@@ -2180,6 +2186,7 @@ void resetMqttRuntimeState() {
   last_mqtt_connect_duration = 0;
   last_mqtt_connect_result = kMqttConnectIdle;
   last_mqtt_energy_power = NAN;
+  last_mqtt_energy_report_reason = kMqttEnergyReportReasonNone;
   mqtt_pending_relay_mask = 0;
   mqtt_pending_light_mask = 0;
   mqtt_button_queue_head = 0;
@@ -2202,6 +2209,7 @@ bool saveEnergyConfig(float total_offset_kwh, uint16_t mqtt_interval, uint16_t m
   config.energy_mqtt_change_percent_x10 = mqtt_change_percent_x10;
   last_mqtt_energy_publish = 0;
   last_mqtt_energy_power = NAN;
+  last_mqtt_energy_report_reason = kMqttEnergyReportReasonNone;
   return commitConfig();
 }
 
@@ -4141,6 +4149,7 @@ void queueMqttConnectHeal() {
   if (mqttEnergyReportingEnabled()) {
     last_mqtt_energy_publish = 0;
     last_mqtt_energy_power = NAN;
+    last_mqtt_energy_report_reason = kMqttEnergyReportReasonNone;
   }
 
   if (light.present) {
@@ -4507,7 +4516,34 @@ bool mqttEnergyPowerChangedEnough() {
   return (delta * 1000.0f) >= (baseline * static_cast<float>(config.energy_mqtt_change_percent_x10));
 }
 
-bool mqttPublishEnergyStatus() {
+const __FlashStringHelper *mqttEnergyReportReasonName(uint8_t reason) {
+  switch (reason) {
+    case kMqttEnergyReportReasonInitial: return F("initial");
+    case kMqttEnergyReportReasonInterval: return F("interval");
+    case kMqttEnergyReportReasonPowerChange: return F("power change %");
+    case kMqttEnergyReportReasonIntervalPowerChange: return F("interval + power change %");
+    default: return F("none");
+  }
+}
+
+uint8_t mqttEnergyReportReason(uint32_t now) {
+  if (last_mqtt_energy_publish == 0 || isnan(last_mqtt_energy_power)) {
+    return kMqttEnergyReportReasonInitial;
+  }
+
+  bool interval_due = false;
+  if (config.energy_mqtt_interval > 0) {
+    const uint32_t interval_ms = static_cast<uint32_t>(config.energy_mqtt_interval) * 1000UL;
+    interval_due = now - last_mqtt_energy_publish >= interval_ms;
+  }
+  const bool power_change_due = mqttEnergyPowerChangedEnough();
+  if (interval_due && power_change_due) return kMqttEnergyReportReasonIntervalPowerChange;
+  if (interval_due) return kMqttEnergyReportReasonInterval;
+  if (power_change_due) return kMqttEnergyReportReasonPowerChange;
+  return kMqttEnergyReportReasonNone;
+}
+
+bool mqttPublishEnergyStatus(uint8_t reason) {
   if (!energy.present) return true;
 
   const String topic = mqttEnergyTopic();
@@ -4539,6 +4575,7 @@ bool mqttPublishEnergyStatus() {
   if (ok) {
     last_mqtt_energy_publish = millis();
     last_mqtt_energy_power = energy.power;
+    last_mqtt_energy_report_reason = reason;
   }
   return ok;
 }
@@ -4547,20 +4584,14 @@ void maintainMqttEnergyReports(uint32_t now) {
   if (!mqttEnergyReportingEnabled()) {
     last_mqtt_energy_publish = 0;
     last_mqtt_energy_power = NAN;
+    last_mqtt_energy_report_reason = kMqttEnergyReportReasonNone;
     return;
   }
   if (!mqttEnergyReportReady()) return;
 
-  bool publish = last_mqtt_energy_publish == 0 || isnan(last_mqtt_energy_power);
-  if (!publish && config.energy_mqtt_interval > 0) {
-    const uint32_t interval_ms = static_cast<uint32_t>(config.energy_mqtt_interval) * 1000UL;
-    publish = now - last_mqtt_energy_publish >= interval_ms;
-  }
-  if (!publish) {
-    publish = mqttEnergyPowerChangedEnough();
-  }
-  if (publish) {
-    mqttPublishEnergyStatus();
+  const uint8_t reason = mqttEnergyReportReason(now);
+  if (reason != kMqttEnergyReportReasonNone) {
+    mqttPublishEnergyStatus(reason);
   }
 }
 
@@ -4609,6 +4640,7 @@ void maintainMqtt() {
     clearMqttButtonQueue();
     last_mqtt_energy_publish = 0;
     last_mqtt_energy_power = NAN;
+    last_mqtt_energy_report_reason = kMqttEnergyReportReasonNone;
     return;
   }
 
@@ -5610,7 +5642,7 @@ void appendFooter(String &page, bool live_poll = true, bool reboot_wait = false)
   page += F("if(d.power){for(var i=0;i<d.power.length;i++){if(d.power[i]!==null)p('live-relay-'+i,d.power[i]?'on':'off',d.power[i]?'pill ok':'pill bad');}}");
   page += F("if(d.buttons){for(var b=0;b<d.buttons.length;b++){if(d.buttons[b])p('live-button-'+b,d.buttons[b].state||(d.buttons[b].pressed?'pressed':'released'),d.buttons[b].pressed?'pill ok':'pill bad');}}");
   page += F("if(d.leds){for(var l=0;l<d.leds.length;l++){if(d.leds[l])p('live-led-'+l,d.leds[l].on?'on':'off',d.leds[l].on?'pill ok':'pill bad');}}");
-  page += F("if(d.energy){t('live-energy-power',fmt(d.energy.power,1,' W'));t('live-energy-voltage',fmt(d.energy.voltage,1,' V'));t('live-energy-current',fmt(d.energy.current,3,' A'));t('live-energy-total',fmt(d.energy.total_kwh,4,' kWh'));t('live-energy-offset',fmt(d.energy.offset_kwh,4,' kWh'));if(d.energy.channels){for(var e=0;e<d.energy.channels.length;e++){t('live-energy-ch'+e+'-power',fmt(d.energy.channels[e].power,1,' W'));t('live-energy-ch'+e+'-current',fmt(d.energy.channels[e].current,3,' A'));}}}");
+  page += F("if(d.energy){t('live-energy-power',fmt(d.energy.power,1,' W'));t('live-energy-voltage',fmt(d.energy.voltage,1,' V'));t('live-energy-current',fmt(d.energy.current,3,' A'));t('live-energy-total',fmt(d.energy.total_kwh,4,' kWh'));t('live-energy-offset',fmt(d.energy.offset_kwh,4,' kWh'));t('live-energy-mqtt-age',d.energy.last_mqtt_report_ms_ago==null?'n/a':d.energy.last_mqtt_report_ms_ago+' ms ago');t('live-energy-mqtt-reason',d.energy.last_mqtt_report_reason||'n/a');if(d.energy.channels){for(var e=0;e<d.energy.channels.length;e++){t('live-energy-ch'+e+'-power',fmt(d.energy.channels[e].power,1,' W'));t('live-energy-ch'+e+'-current',fmt(d.energy.channels[e].current,3,' A'));}}}");
   page += F("t('live-temp',d.temperature_c==null?'n/a':Number(d.temperature_c).toFixed(1)+' C');t('live-adc-raw',d.adc_raw==null?'n/a':d.adc_raw);");
   page += F("}).catch(function(){});}");
   page += F("function ba(s){var k=s.getAttribute('data-key'),v=s.value,b=document.getElementById('extra-'+k);if(!b)return;var t=b.querySelector('.target-input'),p=b.querySelector('.payload-input'),rr=b.querySelector('.relay-row'),tr=b.querySelector('.target-row'),pr=b.querySelector('.payload-row'),tl=b.querySelector('.target-label'),h=b.querySelector('.action-hint');b.className=(v=='1'||v=='2'||v=='3')?'action-extra show':'action-extra';if(rr)rr.className=v=='1'?'row relay-row':'row relay-row hidden';if(tr)tr.className=(v=='2'||v=='3')?'row target-row':'row target-row hidden';if(pr)pr.className=(v=='2')?'row payload-row':'row payload-row hidden';if(v=='1'){if(h)h.textContent='Toggles the configured output.';}else if(v=='2'){if(t&&(!t.value||t.value.indexOf('http://')==0))t.value=t.getAttribute('data-default-topic');if(p&&!p.value)p.value=p.getAttribute('data-default-payload');if(tl)tl.textContent='MQTT topic';if(h)h.textContent='Publishes this topic and payload through the configured MQTT broker.';}else if(v=='3'){if(tl)tl.textContent='Webhook URL';if(h)h.textContent='Executes an HTTP GET request; only http:// URLs are supported.';}}");
@@ -5913,7 +5945,7 @@ void appendDeviceControls(String &page) {
     page += F("'><span class='actions'><button name='state' value='toggle'>Toggle</button><button name='state' value='on'>On</button><button class='secondary' name='state' value='off'>Off</button></span></form></div>");
   }
   if (energy.present) {
-    page += F("<div class='kv'><span>Power</span><div><code id='live-energy-power'>");
+    page += F("<div class='button-block'><strong>Energy</strong><div class='kv'><span>Power</span><div><code id='live-energy-power'>");
     page += String(energy.power, 1);
     page += F(" W</code></div><span>Voltage</span><div><code id='live-energy-voltage'>");
     page += String(energy.voltage, 1);
@@ -5923,7 +5955,16 @@ void appendDeviceControls(String &page) {
     page += String(reportedEnergyTotalKwh(), 4);
     page += F(" kWh</code></div><span>Total offset</span><div><code id='live-energy-offset'>");
     page += String(config.energy_total_offset_kwh, 4);
-    page += F(" kWh</code></div></div>");
+    page += F(" kWh</code></div><span>Last MQTT report</span><div><code id='live-energy-mqtt-age'>");
+    if (last_mqtt_energy_publish == 0) {
+      page += F("n/a");
+    } else {
+      page += String(millis() - last_mqtt_energy_publish);
+      page += F(" ms ago");
+    }
+    page += F("</code></div><span>MQTT report reason</span><div><code id='live-energy-mqtt-reason'>");
+    page += mqttEnergyReportReasonName(last_mqtt_energy_report_reason);
+    page += F("</code></div></div>");
     if (energy.channel_count > 1) {
       page += F("<div class='kv'>");
       for (uint8_t i = 0; i < energy.channel_count && i < kEnergyMaxChannels; i++) {
@@ -5955,7 +5996,7 @@ void appendDeviceControls(String &page) {
     page += String(kMqttEnergyChangeMaxPercent, 1);
     page += F("' step='0.1' value='");
     page += String(energyMqttChangePercent(), 1);
-    page += F("'></label></div><button type='submit'>Save energy</button></form>");
+    page += F("'></label></div><button type='submit'>Save energy</button></form></div>");
   }
   page += F("</section>");
 }
@@ -7308,6 +7349,7 @@ void handleSettingsImport() {
   if (energy_changed) {
     last_mqtt_energy_publish = 0;
     last_mqtt_energy_power = NAN;
+    last_mqtt_energy_report_reason = kMqttEnergyReportReasonNone;
   }
   if (light_changed) {
     loadLightStateFromConfig();
@@ -7552,6 +7594,15 @@ void handleHealth() {
     out += config.energy_mqtt_interval;
     out += F(",\"report_change_percent\":");
     out += String(energyMqttChangePercent(), 1);
+    out += F(",\"last_mqtt_report_ms_ago\":");
+    if (last_mqtt_energy_publish == 0) {
+      out += F("null");
+    } else {
+      out += millis() - last_mqtt_energy_publish;
+    }
+    out += F(",\"last_mqtt_report_reason\":\"");
+    out += mqttEnergyReportReasonName(last_mqtt_energy_report_reason);
+    out += F("\"");
     if (energy.channel_count > 1) {
       out += F(",\"channels\":[");
       for (uint8_t i = 0; i < energy.channel_count && i < kEnergyMaxChannels; i++) {
