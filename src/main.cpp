@@ -182,6 +182,8 @@ constexpr size_t kJsonStreamChunkReserve = 900;
 constexpr size_t kSettingsImportJsonMaxLen = 8192;
 constexpr size_t kSettingsImportDocCapacity = 12288;
 constexpr uint16_t kSettingsFormatVersion = 1;
+constexpr size_t kApiSettingsDocCapacity = 4096;
+constexpr uint16_t kApiSettingsVersion = 1;
 constexpr const char *kDefaultButtonMqttTopic = "stat/{TOPIC}/RESULT";
 constexpr const char *kDefaultButtonMqttPressPayload = "{\"Switch{BUTTONID}\":{\"Action\":\"{TYPE}\"}}";
 constexpr const char *kDefaultButtonMqttHoldPayload = "{\"Switch{BUTTONID}\":{\"Action\":\"{TYPE}\"}}";
@@ -4214,6 +4216,119 @@ void importSettingsInputs(JsonObjectConst root, StoredConfig &target, const Runt
   }
 }
 
+void appendApiSettingsJson(String &out) {
+  out += F("{\"format\":\"mymota-api-settings\",\"api_version\":");
+  out += kApiSettingsVersion;
+  out += F(",\"inputs\":[");
+  bool first = true;
+  for (uint8_t i = 0; i < runtime_template.button_count && i < kMaxButtons; i++) {
+    if (!first) out += ',';
+    first = false;
+    if (!hasPin(runtime_template.buttons[i])) {
+      out += F("null");
+      continue;
+    }
+    out += F("{\"input\":");
+    out += i + 1;
+    out += F(",\"mode\":\"");
+    out += settingsInputModeName(effectiveInputMode(i));
+    out += F("\",\"press\":{\"action\":\"");
+    out += settingsActionName(config.button_press_action[i]);
+    out += F("\",\"mqtt_topic\":\"");
+    out += settingsJsonEscape(config.button_press_target[i]);
+    out += F("\",\"mqtt_payload\":\"");
+    out += settingsJsonEscape(config.button_press_payload[i]);
+    out += F("\"}}");
+  }
+  out += F("]}");
+}
+
+JsonVariantConst apiSettingValue(JsonObjectConst object, const char *primary, const char *fallback) {
+  JsonVariantConst value = object[primary];
+  return value.isNull() ? object[fallback] : value;
+}
+
+bool applyApiInputPressMqttSetting(JsonObjectConst item, StoredConfig &target, SettingsImportStats &stats, uint8_t item_index) {
+  JsonVariantConst input_value = apiSettingValue(item, "input", "id");
+  uint16_t input_number = 0;
+  if (!settingsReadUint16(input_value, 1, kMaxButtons, input_number)) {
+    recordSettingsSkipped(stats, String(F("inputs[")) + String(item_index) + F("].input"));
+    return false;
+  }
+  const uint8_t input = static_cast<uint8_t>(input_number - 1);
+  if (!buttonAvailableIn(runtime_template, input)) {
+    recordSettingsSkipped(stats, String(F("inputs[")) + String(item_index) + F("].input"));
+    return false;
+  }
+
+  JsonObjectConst press = item["press"].as<JsonObjectConst>();
+  if (press.isNull()) {
+    recordSettingsSkipped(stats, String(F("inputs[")) + String(item_index) + F("].press"));
+    return false;
+  }
+
+  JsonVariantConst topic_value = apiSettingValue(press, "mqtt_topic", "topic");
+  JsonVariantConst payload_value = apiSettingValue(press, "mqtt_payload", "payload");
+  const bool has_topic = !topic_value.isNull();
+  const bool has_payload = !payload_value.isNull();
+  if (!has_topic && !has_payload) {
+    recordSettingsSkipped(stats, String(F("inputs[")) + String(item_index) + F("].press"));
+    return false;
+  }
+
+  String topic = target.button_press_target[input];
+  topic.trim();
+  if (topic.length() == 0 || !isValidMqttPublishTopicTemplate(topic)) {
+    topic = kDefaultButtonMqttTopic;
+  }
+  String payload = target.button_press_payload[input];
+  if (payload.length() == 0 || !isValidButtonActionText(payload, kButtonActionPayloadMaxLen, false, true)) {
+    payload = kDefaultButtonMqttPressPayload;
+  }
+
+  if (has_topic &&
+      (!settingsReadString(topic_value, topic, kButtonActionTargetMaxLen) ||
+       !isValidMqttPublishTopicTemplate(topic))) {
+    recordSettingsSkipped(stats, String(F("inputs[")) + String(item_index) + F("].press.mqtt_topic"));
+    return false;
+  }
+  if (has_payload &&
+      (!settingsReadString(payload_value, payload, kButtonActionPayloadMaxLen, false) ||
+       !isValidButtonActionText(payload, kButtonActionPayloadMaxLen, false, true))) {
+    recordSettingsSkipped(stats, String(F("inputs[")) + String(item_index) + F("].press.mqtt_payload"));
+    return false;
+  }
+
+  target.input_mode[input] = kInputModeButton;
+  target.input_relay[input] = input;
+  target.input_on_level[input] = kInputOnLevelUnset;
+  target.button_press_action[input] = kButtonActionMqtt;
+  strlcpy(target.button_press_target[input], topic.c_str(), sizeof(target.button_press_target[input]));
+  strlcpy(target.button_press_payload[input], payload.c_str(), sizeof(target.button_press_payload[input]));
+  if (has_topic) recordSettingsApplied(stats);
+  if (has_payload) recordSettingsApplied(stats);
+  return true;
+}
+
+void applyApiInputSettings(JsonObjectConst root, StoredConfig &target, SettingsImportStats &stats) {
+  JsonVariantConst inputs_value = root["inputs"];
+  if (inputs_value.isNull()) return;
+  JsonArrayConst inputs = inputs_value.as<JsonArrayConst>();
+  if (inputs.isNull()) {
+    recordSettingsSkipped(stats, F("inputs"));
+    return;
+  }
+  const uint8_t count = min(static_cast<size_t>(kMaxButtons), inputs.size());
+  for (uint8_t i = 0; i < count; i++) {
+    JsonObjectConst item = inputs[i].as<JsonObjectConst>();
+    if (item.isNull()) {
+      if (!inputs[i].isNull()) recordSettingsSkipped(stats, String(F("inputs[")) + String(i) + F("]"));
+      continue;
+    }
+    applyApiInputPressMqttSetting(item, target, stats, i);
+  }
+}
+
 String ipToString(const IPAddress &ip) {
   char buf[16];
   snprintf(buf, sizeof(buf), "%u.%u.%u.%u", ip[0], ip[1], ip[2], ip[3]);
@@ -7967,6 +8082,93 @@ void handleSettingsExport() {
   server.send(200, F("application/json"), out);
 }
 
+void sendApiSettingsError(uint16_t status, const __FlashStringHelper *message) {
+  String out;
+  out.reserve(120);
+  out += F("{\"ok\":false,\"error\":\"");
+  out += message;
+  out += F("\"}");
+  server.sendHeader(F("Cache-Control"), F("no-store"));
+  server.send(status, F("application/json"), out);
+}
+
+void handleApiSettingsGet() {
+  String out;
+  out.reserve(1800);
+  appendApiSettingsJson(out);
+  server.sendHeader(F("Cache-Control"), F("no-store"));
+  server.send(200, F("application/json"), out);
+}
+
+void handleApiSettingsUpdate() {
+  String body = server.arg("plain");
+  body.trim();
+  if (body.length() == 0 || body.length() > kSettingsImportJsonMaxLen) {
+    sendApiSettingsError(400, F("Missing or oversized JSON body"));
+    return;
+  }
+
+  DynamicJsonDocument doc(kApiSettingsDocCapacity);
+  const DeserializationError json_error = deserializeJson(doc, body);
+  if (json_error) {
+    sendApiSettingsError(400, F("Invalid JSON body"));
+    return;
+  }
+
+  JsonObjectConst root = doc.as<JsonObjectConst>();
+  if (root.isNull()) {
+    sendApiSettingsError(400, F("JSON root must be an object"));
+    return;
+  }
+
+  StoredConfig before = config;
+  StoredConfig candidate = config;
+  SettingsImportStats stats = {0, 0, String()};
+  applyApiInputSettings(root, candidate, stats);
+
+  if (stats.applied == 0) {
+    String out;
+    out.reserve(260);
+    out += F("{\"ok\":false,\"error\":\"No API settings were applied\",\"skipped\":");
+    out += stats.skipped;
+    if (stats.skipped_fields.length()) {
+      out += F(",\"skipped_fields\":\"");
+      out += settingsJsonEscape(stats.skipped_fields.c_str());
+      out += F("\"");
+    }
+    out += F("}");
+    server.sendHeader(F("Cache-Control"), F("no-store"));
+    server.send(400, F("application/json"), out);
+    return;
+  }
+
+  const bool input_changed = inputConfigDiffers(before, candidate);
+  config = candidate;
+  if (!commitConfig()) {
+    config = before;
+    sendApiSettingsError(500, F("Could not save API settings"));
+    return;
+  }
+  if (input_changed) updateDeviceLeds(true);
+
+  String out;
+  out.reserve(2200);
+  out += F("{\"ok\":true,\"applied\":");
+  out += stats.applied;
+  out += F(",\"skipped\":");
+  out += stats.skipped;
+  if (stats.skipped_fields.length()) {
+    out += F(",\"skipped_fields\":\"");
+    out += settingsJsonEscape(stats.skipped_fields.c_str());
+    out += F("\"");
+  }
+  out += F(",\"settings\":");
+  appendApiSettingsJson(out);
+  out += F("}");
+  server.sendHeader(F("Cache-Control"), F("no-store"));
+  server.send(200, F("application/json"), out);
+}
+
 void appendSettingsImportSummary(String &page, const SettingsImportStats &stats) {
   page += F("<p><code>");
   page += String(stats.applied);
@@ -8723,6 +8925,10 @@ void setupRoutes() {
   server.on(F("/factory-reset"), HTTP_POST, handleFactoryReset);
   server.on(F("/settings/export"), HTTP_GET, handleSettingsExport);
   server.on(F("/settings/import"), HTTP_POST, handleSettingsImport);
+  server.on(F("/api/settings"), HTTP_GET, handleApiSettingsGet);
+  server.on(F("/api/settings"), HTTP_POST, handleApiSettingsUpdate);
+  server.on(F("/api/settings"), HTTP_PUT, handleApiSettingsUpdate);
+  server.on(F("/api/settings"), HTTP_PATCH, handleApiSettingsUpdate);
   server.on(F("/health"), HTTP_GET, handleHealth);
   server.on(F("/update"), HTTP_POST, handleUpdateDone, handleUpdateUpload);
   server.onNotFound(handleNotFound);
