@@ -121,6 +121,21 @@ constexpr uint32_t kRotaryHandlerMs = 50;
 constexpr uint8_t kRotaryOffset = 128;
 constexpr uint8_t kRotaryMaxSteps = 10;
 constexpr uint8_t kRotaryMiDeskStepScale = 3;
+constexpr uint32_t kShellyDimmerPollMs = 1000;
+constexpr uint32_t kShellyDimmerRetryMs = 1000;
+constexpr uint32_t kShellyDimmerStaleMs = 5000;
+constexpr uint32_t kShellyDimmerResponseTimeoutMs = 200;
+constexpr uint8_t kShellyDimmerBufferSize = 64;
+constexpr uint8_t kShellyDimmerMaxPayloadSize = 17;
+constexpr uint8_t kShellyDimmerStartByte = 0x01;
+constexpr uint8_t kShellyDimmerEndByte = 0x04;
+constexpr uint8_t kShellyDimmerSwitchCmd = 0x01;
+constexpr uint8_t kShellyDimmerPollCmd = 0x10;
+constexpr uint8_t kShellyDimmerVersionCmd = 0x11;
+constexpr uint8_t kShellyDimmerSettingsCmd = 0x20;
+constexpr uint8_t kShellyDimmerDefaultEdgeMode = 2;
+constexpr uint16_t kShellyDimmerDefaultWarmupBrightness = 100;
+constexpr uint16_t kShellyDimmerDefaultWarmupMs = 20;
 constexpr uint32_t kAdcUpdateMs = 2000;
 constexpr uint32_t kEnergyUpdateMs = 200;
 constexpr uint32_t kEnergyIntegrateMs = 1000;
@@ -206,10 +221,14 @@ constexpr uint16_t kTplNrgSelInv = 2624;
 constexpr uint16_t kTplNrgCf1 = 2656;
 constexpr uint16_t kTplHlwCf = 2688;
 constexpr uint16_t kTplHjlCf = 2720;
+constexpr uint16_t kTplSerialTxd = 3200;
+constexpr uint16_t kTplSerialRxd = 3232;
 constexpr uint16_t kTplRot1A = 3264;
 constexpr uint16_t kTplRot1B = 3296;
 constexpr uint16_t kTplAde7953Irq = 3456;
 constexpr uint16_t kTplAdcTemp = 4736;
+constexpr uint16_t kTplShellyDimmerBoot0 = 5568;
+constexpr uint16_t kTplShellyDimmerResetInv = 5600;
 
 const char kTemplateMiDeskLampJson[] PROGMEM =
   "{\"NAME\":\"Mi Desk Lamp\",\"GPIO\":[0,0,32,0,416,417,0,0,3264,3296,0,0,0,0],\"FLAG\":0,\"BASE\":66}";
@@ -223,6 +242,8 @@ const char kTemplateShelly1Json[] PROGMEM =
   "{\"NAME\":\"Shelly 1\",\"GPIO\":[1,1,0,1,224,192,0,0,0,0,0,0,0,0],\"FLAG\":0,\"BASE\":46}";
 const char kTemplateShelly1LJson[] PROGMEM =
   "{\"NAME\":\"Shelly 1L\",\"GPIO\":[320,0,0,0,192,224,0,0,0,0,193,0,0,4736],\"FLAG\":0,\"BASE\":18}";
+const char kTemplateShellyDimmer2Json[] PROGMEM =
+  "{\"NAME\":\"Shelly Dimmer 2\",\"GPIO\":[0,3200,0,3232,5568,5600,0,0,193,0,192,0,320,4736],\"FLAG\":0,\"BASE\":18}";
 
 enum Ade7953Register : uint16_t {
   kAde7953DisNoLoad = 0x001,
@@ -266,6 +287,7 @@ constexpr uint8_t kEnergyCf1SampleCount = 10;
 constexpr uint8_t kEnergyDriverNone = 0;
 constexpr uint8_t kEnergyDriverPulse = 1;
 constexpr uint8_t kEnergyDriverAde7953 = 2;
+constexpr uint8_t kEnergyDriverShellyDimmer = 3;
 constexpr uint8_t kEnergyMaxChannels = 2;
 constexpr uint8_t kAde7953Address = 0x38;
 constexpr uint8_t kAde7953ModelShelly25 = 0;
@@ -764,9 +786,14 @@ struct RuntimeTemplate {
   uint8_t energy_cf_pin;
   uint8_t energy_cf1_pin;
   uint8_t energy_sel_pin;
+  uint8_t serial_tx_pin;
+  uint8_t serial_rx_pin;
+  uint8_t shelly_dimmer_boot0_pin;
+  uint8_t shelly_dimmer_reset_pin;
   bool energy_sel_inverted;
   bool energy_hjl;
   bool adc_temp;
+  bool shelly_dimmer;
   uint8_t unsupported_count;
   uint8_t unsupported_pin[8];
   uint16_t unsupported_code[8];
@@ -788,6 +815,29 @@ struct RotaryEncoderState {
   volatile uint8_t state;
   volatile int16_t position;
   bool changed_while_pressed;
+};
+
+struct ShellyDimmerState {
+  bool present;
+  bool serial_claimed;
+  uint8_t counter;
+  uint8_t buffer[kShellyDimmerBufferSize];
+  uint8_t byte_count;
+  uint8_t expected_frame_len;
+  uint8_t version_major;
+  uint8_t version_minor;
+  uint8_t hw_version;
+  uint16_t actual_brightness;
+  uint16_t requested_brightness;
+  uint8_t fade_rate;
+  uint32_t wattage_raw;
+  uint32_t voltage_raw;
+  uint32_t current_raw;
+  uint32_t last_poll_ms;
+  uint32_t last_command_ms;
+  uint32_t last_rx_ms;
+  uint32_t timeout_count;
+  uint32_t error_count;
 };
 
 struct EnergyChannelState {
@@ -861,6 +911,7 @@ RuntimeTemplate runtime_template{};
 ButtonState button_state[kMaxButtons]{};
 LightState light{};
 RotaryEncoderState rotary_encoder{};
+ShellyDimmerState shelly_dimmer{};
 EnergyState energy{};
 
 bool config_ok = false;
@@ -2616,10 +2667,20 @@ bool relayAvailable(uint8_t relay) {
 }
 
 bool lightAvailableIn(const RuntimeTemplate &rt) {
+  if (rt.shelly_dimmer) return true;
   for (uint8_t i = 0; i < rt.pwm_count && i < kMaxLightPwms; i++) {
     if (hasPin(rt.light_pwm[i])) return true;
   }
   return false;
+}
+
+bool lightSupportsColorTemperatureIn(const RuntimeTemplate &rt) {
+  if (rt.shelly_dimmer || rt.pwm_count < 2) return false;
+  return hasPin(rt.light_pwm[0]) && hasPin(rt.light_pwm[1]);
+}
+
+bool lightSupportsColorTemperature() {
+  return lightSupportsColorTemperatureIn(runtime_template);
 }
 
 bool defaultButtonRelayTarget(uint8_t button, uint8_t &relay) {
@@ -2662,6 +2723,11 @@ bool inputRelayTarget(uint8_t input, uint8_t &relay) {
     return true;
   }
   return defaultButtonRelayTarget(input, relay);
+}
+
+bool inputCanFollowOutput(uint8_t input) {
+  uint8_t relay = 0;
+  return defaultButtonRelayTarget(input, relay) || lightAvailableIn(runtime_template);
 }
 
 bool buttonActionAvailable(uint8_t button, uint8_t action) {
@@ -2790,6 +2856,26 @@ void parseTemplateFunction(RuntimeTemplate &target, uint8_t pin, uint16_t code) 
     return;
   }
 
+  if (code == kTplSerialTxd) {
+    target.serial_tx_pin = pin;
+    return;
+  }
+
+  if (code == kTplSerialRxd) {
+    target.serial_rx_pin = pin;
+    return;
+  }
+
+  if (code == kTplShellyDimmerBoot0) {
+    target.shelly_dimmer_boot0_pin = pin;
+    return;
+  }
+
+  if (code == kTplShellyDimmerResetInv) {
+    target.shelly_dimmer_reset_pin = pin;
+    return;
+  }
+
   if (code == kTplNrgSel || code == kTplNrgSelInv) {
     target.energy_sel_pin = pin;
     target.energy_sel_inverted = code == kTplNrgSelInv;
@@ -2876,6 +2962,33 @@ void resetRuntimeTemplate(RuntimeTemplate &target) {
   target.energy_cf_pin = kInvalidPin;
   target.energy_cf1_pin = kInvalidPin;
   target.energy_sel_pin = kInvalidPin;
+  target.serial_tx_pin = kInvalidPin;
+  target.serial_rx_pin = kInvalidPin;
+  target.shelly_dimmer_boot0_pin = kInvalidPin;
+  target.shelly_dimmer_reset_pin = kInvalidPin;
+}
+
+void finalizeRuntimeTemplate(RuntimeTemplate &target) {
+  const bool has_shelly_serial = target.serial_tx_pin == 1 && target.serial_rx_pin == 3;
+  const bool has_shelly_control =
+    digitalPinSupported(target.shelly_dimmer_boot0_pin) &&
+    digitalPinSupported(target.shelly_dimmer_reset_pin);
+  target.shelly_dimmer = has_shelly_serial && has_shelly_control;
+
+  if (!target.shelly_dimmer) {
+    if (digitalPinSupported(target.serial_tx_pin)) {
+      addUnsupportedTemplatePin(target, target.serial_tx_pin, kTplSerialTxd);
+    }
+    if (digitalPinSupported(target.serial_rx_pin)) {
+      addUnsupportedTemplatePin(target, target.serial_rx_pin, kTplSerialRxd);
+    }
+    if (digitalPinSupported(target.shelly_dimmer_boot0_pin)) {
+      addUnsupportedTemplatePin(target, target.shelly_dimmer_boot0_pin, kTplShellyDimmerBoot0);
+    }
+    if (digitalPinSupported(target.shelly_dimmer_reset_pin)) {
+      addUnsupportedTemplatePin(target, target.shelly_dimmer_reset_pin, kTplShellyDimmerResetInv);
+    }
+  }
 }
 
 void decodeTemplateConfigInto(const StoredConfig &source, RuntimeTemplate &target) {
@@ -2889,6 +3002,7 @@ void decodeTemplateConfigInto(const StoredConfig &source, RuntimeTemplate &targe
   for (uint8_t i = 0; i < kTemplateSlotCount; i++) {
     parseTemplateFunction(target, kTemplateSlotToPin[i], source.template_gpio[i]);
   }
+  finalizeRuntimeTemplate(target);
 }
 
 void decodeTemplateConfig() {
@@ -4742,6 +4856,7 @@ void writeEnergySelector(bool select_ui_flag) {
 
 const __FlashStringHelper *energyDriverName() {
   if (energy.driver == kEnergyDriverAde7953) return F("ADE7953");
+  if (energy.driver == kEnergyDriverShellyDimmer) return F("Shelly Dimmer");
   if (energy.driver == kEnergyDriverPulse) return energy.hjl ? F("HJL/BL0937") : F("HLW8012");
   return F("none");
 }
@@ -4947,6 +5062,13 @@ void setupEnergyMonitor() {
   energy.last_integrate_ms = millis();
   energy.last_success_ms = energy.last_update_ms;
 
+  if (runtime_template.shelly_dimmer) {
+    energy.present = true;
+    energy.driver = kEnergyDriverShellyDimmer;
+    energy.channel_count = 1;
+    return;
+  }
+
   if (setupAde7953EnergyMonitor()) {
     return;
   }
@@ -4969,6 +5091,252 @@ void setupEnergyMonitor() {
 }
 
 void updateDeviceLeds(bool force);
+
+uint16_t shellyDimmerTargetBrightness() {
+  if (!light.present || !light.power) return 0;
+  const uint8_t dimmer = light.dimmer > kLightDimmerMax ? kLightDimmerMax : light.dimmer;
+  return static_cast<uint16_t>(dimmer * 10U);
+}
+
+uint16_t shellyDimmerChecksum(const uint8_t *buf, uint8_t len) {
+  uint16_t sum = 0;
+  for (uint8_t i = 0; i < len; i++) sum += buf[i];
+  return sum;
+}
+
+uint16_t readLe16(const uint8_t *buf) {
+  return static_cast<uint16_t>(buf[0]) | (static_cast<uint16_t>(buf[1]) << 8);
+}
+
+uint32_t readLe32(const uint8_t *buf) {
+  return static_cast<uint32_t>(buf[0]) |
+         (static_cast<uint32_t>(buf[1]) << 8) |
+         (static_cast<uint32_t>(buf[2]) << 16) |
+         (static_cast<uint32_t>(buf[3]) << 24);
+}
+
+void shellyDimmerResetRx() {
+  shelly_dimmer.byte_count = 0;
+  shelly_dimmer.expected_frame_len = 0;
+}
+
+void shellyDimmerUpdateEnergy(float wattage, float voltage, float current) {
+  if (energy.driver != kEnergyDriverShellyDimmer) return;
+  energy.channel[0].power = wattage;
+  energy.channel[0].voltage = voltage;
+  energy.channel[0].current = current;
+  energy.channel[0].active_power_raw = shelly_dimmer.wattage_raw;
+  energy.channel[0].voltage_raw = shelly_dimmer.voltage_raw;
+  energy.channel[0].current_raw = shelly_dimmer.current_raw;
+  updateEnergyAggregateFromChannels();
+  energy.last_success_ms = millis();
+}
+
+void shellyDimmerProcessPacket(const uint8_t *frame, uint8_t frame_len) {
+  if (frame_len < 7 || frame[0] != kShellyDimmerStartByte) return;
+  const uint8_t cmd = frame[2];
+  const uint8_t len = frame[3];
+  const uint8_t *payload = frame + 4;
+  shelly_dimmer.last_rx_ms = millis();
+
+  if (cmd == kShellyDimmerPollCmd && len >= 17) {
+    const uint8_t hw_version_raw = payload[0];
+    const uint16_t brightness = readLe16(payload + 2);
+    const uint32_t wattage_raw = readLe32(payload + 4);
+    const uint32_t voltage_raw = readLe32(payload + 8);
+    const uint32_t current_raw = readLe32(payload + 12);
+
+    shelly_dimmer.hw_version = hw_version_raw == 0 ? 1 : (hw_version_raw == 1 ? 2 : hw_version_raw);
+    shelly_dimmer.actual_brightness = brightness;
+    shelly_dimmer.wattage_raw = wattage_raw;
+    shelly_dimmer.voltage_raw = voltage_raw;
+    shelly_dimmer.current_raw = current_raw;
+    shelly_dimmer.fade_rate = payload[16];
+
+    const float wattage = wattage_raw > 0 ? 880373.0f / static_cast<float>(wattage_raw) : 0.0f;
+    const float voltage = voltage_raw > 0 ? 347800.0f / static_cast<float>(voltage_raw) : 0.0f;
+    const float current = current_raw > 0 ? 1448.0f / static_cast<float>(current_raw) : 0.0f;
+    shellyDimmerUpdateEnergy(wattage, voltage, current);
+  } else if (cmd == kShellyDimmerVersionCmd && len >= 2) {
+    shelly_dimmer.version_minor = payload[0];
+    shelly_dimmer.version_major = payload[1];
+  } else if (cmd == kShellyDimmerSwitchCmd && len >= 1 && payload[0] == 0x01) {
+    shelly_dimmer.actual_brightness = shelly_dimmer.requested_brightness;
+  }
+}
+
+bool shellyDimmerSerialInput() {
+  bool got_packet = false;
+  while (Serial.available()) {
+    const int value = Serial.read();
+    if (value < 0) break;
+    const uint8_t byte = static_cast<uint8_t>(value);
+
+    if (shelly_dimmer.byte_count == 0 && byte != kShellyDimmerStartByte) {
+      continue;
+    }
+    if (shelly_dimmer.byte_count >= kShellyDimmerBufferSize) {
+      shelly_dimmer.error_count++;
+      shellyDimmerResetRx();
+      continue;
+    }
+
+    shelly_dimmer.buffer[shelly_dimmer.byte_count++] = byte;
+    if (shelly_dimmer.byte_count == 4) {
+      const uint8_t payload_len = shelly_dimmer.buffer[3];
+      shelly_dimmer.expected_frame_len = static_cast<uint8_t>(4U + payload_len + 3U);
+      if (shelly_dimmer.expected_frame_len > kShellyDimmerBufferSize) {
+        shelly_dimmer.error_count++;
+        shellyDimmerResetRx();
+      }
+      continue;
+    }
+
+    if (shelly_dimmer.expected_frame_len == 0 ||
+        shelly_dimmer.byte_count < shelly_dimmer.expected_frame_len) {
+      continue;
+    }
+
+    const uint8_t payload_len = shelly_dimmer.buffer[3];
+    const uint8_t checksum_pos = static_cast<uint8_t>(4U + payload_len);
+    const uint16_t received_checksum =
+      (static_cast<uint16_t>(shelly_dimmer.buffer[checksum_pos]) << 8) |
+      shelly_dimmer.buffer[checksum_pos + 1];
+    const uint16_t calculated_checksum =
+      shellyDimmerChecksum(shelly_dimmer.buffer + 1, static_cast<uint8_t>(3U + payload_len));
+    if (shelly_dimmer.buffer[shelly_dimmer.expected_frame_len - 1] == kShellyDimmerEndByte &&
+        received_checksum == calculated_checksum) {
+      shellyDimmerProcessPacket(shelly_dimmer.buffer, shelly_dimmer.expected_frame_len);
+      got_packet = true;
+    } else {
+      shelly_dimmer.error_count++;
+    }
+    shellyDimmerResetRx();
+  }
+  return got_packet;
+}
+
+bool shellyDimmerWaitForResponse(uint32_t timeout_ms) {
+  const uint32_t deadline = millis() + timeout_ms;
+  while (static_cast<int32_t>(millis() - deadline) < 0) {
+    if (shellyDimmerSerialInput()) return true;
+    delay(1);
+  }
+  return false;
+}
+
+bool shellyDimmerSendCmd(uint8_t cmd, const uint8_t *payload, uint8_t len) {
+  if (!shelly_dimmer.present || !shelly_dimmer.serial_claimed || len > kShellyDimmerMaxPayloadSize) {
+    return false;
+  }
+
+  uint8_t frame[4 + kShellyDimmerMaxPayloadSize + 3];
+  uint8_t pos = 0;
+  frame[pos++] = kShellyDimmerStartByte;
+  frame[pos++] = shelly_dimmer.counter++;
+  frame[pos++] = cmd;
+  frame[pos++] = len;
+  if (payload && len) {
+    memcpy(frame + pos, payload, len);
+    pos += len;
+  }
+  const uint16_t checksum = shellyDimmerChecksum(frame + 1, static_cast<uint8_t>(3U + len));
+  frame[pos++] = checksum >> 8;
+  frame[pos++] = checksum & 0xff;
+  frame[pos++] = kShellyDimmerEndByte;
+
+  shellyDimmerSerialInput();
+  Serial.write(frame, pos);
+  Serial.flush();
+  shelly_dimmer.last_command_ms = millis();
+  if (shellyDimmerWaitForResponse(kShellyDimmerResponseTimeoutMs)) {
+    return true;
+  }
+  shelly_dimmer.timeout_count++;
+  return false;
+}
+
+bool shellyDimmerSendVersion() {
+  return shellyDimmerSendCmd(kShellyDimmerVersionCmd, nullptr, 0);
+}
+
+bool shellyDimmerSendSettings() {
+  uint8_t payload[10];
+  const uint16_t brightness = shellyDimmerTargetBrightness();
+  const uint16_t edge_mode = kShellyDimmerDefaultEdgeMode;
+  const uint16_t fade_rate = 0;
+  payload[0] = brightness & 0xff;
+  payload[1] = brightness >> 8;
+  payload[2] = edge_mode & 0xff;
+  payload[3] = edge_mode >> 8;
+  payload[4] = fade_rate & 0xff;
+  payload[5] = fade_rate >> 8;
+  payload[6] = kShellyDimmerDefaultWarmupBrightness & 0xff;
+  payload[7] = kShellyDimmerDefaultWarmupBrightness >> 8;
+  payload[8] = kShellyDimmerDefaultWarmupMs & 0xff;
+  payload[9] = kShellyDimmerDefaultWarmupMs >> 8;
+  return shellyDimmerSendCmd(kShellyDimmerSettingsCmd, payload, sizeof(payload));
+}
+
+bool shellyDimmerSendBrightness(uint16_t brightness) {
+  uint8_t payload[2];
+  payload[0] = brightness & 0xff;
+  payload[1] = brightness >> 8;
+  return shellyDimmerSendCmd(kShellyDimmerSwitchCmd, payload, sizeof(payload));
+}
+
+void shellyDimmerResetToAppMode() {
+  pinMode(runtime_template.shelly_dimmer_reset_pin, OUTPUT);
+  digitalWrite(runtime_template.shelly_dimmer_reset_pin, LOW);
+  pinMode(runtime_template.shelly_dimmer_boot0_pin, OUTPUT);
+  digitalWrite(runtime_template.shelly_dimmer_boot0_pin, LOW);
+  delay(50);
+  while (Serial.available()) Serial.read();
+  digitalWrite(runtime_template.shelly_dimmer_reset_pin, HIGH);
+  delay(50);
+}
+
+void setupShellyDimmerRuntime() {
+  memset(&shelly_dimmer, 0, sizeof(shelly_dimmer));
+  shelly_dimmer.requested_brightness = 0xffffU;
+  if (!runtime_template.shelly_dimmer) return;
+
+  shelly_dimmer.present = true;
+  shelly_dimmer.counter = 1;
+  Serial.begin(115200);
+  shelly_dimmer.serial_claimed = true;
+  shellyDimmerResetToAppMode();
+  shellyDimmerSendVersion();
+  shellyDimmerSendSettings();
+}
+
+void shellyDimmerApplyLightState(bool force) {
+  if (!shelly_dimmer.present) return;
+  const uint16_t target = shellyDimmerTargetBrightness();
+  const bool target_changed = shelly_dimmer.requested_brightness != target;
+  const uint32_t now = millis();
+  shelly_dimmer.requested_brightness = target;
+  if (force || target_changed ||
+      (target != shelly_dimmer.actual_brightness && now - shelly_dimmer.last_command_ms >= kShellyDimmerRetryMs)) {
+    shellyDimmerSendBrightness(target);
+  }
+}
+
+void shellyDimmerPoll() {
+  if (!shelly_dimmer.present) return;
+  shellyDimmerSendCmd(kShellyDimmerPollCmd, nullptr, 0);
+}
+
+void maintainShellyDimmer() {
+  if (!shelly_dimmer.present) return;
+  shellyDimmerSerialInput();
+  const uint32_t now = millis();
+  if (now - shelly_dimmer.last_poll_ms >= kShellyDimmerPollMs) {
+    shelly_dimmer.last_poll_ms = now;
+    shellyDimmerPoll();
+  }
+  shellyDimmerApplyLightState(false);
+}
 
 uint8_t sanitizeLightDimmerValue(uint16_t value) {
   if (value < kLightDimmerMin) return kLightDimmerMin;
@@ -5018,6 +5386,10 @@ void writeLightPwm(uint8_t index, uint16_t duty) {
 
 void updateLightOutputs() {
   if (!light.present) return;
+  if (runtime_template.shelly_dimmer) {
+    shellyDimmerApplyLightState(false);
+    return;
+  }
   for (uint8_t i = 0; i < runtime_template.pwm_count && i < kMaxLightPwms; i++) {
     if (!hasPin(runtime_template.light_pwm[i])) continue;
     writeLightPwm(i, lightPwmDuty(i));
@@ -5107,6 +5479,12 @@ void setupLightRuntime() {
   loadLightStateFromConfig();
   if (!light.present) return;
 
+  if (runtime_template.shelly_dimmer) {
+    setupShellyDimmerRuntime();
+    updateLightOutputs();
+    return;
+  }
+
   analogWriteRange(kLightPwmRange);
   analogWriteFreq(kLightPwmFrequency);
   for (uint8_t i = 0; i < runtime_template.pwm_count && i < kMaxLightPwms; i++) {
@@ -5172,6 +5550,7 @@ void maintainRotary() {
 }
 
 void maintainLight() {
+  maintainShellyDimmer();
   persistLightConfig(false);
 }
 
@@ -5398,6 +5777,8 @@ void maintainButtons() {
         uint8_t relay = 0;
         if (inputRelayTarget(i, relay)) {
           setRelay(relay, raw);
+        } else if (light.present) {
+          setLightPower(raw, false);
         }
         button_state[i].hold_emitted = false;
       } else {
@@ -5452,6 +5833,21 @@ void maintainEnergy() {
         }
         updateEnergyAggregateFromChannels();
       }
+    }
+    if (now - energy.last_integrate_ms >= kEnergyIntegrateMs) {
+      const uint32_t elapsed = now - energy.last_integrate_ms;
+      energy.last_integrate_ms = now;
+      energy.total_kwh += (energy.power * static_cast<float>(elapsed)) / 3600000000.0f;
+    }
+    persistEnergyTotal(false);
+    return;
+  }
+
+  if (energy.driver == kEnergyDriverShellyDimmer) {
+    if (now - energy.last_success_ms >= kShellyDimmerStaleMs) {
+      energy.channel[0].power = 0.0f;
+      energy.channel[0].current = 0.0f;
+      updateEnergyAggregateFromChannels();
     }
     if (now - energy.last_integrate_ms >= kEnergyIntegrateMs) {
       const uint32_t elapsed = now - energy.last_integrate_ms;
@@ -5572,6 +5968,8 @@ void setupDevicePins() {
       uint8_t relay = 0;
       if (inputRelayTarget(i, relay)) {
         setRelay(relay, active);
+      } else if (light.present) {
+        setLightPower(active, false);
       }
     }
   }
@@ -5811,13 +6209,21 @@ void appendTemplateStatus(String &page) {
     page += F("</code> PWM</div>");
     if (light.present) {
       page += F("<span>Light</span><div>");
-      for (uint8_t i = 0; i < runtime_template.pwm_count && i < kMaxLightPwms; i++) {
-        if (!hasPin(runtime_template.light_pwm[i])) continue;
-        if (i) page += F(", ");
-        page += i == 0 ? F("cold ") : F("warm ");
-        page += F("<code>");
-        page += pinName(runtime_template.light_pwm[i].pin);
+      if (runtime_template.shelly_dimmer) {
+        page += F("Shelly Dimmer STM32 serial TX <code>");
+        page += pinName(runtime_template.serial_tx_pin);
+        page += F("</code>, RX <code>");
+        page += pinName(runtime_template.serial_rx_pin);
         page += F("</code>");
+      } else {
+        for (uint8_t i = 0; i < runtime_template.pwm_count && i < kMaxLightPwms; i++) {
+          if (!hasPin(runtime_template.light_pwm[i])) continue;
+          if (i) page += F(", ");
+          page += i == 0 ? F("cold ") : F("warm ");
+          page += F("<code>");
+          page += pinName(runtime_template.light_pwm[i].pin);
+          page += F("</code>");
+        }
       }
       page += F("</div>");
     }
@@ -5844,6 +6250,16 @@ void appendTemplateStatus(String &page) {
         page += pinName(runtime_template.ade7953_irq_pin);
         page += F("</code>, channels <code>");
         page += String(energy.channel_count);
+        page += F("</code>");
+      } else if (energy.driver == kEnergyDriverShellyDimmer) {
+        page += F(" MCU v<code>");
+        page += String(shelly_dimmer.version_major);
+        page += F(".");
+        page += String(shelly_dimmer.version_minor);
+        page += F("</code>, BOOT0 <code>");
+        page += pinName(runtime_template.shelly_dimmer_boot0_pin);
+        page += F("</code>, reset <code>");
+        page += pinName(runtime_template.shelly_dimmer_reset_pin);
         page += F("</code>");
       } else {
         page += F(" CF <code>");
@@ -5893,14 +6309,28 @@ void appendDeviceControls(String &page) {
   if (!runtime_template.enabled || (runtime_template.relay_count == 0 && !energy.present && !light.present)) return;
   page += F("<section class='panel'><h2>Device</h2>");
   if (light.present) {
+    const bool has_ct = lightSupportsColorTemperature();
     page += F("<div class='row'><strong>Light</strong> ");
     page += F("<span id='live-light-power' class='");
     page += light.power ? F("pill ok'>on") : F("pill bad'>off");
     page += F("</span><div class='kv'><span>Dimmer</span><div><code id='live-light-dimmer'>");
     page += String(light.dimmer);
-    page += F("%</code></div><span>Color temp</span><div><code id='live-light-ct'>");
-    page += String(light.ct);
-    page += F(" mired</code></div><span>ON dimmer</span><div><code id='live-light-on-dimmer'>");
+    page += F("%</code></div>");
+    if (has_ct) {
+      page += F("<span>Color temp</span><div><code id='live-light-ct'>");
+      page += String(light.ct);
+      page += F(" mired</code></div>");
+    }
+    if (runtime_template.shelly_dimmer) {
+      page += F("<span>Dimmer MCU</span><div><code>");
+      page += String(shelly_dimmer.version_major);
+      page += F(".");
+      page += String(shelly_dimmer.version_minor);
+      page += F("</code> hw <code>");
+      page += String(shelly_dimmer.hw_version);
+      page += F("</code></div>");
+    }
+    page += F("<span>ON dimmer</span><div><code id='live-light-on-dimmer'>");
     page += String(config.light_on_dimmer);
     page += F("%</code></div></div>");
     page += F("<form class='inline' data-inline='1' method='post' action='/light'><span class='actions'><button name='power' value='toggle'>Toggle</button><button name='power' value='on'>On</button><button class='secondary' name='power' value='off'>Off</button></span></form>");
@@ -5910,13 +6340,17 @@ void appendDeviceControls(String &page) {
     page += String(kLightDimmerMax);
     page += F("' step='1' value='");
     page += String(light.dimmer);
-    page += F("'></label></div><div class='row'><label>Color temperature<br><input class='light-auto' data-live='live-light-ct' data-suffix=' mired' name='ct' type='range' min='");
-    page += String(kLightCtMin);
-    page += F("' max='");
-    page += String(kLightCtMax);
-    page += F("' step='1' value='");
-    page += String(light.ct);
-    page += F("'></label></div><div class='row'><label>ON dimmer<br><input class='light-auto' data-live='live-light-on-dimmer' data-suffix='%' name='on_dimmer' type='number' min='");
+    page += F("'></label></div>");
+    if (has_ct) {
+      page += F("<div class='row'><label>Color temperature<br><input class='light-auto' data-live='live-light-ct' data-suffix=' mired' name='ct' type='range' min='");
+      page += String(kLightCtMin);
+      page += F("' max='");
+      page += String(kLightCtMax);
+      page += F("' step='1' value='");
+      page += String(light.ct);
+      page += F("'></label></div>");
+    }
+    page += F("<div class='row'><label>ON dimmer<br><input class='light-auto' data-live='live-light-on-dimmer' data-suffix='%' name='on_dimmer' type='number' min='");
     page += String(kLightDimmerMin);
     page += F("' max='");
     page += String(kLightDimmerMax);
@@ -6241,9 +6675,8 @@ void appendButtonSettings(String &page) {
     page += String(i);
     page += F("'>");
     appendInputModeOption(page, kInputModeButton, F("Button actions"), mode);
-    uint8_t unused_relay = 0;
-    if (defaultButtonRelayTarget(i, unused_relay)) {
-      appendInputModeOption(page, kInputModeSwitch, F("Switch follows relay"), mode);
+    if (inputCanFollowOutput(i)) {
+      appendInputModeOption(page, kInputModeSwitch, F("Switch follows output"), mode);
     }
     page += F("</select></label></div>");
 
@@ -6251,14 +6684,21 @@ void appendButtonSettings(String &page) {
     page += String(i);
     page += F("' class='mode-extra");
     if (mode == kInputModeSwitch) page += F(" show");
-    page += F("'><div class='row'><label>Target relay<br><select name='relay");
-    page += String(i);
     page += F("'>");
-    for (uint8_t relay = 0; relay < runtime_template.relay_count; relay++) {
-      if (!hasPin(runtime_template.relays[relay])) continue;
-      appendInputRelayOption(page, relay, target_relay);
+    uint8_t unused_relay = 0;
+    if (defaultButtonRelayTarget(i, unused_relay)) {
+      page += F("<div class='row'><label>Target relay<br><select name='relay");
+      page += String(i);
+      page += F("'>");
+      for (uint8_t relay = 0; relay < runtime_template.relay_count; relay++) {
+        if (!hasPin(runtime_template.relays[relay])) continue;
+        appendInputRelayOption(page, relay, target_relay);
+      }
+      page += F("</select></label></div>");
+    } else if (light.present) {
+      page += F("<p class='hint'>Switch follows the light output.</p>");
     }
-    page += F("</select></label></div><div class='row'><label>Reverse<br><select name='reverse");
+    page += F("<div class='row'><label>Reverse<br><select name='reverse");
     page += String(i);
     page += F("'><option value='0'");
     if (on_level == kInputOnLevelHigh) page += F(" selected");
@@ -6297,6 +6737,8 @@ void appendTemplateForm(String &page) {
   page += F("'>Shelly 1L</option><option data-json='");
   page += htmlEscape(String(FPSTR(kTemplateShelly25Json)));
   page += F("'>Shelly 2.5</option><option data-json='");
+  page += htmlEscape(String(FPSTR(kTemplateShellyDimmer2Json)));
+  page += F("'>Shelly Dimmer 2</option><option data-json='");
   page += htmlEscape(String(FPSTR(kTemplateShellyPlugSJson)));
   page += F("'>Shelly Plug S</option></select></label></div>");
   page += F("<div class='row'><label>Tasmota ESP8266 template JSON<br><textarea id='template-json' name='template' rows='5' maxlength='");
@@ -6848,7 +7290,9 @@ void handleButtonSave() {
       relay_arg += String(i);
       String reverse_arg = F("reverse");
       reverse_arg += String(i);
-      if (!server.hasArg(relay_arg) || !server.hasArg(reverse_arg)) {
+      uint8_t unused_relay = 0;
+      const bool has_relay_target = defaultButtonRelayTarget(i, unused_relay);
+      if ((has_relay_target && !server.hasArg(relay_arg)) || !server.hasArg(reverse_arg)) {
         delete candidate;
         server.send(400, F("text/plain"), F("Missing switch setting"));
         return;
@@ -6856,19 +7300,27 @@ void handleButtonSave() {
 
       uint16_t relay_value = 0;
       uint16_t reverse_value = 0;
-      if (!parseUint16Input(server.arg(relay_arg), 0, kMaxRelays - 1, relay_value) ||
+      if ((has_relay_target && !parseUint16Input(server.arg(relay_arg), 0, kMaxRelays - 1, relay_value)) ||
           !parseUint16Input(server.arg(reverse_arg), 0, 1, reverse_value)) {
         delete candidate;
         server.send(400, F("text/plain"), F("Invalid switch setting"));
         return;
       }
-      const uint8_t relay = static_cast<uint8_t>(relay_value);
-      if (relay >= runtime_template.relay_count || !hasPin(runtime_template.relays[relay])) {
+      if (has_relay_target) {
+        const uint8_t relay = static_cast<uint8_t>(relay_value);
+        if (relay >= runtime_template.relay_count || !hasPin(runtime_template.relays[relay])) {
+          delete candidate;
+          server.send(400, F("text/plain"), F("Invalid switch relay"));
+          return;
+        }
+        candidate->input_relay[i] = relay;
+      } else if (light.present) {
+        candidate->input_relay[i] = kButtonRelayUnset;
+      } else {
         delete candidate;
-        server.send(400, F("text/plain"), F("Invalid switch relay"));
+        server.send(400, F("text/plain"), F("Invalid switch target"));
         return;
       }
-      candidate->input_relay[i] = relay;
       candidate->input_on_level[i] = reverse_value ? kInputOnLevelLow : kInputOnLevelHigh;
       continue;
     }
@@ -7468,6 +7920,8 @@ void handleHealth() {
     out += light.dimmer;
     out += F(",\"ct\":");
     out += light.ct;
+    out += F(",\"ct_supported\":");
+    out += lightSupportsColorTemperature() ? F("true") : F("false");
     out += F(",\"on_dimmer\":");
     out += config.light_on_dimmer;
     out += F(",\"pwm\":[");
@@ -7483,7 +7937,27 @@ void handleHealth() {
         out += F("}");
       }
     }
-    out += F("]}");
+    out += F("]");
+    if (runtime_template.shelly_dimmer) {
+      out += F(",\"shelly_dimmer\":{\"mcu_version\":\"");
+      out += String(shelly_dimmer.version_major);
+      out += F(".");
+      out += String(shelly_dimmer.version_minor);
+      out += F("\",\"hw_version\":");
+      out += String(shelly_dimmer.hw_version);
+      out += F(",\"actual_brightness\":");
+      out += shelly_dimmer.actual_brightness;
+      out += F(",\"requested_brightness\":");
+      out += shelly_dimmer.requested_brightness == 0xffffU ? 0 : shelly_dimmer.requested_brightness;
+      out += F(",\"last_rx_ms_ago\":");
+      if (shelly_dimmer.last_rx_ms == 0) {
+        out += F("null");
+      } else {
+        out += millis() - shelly_dimmer.last_rx_ms;
+      }
+      out += F("}");
+    }
+    out += F("}");
   } else {
     out += F("null");
   }
@@ -7577,7 +8051,13 @@ void handleHealth() {
   out += F(",\"energy\":");
   if (energy.present) {
     out += F("{\"driver\":\"");
-    out += energy.driver == kEnergyDriverAde7953 ? F("ade7953") : (energy.hjl ? F("hjl_bl0937") : F("hlw8012"));
+    if (energy.driver == kEnergyDriverAde7953) {
+      out += F("ade7953");
+    } else if (energy.driver == kEnergyDriverShellyDimmer) {
+      out += F("shelly_dimmer");
+    } else {
+      out += energy.hjl ? F("hjl_bl0937") : F("hlw8012");
+    }
     out += F("\",\"voltage\":");
     out += String(energy.voltage, 1);
     out += F(",\"current\":");
@@ -7643,6 +8123,32 @@ void handleHealth() {
         out += F("}");
       }
       out += F("]");
+    } else if (energy.driver == kEnergyDriverShellyDimmer) {
+      out += F("\"last_success_ms_ago\":");
+      out += millis() - energy.last_success_ms;
+      out += F(",\"mcu_version\":\"");
+      out += String(shelly_dimmer.version_major);
+      out += F(".");
+      out += String(shelly_dimmer.version_minor);
+      out += F("\",\"hw_version\":");
+      out += String(shelly_dimmer.hw_version);
+      out += F(",\"rx_ms_ago\":");
+      if (shelly_dimmer.last_rx_ms == 0) {
+        out += F("null");
+      } else {
+        out += millis() - shelly_dimmer.last_rx_ms;
+      }
+      out += F(",\"timeouts\":");
+      out += shelly_dimmer.timeout_count;
+      out += F(",\"errors\":");
+      out += shelly_dimmer.error_count;
+      out += F(",\"raw\":{\"wattage\":");
+      out += shelly_dimmer.wattage_raw;
+      out += F(",\"voltage\":");
+      out += shelly_dimmer.voltage_raw;
+      out += F(",\"current\":");
+      out += shelly_dimmer.current_raw;
+      out += F("}");
     } else {
       out += F("\"cf_us\":");
       out += energy.cf_power_pulse_length;
@@ -7975,9 +8481,11 @@ void setup() {
   setupRoutes();
   server.begin();
 
-  Serial.printf("HTTP server started; STA %s AP %s\n",
-                WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString().c_str() : "not-connected",
-                ap_started ? WiFi.softAPIP().toString().c_str() : "off");
+  if (!shelly_dimmer.serial_claimed) {
+    Serial.printf("HTTP server started; STA %s AP %s\n",
+                  WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString().c_str() : "not-connected",
+                  ap_started ? WiFi.softAPIP().toString().c_str() : "off");
+  }
 }
 
 void loop() {
