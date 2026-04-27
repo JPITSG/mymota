@@ -42,7 +42,8 @@ constexpr uint16_t kConfigVersionV11 = 11;
 constexpr uint16_t kConfigVersionV12 = 12;
 constexpr uint16_t kConfigVersionV13 = 13;
 constexpr uint16_t kConfigVersionV14 = 14;
-constexpr uint16_t kConfigVersion = 15;
+constexpr uint16_t kConfigVersionV15 = 15;
+constexpr uint16_t kConfigVersion = 16;
 constexpr size_t kEepromSize = 4096;
 constexpr size_t kFlashSectorSize = 4096;
 constexpr uint8_t kEnergyJournalSectorCount = 2;
@@ -82,6 +83,7 @@ constexpr size_t kMqttInboundTopicMaxLen = kMqttCommandTopicMaxLen + 32;
 constexpr size_t kMqttInboundPayloadMaxLen = 96;
 constexpr uint16_t kMqttEnergyIntervalMax = 65535U;
 constexpr float kMqttEnergyChangeMaxPercent = 1000.0f;
+constexpr uint16_t kMqttEnergyChangeMaxWatts = 65535U;
 constexpr uint8_t kMqttPacketConnack = 0x20;
 constexpr uint8_t kMqttPacketPublish = 0x30;
 constexpr uint8_t kMqttPacketPuback = 0x40;
@@ -200,8 +202,12 @@ constexpr uint8_t kMqttLightPendingAll = kMqttLightPendingDimmer | kMqttLightPen
 constexpr uint8_t kMqttEnergyReportReasonNone = 0;
 constexpr uint8_t kMqttEnergyReportReasonInitial = 1;
 constexpr uint8_t kMqttEnergyReportReasonInterval = 2;
-constexpr uint8_t kMqttEnergyReportReasonPowerChange = 3;
-constexpr uint8_t kMqttEnergyReportReasonIntervalPowerChange = 4;
+constexpr uint8_t kMqttEnergyReportReasonPowerChangePercent = 3;
+constexpr uint8_t kMqttEnergyReportReasonIntervalPowerChangePercent = 4;
+constexpr uint8_t kMqttEnergyReportReasonPowerChangeWatts = 5;
+constexpr uint8_t kMqttEnergyReportReasonIntervalPowerChangeWatts = 6;
+constexpr uint8_t kMqttEnergyReportReasonPowerChangePercentWatts = 7;
+constexpr uint8_t kMqttEnergyReportReasonIntervalPowerChangePercentWatts = 8;
 constexpr uint8_t kPowerStateOff = 0;
 constexpr uint8_t kPowerStateOn = 1;
 constexpr uint8_t kPowerStateToggle = 2;
@@ -701,6 +707,54 @@ struct StoredConfigV14 {
   uint32_t crc;
 };
 
+struct StoredConfigV15 {
+  uint32_t magic;
+  uint16_t version;
+  uint16_t size;
+  char ssid[33];
+  char password[65];
+  char hostname[33];
+  uint8_t phy_mode;
+  uint8_t template_enabled;
+  uint16_t template_base;
+  uint32_t template_flag;
+  char template_name[33];
+  uint16_t template_gpio[kTemplateSlotCount];
+  uint16_t mqtt_port;
+  uint16_t mqtt_keepalive;
+  char mqtt_host[kMqttHostMaxLen + 1];
+  char mqtt_topic[kMqttTopicMaxLen + 1];
+  float energy_total_offset_kwh;
+  uint8_t led_attach[kMaxLedOutputs];
+  uint16_t button_hold_ms;
+  uint8_t button_press_action[kMaxButtons];
+  uint8_t button_hold_action[kMaxButtons];
+  uint16_t energy_mqtt_interval;
+  uint16_t energy_mqtt_change_percent_x10;
+  char button_press_target[kMaxButtons][kButtonActionTargetMaxLen + 1];
+  char button_press_payload[kMaxButtons][kButtonActionPayloadMaxLen + 1];
+  char button_hold_target[kMaxButtons][kButtonActionTargetMaxLen + 1];
+  char button_hold_payload[kMaxButtons][kButtonActionPayloadMaxLen + 1];
+  uint16_t button_debounce_ms;
+  uint8_t input_mode[kMaxButtons];
+  uint8_t input_relay[kMaxButtons];
+  uint8_t input_on_level[kMaxButtons];
+  uint8_t reserved[1];
+  uint8_t button_press_relay[kMaxButtons];
+  uint8_t button_hold_relay[kMaxButtons];
+  uint8_t light_power;
+  uint8_t light_dimmer;
+  uint16_t light_ct;
+  uint8_t light_on_dimmer;
+  uint8_t shelly_dimmer_edge;
+  uint8_t shelly_dimmer_range_min;
+  uint8_t shelly_dimmer_range_max;
+  uint8_t relay_on_boot[kMaxRelays];
+  uint8_t relay_time_enabled[kMaxRelays];
+  uint16_t relay_time_seconds[kMaxRelays];
+  uint32_t crc;
+};
+
 struct StoredConfig {
   uint32_t magic;
   uint16_t version;
@@ -746,6 +800,8 @@ struct StoredConfig {
   uint8_t relay_on_boot[kMaxRelays];
   uint8_t relay_time_enabled[kMaxRelays];
   uint16_t relay_time_seconds[kMaxRelays];
+  uint16_t energy_mqtt_change_watts;
+  uint16_t energy_reserved;
   uint32_t crc;
 };
 
@@ -1098,6 +1154,8 @@ void setDefaultMqttConfig() {
 void setDefaultEnergyMqttConfig() {
   config.energy_mqtt_interval = 0;
   config.energy_mqtt_change_percent_x10 = 0;
+  config.energy_mqtt_change_watts = 0;
+  config.energy_reserved = 0;
 }
 
 void setDefaultLightConfig(StoredConfig &target) {
@@ -1647,6 +1705,7 @@ void normalizeConfigStrings() {
   if (config.energy_mqtt_change_percent_x10 > static_cast<uint16_t>(kMqttEnergyChangeMaxPercent * 10.0f)) {
     config.energy_mqtt_change_percent_x10 = 0;
   }
+  config.energy_reserved = 0;
   config.light_power = config.light_power ? 1 : 0;
   if (config.light_dimmer > kLightDimmerMax) {
     config.light_dimmer = kLightDimmerDefault;
@@ -1763,7 +1822,8 @@ bool commitConfig(bool force_commit) {
 
 bool saveWifiConfig(const char *ssid, const char *password, const char *hostname, uint8_t phy_mode);
 bool saveMqttConfig(const char *host, uint16_t port, const char *topic, uint16_t keepalive);
-bool saveEnergyConfig(float total_offset_kwh, uint16_t mqtt_interval, uint16_t mqtt_change_percent_x10);
+bool saveEnergyConfig(float total_offset_kwh, uint16_t mqtt_interval, uint16_t mqtt_change_percent_x10,
+                      uint16_t mqtt_change_watts);
 bool saveLedConfig(const uint8_t *attachments);
 bool saveRelayEnforcementConfig(const uint8_t *on_boot, const uint8_t *time_enabled, const uint16_t *time_seconds);
 bool saveButtonConfig(uint16_t hold_ms, uint16_t debounce_ms,
@@ -1801,6 +1861,27 @@ bool loadConfig() {
     }
     normalizeConfigStrings();
     config_ok = config.ssid[0] != '\0';
+    return config_ok;
+  }
+
+  if (header.version == kConfigVersionV15 && header.size == sizeof(StoredConfigV15)) {
+    StoredConfigV15 *old_config = new StoredConfigV15;
+    if (!old_config) {
+      setDefaultConfig();
+      return false;
+    }
+    EEPROM.get(0, *old_config);
+    if (old_config->crc != configCrc(*old_config)) {
+      delete old_config;
+      setDefaultConfig();
+      return false;
+    }
+    memset(&config, 0, sizeof(config));
+    memcpy(&config, old_config, offsetof(StoredConfigV15, crc));
+    config.energy_mqtt_change_watts = 0;
+    config.energy_reserved = 0;
+    delete old_config;
+    commitConfig();
     return config_ok;
   }
 
@@ -2278,10 +2359,12 @@ bool saveMqttConfig(const char *host, uint16_t port, const char *topic, uint16_t
   return commitConfig();
 }
 
-bool saveEnergyConfig(float total_offset_kwh, uint16_t mqtt_interval, uint16_t mqtt_change_percent_x10) {
+bool saveEnergyConfig(float total_offset_kwh, uint16_t mqtt_interval, uint16_t mqtt_change_percent_x10,
+                      uint16_t mqtt_change_watts) {
   config.energy_total_offset_kwh = total_offset_kwh;
   config.energy_mqtt_interval = mqtt_interval;
   config.energy_mqtt_change_percent_x10 = mqtt_change_percent_x10;
+  config.energy_mqtt_change_watts = mqtt_change_watts;
   last_mqtt_energy_publish = 0;
   last_mqtt_energy_power = NAN;
   last_mqtt_energy_report_reason = kMqttEnergyReportReasonNone;
@@ -3571,7 +3654,8 @@ bool mqttConfigDiffers(const StoredConfig &a, const StoredConfig &b) {
 bool energyConfigDiffers(const StoredConfig &a, const StoredConfig &b) {
   return a.energy_total_offset_kwh != b.energy_total_offset_kwh ||
          a.energy_mqtt_interval != b.energy_mqtt_interval ||
-         a.energy_mqtt_change_percent_x10 != b.energy_mqtt_change_percent_x10;
+         a.energy_mqtt_change_percent_x10 != b.energy_mqtt_change_percent_x10 ||
+         a.energy_mqtt_change_watts != b.energy_mqtt_change_watts;
 }
 
 bool lightConfigDiffers(const StoredConfig &a, const StoredConfig &b) {
@@ -3665,6 +3749,8 @@ void appendSettingsExportJson(String &out) {
   out += config.energy_mqtt_interval;
   out += F(",\"report_change_percent\":");
   out += String(energyMqttChangePercent(), 1);
+  out += F(",\"report_change_watts\":");
+  out += config.energy_mqtt_change_watts;
   out += F("},\"light\":{\"power\":");
   out += config.light_power ? F("true") : F("false");
   out += F(",\"dimmer\":");
@@ -3847,6 +3933,15 @@ void importSettingsEnergy(JsonObjectConst root, StoredConfig &target, SettingsIm
       recordSettingsApplied(stats);
     } else {
       recordSettingsSkipped(stats, F("energy.report_change_percent"));
+    }
+  }
+  if (energy_settings.containsKey("report_change_watts")) {
+    uint16_t watts = 0;
+    if (settingsReadUint16(energy_settings["report_change_watts"], 0, kMqttEnergyChangeMaxWatts, watts)) {
+      target.energy_mqtt_change_watts = watts;
+      recordSettingsApplied(stats);
+    } else {
+      recordSettingsSkipped(stats, F("energy.report_change_watts"));
     }
   }
 }
@@ -4960,7 +5055,9 @@ String mqttEnergyTopic() {
 }
 
 bool mqttEnergyReportingEnabled() {
-  return energy.present && (config.energy_mqtt_interval > 0 || config.energy_mqtt_change_percent_x10 > 0);
+  return energy.present && (config.energy_mqtt_interval > 0 ||
+                            config.energy_mqtt_change_percent_x10 > 0 ||
+                            config.energy_mqtt_change_watts > 0);
 }
 
 bool mqttEnergyReportReady() {
@@ -4971,7 +5068,7 @@ bool mqttEnergyReportReady() {
   return energy.cf1_voltage_pulse_length > 0 || energy_report_boot_settled;
 }
 
-bool mqttEnergyPowerChangedEnough() {
+bool mqttEnergyPowerChangedPercentEnough() {
   if (config.energy_mqtt_change_percent_x10 == 0) return false;
   if (isnan(last_mqtt_energy_power)) return true;
 
@@ -4984,12 +5081,24 @@ bool mqttEnergyPowerChangedEnough() {
   return (delta * 1000.0f) >= (baseline * static_cast<float>(config.energy_mqtt_change_percent_x10));
 }
 
+bool mqttEnergyPowerChangedWattsEnough() {
+  if (config.energy_mqtt_change_watts == 0) return false;
+  if (isnan(last_mqtt_energy_power)) return true;
+
+  const float delta = fabs(energy.power - last_mqtt_energy_power);
+  return delta >= static_cast<float>(config.energy_mqtt_change_watts);
+}
+
 const __FlashStringHelper *mqttEnergyReportReasonName(uint8_t reason) {
   switch (reason) {
     case kMqttEnergyReportReasonInitial: return F("initial");
     case kMqttEnergyReportReasonInterval: return F("interval");
-    case kMqttEnergyReportReasonPowerChange: return F("power change %");
-    case kMqttEnergyReportReasonIntervalPowerChange: return F("interval + power change %");
+    case kMqttEnergyReportReasonPowerChangePercent: return F("power change %");
+    case kMqttEnergyReportReasonIntervalPowerChangePercent: return F("interval + power change %");
+    case kMqttEnergyReportReasonPowerChangeWatts: return F("power change W");
+    case kMqttEnergyReportReasonIntervalPowerChangeWatts: return F("interval + power change W");
+    case kMqttEnergyReportReasonPowerChangePercentWatts: return F("power change % + W");
+    case kMqttEnergyReportReasonIntervalPowerChangePercentWatts: return F("interval + power change % + W");
     default: return F("none");
   }
 }
@@ -5004,10 +5113,15 @@ uint8_t mqttEnergyReportReason(uint32_t now) {
     const uint32_t interval_ms = static_cast<uint32_t>(config.energy_mqtt_interval) * 1000UL;
     interval_due = now - last_mqtt_energy_publish >= interval_ms;
   }
-  const bool power_change_due = mqttEnergyPowerChangedEnough();
-  if (interval_due && power_change_due) return kMqttEnergyReportReasonIntervalPowerChange;
+  const bool percent_due = mqttEnergyPowerChangedPercentEnough();
+  const bool watts_due = mqttEnergyPowerChangedWattsEnough();
+  if (interval_due && percent_due && watts_due) return kMqttEnergyReportReasonIntervalPowerChangePercentWatts;
+  if (interval_due && percent_due) return kMqttEnergyReportReasonIntervalPowerChangePercent;
+  if (interval_due && watts_due) return kMqttEnergyReportReasonIntervalPowerChangeWatts;
   if (interval_due) return kMqttEnergyReportReasonInterval;
-  if (power_change_due) return kMqttEnergyReportReasonPowerChange;
+  if (percent_due && watts_due) return kMqttEnergyReportReasonPowerChangePercentWatts;
+  if (percent_due) return kMqttEnergyReportReasonPowerChangePercent;
+  if (watts_due) return kMqttEnergyReportReasonPowerChangeWatts;
   return kMqttEnergyReportReasonNone;
 }
 
@@ -6818,6 +6932,10 @@ void appendDeviceControls(String &page) {
     page += String(kMqttEnergyChangeMaxPercent, 1);
     page += F("' step='0.1' value='");
     page += String(energyMqttChangePercent(), 1);
+    page += F("'></label></div><div class='row'><label>MQTT report power change watts<br><input name='energy_report_change_watts' type='number' min='0' max='");
+    page += String(kMqttEnergyChangeMaxWatts);
+    page += F("' step='1' value='");
+    page += String(config.energy_mqtt_change_watts);
     page += F("'></label></div><button type='submit'>Save energy</button></form></div>");
   }
   page += F("</section>");
@@ -7445,6 +7563,7 @@ void handleEnergySave() {
   float total_offset_kwh = 0.0f;
   uint16_t energy_report_interval = config.energy_mqtt_interval;
   uint16_t energy_report_change_percent_x10 = config.energy_mqtt_change_percent_x10;
+  uint16_t energy_report_change_watts = config.energy_mqtt_change_watts;
   if (!parseFloatInput(offset_arg, kEnergyTotalOffsetMinKwh, kEnergyTotalOffsetMaxKwh, total_offset_kwh)) {
     server.send(400, F("text/plain"), F("Invalid total kWh offset"));
     return;
@@ -7462,8 +7581,14 @@ void handleEnergySave() {
     }
     energy_report_change_percent_x10 = static_cast<uint16_t>((percent * 10.0f) + 0.5f);
   }
+  if (server.hasArg("energy_report_change_watts") &&
+      !parseUint16Input(server.arg("energy_report_change_watts"), 0, kMqttEnergyChangeMaxWatts, energy_report_change_watts)) {
+    server.send(400, F("text/plain"), F("Invalid energy report change watts"));
+    return;
+  }
 
-  if (!saveEnergyConfig(total_offset_kwh, energy_report_interval, energy_report_change_percent_x10)) {
+  if (!saveEnergyConfig(total_offset_kwh, energy_report_interval, energy_report_change_percent_x10,
+                        energy_report_change_watts)) {
     server.send(500, F("text/plain"), F("Could not save energy settings"));
     return;
   }
@@ -8709,6 +8834,8 @@ void handleHealth() {
     out += config.energy_mqtt_interval;
     out += F(",\"report_change_percent\":");
     out += String(energyMqttChangePercent(), 1);
+    out += F(",\"report_change_watts\":");
+    out += config.energy_mqtt_change_watts;
     out += F(",\"last_mqtt_report_ms_ago\":");
     if (last_mqtt_energy_publish == 0) {
       out += F("null");
