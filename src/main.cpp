@@ -2585,6 +2585,7 @@ bool isSwitchInput(uint8_t input) {
 }
 
 uint8_t defaultInputMode(uint8_t input) {
+  if (runtime_template.shelly_dimmer && isSwitchInput(input)) return kInputModeButton;
   return isSwitchInput(input) ? kInputModeSwitch : kInputModeButton;
 }
 
