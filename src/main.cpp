@@ -208,6 +208,9 @@ constexpr uint8_t kMqttEnergyReportReasonPowerChangeWatts = 5;
 constexpr uint8_t kMqttEnergyReportReasonIntervalPowerChangeWatts = 6;
 constexpr uint8_t kMqttEnergyReportReasonPowerChangePercentWatts = 7;
 constexpr uint8_t kMqttEnergyReportReasonIntervalPowerChangePercentWatts = 8;
+constexpr uint8_t kMqttEnergyReportReasonRelayOff = 9;
+constexpr uint8_t kMqttEnergyReportReasonPowerZero = 10;
+constexpr float kEnergyZeroPowerThreshold = 0.001f;
 constexpr uint8_t kPowerStateOff = 0;
 constexpr uint8_t kPowerStateOn = 1;
 constexpr uint8_t kPowerStateToggle = 2;
@@ -1006,8 +1009,11 @@ uint32_t last_mqtt_energy_publish = 0;
 uint32_t last_mqtt_connect_attempt = 0;
 uint32_t last_mqtt_connect_duration = 0;
 float last_mqtt_energy_power = NAN;
+float last_observed_energy_power = NAN;
 uint8_t last_mqtt_energy_report_reason = kMqttEnergyReportReasonNone;
 uint16_t mqtt_pending_relay_mask = 0;
+uint16_t mqtt_pending_energy_zero_relay_mask = 0;
+uint8_t mqtt_pending_energy_report_reason = kMqttEnergyReportReasonNone;
 uint8_t mqtt_pending_light_mask = 0;
 struct MqttButtonPending {
   uint32_t queued_at;
@@ -1050,6 +1056,7 @@ bool hasPin(const PinAssignment &assignment);
 bool mqttEnergyReportingEnabled();
 bool relayAvailable(uint8_t relay);
 bool lightAvailableIn(const RuntimeTemplate &rt);
+void updateEnergyAggregateFromChannels();
 bool defaultButtonRelayTarget(uint8_t button, uint8_t &relay);
 bool parseUint16Input(const String &input, uint16_t min_value, uint16_t max_value, uint16_t &out);
 void cancelRelayEnforcement(uint8_t relay);
@@ -2342,8 +2349,11 @@ void resetMqttRuntimeState() {
   last_mqtt_connect_duration = 0;
   last_mqtt_connect_result = kMqttConnectIdle;
   last_mqtt_energy_power = NAN;
+  last_observed_energy_power = NAN;
   last_mqtt_energy_report_reason = kMqttEnergyReportReasonNone;
   mqtt_pending_relay_mask = 0;
+  mqtt_pending_energy_zero_relay_mask = 0;
+  mqtt_pending_energy_report_reason = kMqttEnergyReportReasonNone;
   mqtt_pending_light_mask = 0;
   mqtt_button_queue_head = 0;
   mqtt_button_queue_count = 0;
@@ -2367,7 +2377,10 @@ bool saveEnergyConfig(float total_offset_kwh, uint16_t mqtt_interval, uint16_t m
   config.energy_mqtt_change_watts = mqtt_change_watts;
   last_mqtt_energy_publish = 0;
   last_mqtt_energy_power = NAN;
+  last_observed_energy_power = NAN;
   last_mqtt_energy_report_reason = kMqttEnergyReportReasonNone;
+  mqtt_pending_energy_zero_relay_mask = 0;
+  mqtt_pending_energy_report_reason = kMqttEnergyReportReasonNone;
   return commitConfig();
 }
 
@@ -4714,6 +4727,8 @@ void queueMqttConnectHeal() {
     last_mqtt_energy_power = NAN;
     last_mqtt_energy_report_reason = kMqttEnergyReportReasonNone;
   }
+  mqtt_pending_energy_zero_relay_mask = 0;
+  mqtt_pending_energy_report_reason = kMqttEnergyReportReasonNone;
 
   if (light.present) {
     mqtt_pending_light_mask |= kMqttLightPendingAll;
@@ -5045,6 +5060,47 @@ bool mqttPublishAllRelayStates() {
   return ok;
 }
 
+bool energyRelayHasChannel(uint8_t relay) {
+  if (!energy.present || relay >= runtime_template.relay_count || relay >= kMaxRelays) return false;
+  if (energy.channel_count <= 1) return relay == 0;
+  return relay < energy.channel_count && relay < kEnergyMaxChannels;
+}
+
+void updateEnergyRelayOffZero(uint8_t relay) {
+  if (!energyRelayHasChannel(relay)) return;
+
+  if (energy.channel_count > 1) {
+    energy.channel[relay].power = 0.0f;
+    energy.channel[relay].current = 0.0f;
+    updateEnergyAggregateFromChannels();
+    return;
+  }
+
+  energy.power = 0.0f;
+  energy.current = 0.0f;
+  energy.channel[0].power = 0.0f;
+  energy.channel[0].current = 0.0f;
+}
+
+void scheduleMqttEnergyReport(uint8_t reason) {
+  if (!energy.present || !mqttConfigured()) return;
+  if (reason == kMqttEnergyReportReasonNone) return;
+  if (mqtt_pending_energy_report_reason == kMqttEnergyReportReasonRelayOff &&
+      reason == kMqttEnergyReportReasonPowerZero) {
+    return;
+  }
+  mqtt_pending_energy_report_reason = reason;
+}
+
+void scheduleMqttRelayOffEnergyReport(uint8_t relay) {
+  if (!energyRelayHasChannel(relay)) return;
+  updateEnergyRelayOffZero(relay);
+  if (relay < kMaxRelays) {
+    mqtt_pending_energy_zero_relay_mask |= (1U << relay);
+  }
+  scheduleMqttEnergyReport(kMqttEnergyReportReasonRelayOff);
+}
+
 String mqttEnergyTopic() {
   String topic;
   topic.reserve(kMqttTopicMaxLen + 16);
@@ -5089,6 +5145,10 @@ bool mqttEnergyPowerChangedWattsEnough() {
   return delta >= static_cast<float>(config.energy_mqtt_change_watts);
 }
 
+bool energyPowerIsZero(float power) {
+  return fabs(power) <= kEnergyZeroPowerThreshold;
+}
+
 const __FlashStringHelper *mqttEnergyReportReasonName(uint8_t reason) {
   switch (reason) {
     case kMqttEnergyReportReasonInitial: return F("initial");
@@ -5099,6 +5159,8 @@ const __FlashStringHelper *mqttEnergyReportReasonName(uint8_t reason) {
     case kMqttEnergyReportReasonIntervalPowerChangeWatts: return F("interval + power change W");
     case kMqttEnergyReportReasonPowerChangePercentWatts: return F("power change % + W");
     case kMqttEnergyReportReasonIntervalPowerChangePercentWatts: return F("interval + power change % + W");
+    case kMqttEnergyReportReasonRelayOff: return F("relay off");
+    case kMqttEnergyReportReasonPowerZero: return F("power zero");
     default: return F("none");
   }
 }
@@ -5125,30 +5187,48 @@ uint8_t mqttEnergyReportReason(uint32_t now) {
   return kMqttEnergyReportReasonNone;
 }
 
-bool mqttPublishEnergyStatus(uint8_t reason) {
+bool mqttPublishEnergyStatus(uint8_t reason, uint16_t zero_relay_mask = 0) {
   if (!energy.present) return true;
 
   const String topic = mqttEnergyTopic();
+  float payload_power = energy.power;
+  float payload_current = energy.current;
+  if (zero_relay_mask) {
+    if (energy.channel_count > 1) {
+      for (uint8_t i = 0; i < energy.channel_count && i < kEnergyMaxChannels; i++) {
+        if (!(zero_relay_mask & (1U << i))) continue;
+        payload_power -= energy.channel[i].power;
+        payload_current -= energy.channel[i].current;
+      }
+      if (payload_power < 0.0f && fabs(payload_power) <= kEnergyZeroPowerThreshold) payload_power = 0.0f;
+      if (payload_current < 0.0f && fabs(payload_current) <= kEnergyZeroPowerThreshold) payload_current = 0.0f;
+    } else if (zero_relay_mask & 0x01U) {
+      payload_power = 0.0f;
+      payload_current = 0.0f;
+    }
+  }
+
   String payload;
   payload.reserve(260);
   payload += F("{\"StatusSNS\":{\"ENERGY\":{\"Total\":");
   payload += String(reportedEnergyTotalKwh(), 4);
   payload += F(",\"Power\":");
-  payload += String(energy.power, 2);
+  payload += String(payload_power, 2);
   payload += F(",\"Voltage\":");
   payload += String(energy.voltage, 1);
   payload += F(",\"Current\":");
-  payload += String(energy.current, 3);
+  payload += String(payload_current, 3);
   if (energy.channel_count > 1) {
     for (uint8_t i = 0; i < energy.channel_count && i < kEnergyMaxChannels; i++) {
+      const bool zero_channel = zero_relay_mask & (1U << i);
       payload += F(",\"Power");
       payload += String(i + 1);
       payload += F("\":");
-      payload += String(energy.channel[i].power, 2);
+      payload += String(zero_channel ? 0.0f : energy.channel[i].power, 2);
       payload += F(",\"Current");
       payload += String(i + 1);
       payload += F("\":");
-      payload += String(energy.channel[i].current, 3);
+      payload += String(zero_channel ? 0.0f : energy.channel[i].current, 3);
     }
   }
   payload += F("}}}");
@@ -5156,20 +5236,34 @@ bool mqttPublishEnergyStatus(uint8_t reason) {
   const bool ok = mqttPublish(topic.c_str(), payload.c_str());
   if (ok) {
     last_mqtt_energy_publish = millis();
-    last_mqtt_energy_power = energy.power;
+    last_mqtt_energy_power = payload_power;
     last_mqtt_energy_report_reason = reason;
   }
   return ok;
 }
 
 void maintainMqttEnergyReports(uint32_t now) {
-  if (!mqttEnergyReportingEnabled()) {
+  if (!energy.present) {
     last_mqtt_energy_publish = 0;
     last_mqtt_energy_power = NAN;
     last_mqtt_energy_report_reason = kMqttEnergyReportReasonNone;
+    mqtt_pending_energy_zero_relay_mask = 0;
+    mqtt_pending_energy_report_reason = kMqttEnergyReportReasonNone;
     return;
   }
   if (!mqttEnergyReportReady()) return;
+
+  if (mqtt_pending_energy_report_reason != kMqttEnergyReportReasonNone) {
+    const uint8_t reason = mqtt_pending_energy_report_reason;
+    const uint16_t zero_relay_mask = mqtt_pending_energy_zero_relay_mask;
+    if (mqttPublishEnergyStatus(reason, zero_relay_mask)) {
+      mqtt_pending_energy_zero_relay_mask = 0;
+      mqtt_pending_energy_report_reason = kMqttEnergyReportReasonNone;
+    }
+    return;
+  }
+
+  if (!mqttEnergyReportingEnabled()) return;
 
   const uint8_t reason = mqttEnergyReportReason(now);
   if (reason != kMqttEnergyReportReasonNone) {
@@ -5223,6 +5317,8 @@ void maintainMqtt() {
     last_mqtt_energy_publish = 0;
     last_mqtt_energy_power = NAN;
     last_mqtt_energy_report_reason = kMqttEnergyReportReasonNone;
+    mqtt_pending_energy_zero_relay_mask = 0;
+    mqtt_pending_energy_report_reason = kMqttEnergyReportReasonNone;
     return;
   }
 
@@ -6078,6 +6174,7 @@ void setRelay(uint8_t relay, bool on) {
     scheduleMqttRelayPublish(relay);
     if (energy.present && was_on && !on) {
       energy_persist_requested = true;
+      scheduleMqttRelayOffEnergyReport(relay);
     }
     updateDeviceLeds(true);
   }
@@ -6297,6 +6394,22 @@ void maintainButtons() {
   }
 }
 
+void observeEnergyPowerForZeroReport() {
+  if (!energy.present) {
+    last_observed_energy_power = NAN;
+    return;
+  }
+
+  const bool had_positive_power = !isnan(last_observed_energy_power) &&
+                                  !energyPowerIsZero(last_observed_energy_power) &&
+                                  last_observed_energy_power > 0.0f;
+  const bool has_zero_power = energyPowerIsZero(energy.power);
+  if (had_positive_power && has_zero_power) {
+    scheduleMqttEnergyReport(kMqttEnergyReportReasonPowerZero);
+  }
+  last_observed_energy_power = energy.power;
+}
+
 void maintainEnergy() {
   if (!energy.present) return;
   const uint32_t now = millis();
@@ -6318,6 +6431,7 @@ void maintainEnergy() {
       energy.total_kwh += (energy.power * static_cast<float>(elapsed)) / 3600000000.0f;
     }
     persistEnergyTotal(false);
+    observeEnergyPowerForZeroReport();
     return;
   }
 
@@ -6333,6 +6447,7 @@ void maintainEnergy() {
       energy.total_kwh += (energy.power * static_cast<float>(elapsed)) / 3600000000.0f;
     }
     persistEnergyTotal(false);
+    observeEnergyPowerForZeroReport();
     return;
   }
 
@@ -6414,6 +6529,7 @@ void maintainEnergy() {
   }
 
   persistEnergyTotal(false);
+  observeEnergyPowerForZeroReport();
 }
 
 void setupDevicePins() {
