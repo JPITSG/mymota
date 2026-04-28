@@ -241,11 +241,14 @@ constexpr uint16_t kTplNrgSelInv = 2624;
 constexpr uint16_t kTplNrgCf1 = 2656;
 constexpr uint16_t kTplHlwCf = 2688;
 constexpr uint16_t kTplHjlCf = 2720;
+constexpr uint16_t kTplCse7766Tx = 3072;
+constexpr uint16_t kTplCse7766Rx = 3104;
 constexpr uint16_t kTplSerialTxd = 3200;
 constexpr uint16_t kTplSerialRxd = 3232;
 constexpr uint16_t kTplRot1A = 3264;
 constexpr uint16_t kTplRot1B = 3296;
 constexpr uint16_t kTplAde7953Irq = 3456;
+constexpr uint16_t kTplAdcInput = 4704;
 constexpr uint16_t kTplAdcTemp = 4736;
 constexpr uint16_t kTplShellyDimmerBoot0 = 5568;
 constexpr uint16_t kTplShellyDimmerResetInv = 5600;
@@ -256,6 +259,8 @@ const char kTemplateShellyPlugSJson[] PROGMEM =
   "{\"NAME\":\"Shelly Plug S\",\"GPIO\":[320,1,576,1,1,2720,0,0,2624,32,2656,224,1,4736],\"FLAG\":0,\"BASE\":45}";
 const char kTemplateNousA1TJson[] PROGMEM =
   "{\"NAME\":\"NOUS A1T\",\"GPIO\":[32,0,0,0,2720,2656,0,0,2624,320,224,0,0,0],\"FLAG\":0,\"BASE\":18}";
+const char kTemplateNousA5TJson[] PROGMEM =
+  "{\"NAME\":\"NOUS A5T\",\"GPIO\":[0,3072,544,3104,0,259,0,0,225,226,224,0,35,4704],\"FLAG\":1,\"BASE\":18}";
 const char kTemplateShelly25Json[] PROGMEM =
   "{\"NAME\":\"Shelly 2.5\",\"GPIO\":[320,0,0,0,224,193,0,0,640,192,608,225,3456,4736],\"FLAG\":0,\"BASE\":18}";
 const char kTemplateShelly1Json[] PROGMEM =
@@ -308,7 +313,16 @@ constexpr uint8_t kEnergyDriverNone = 0;
 constexpr uint8_t kEnergyDriverPulse = 1;
 constexpr uint8_t kEnergyDriverAde7953 = 2;
 constexpr uint8_t kEnergyDriverShellyDimmer = 3;
+constexpr uint8_t kEnergyDriverCse7766 = 4;
 constexpr uint8_t kEnergyMaxChannels = 2;
+constexpr uint8_t kCse7766FrameSize = 24;
+constexpr uint8_t kCse7766MaxInvalidPower = 128;
+constexpr uint8_t kCse7766NotCalibrated = 0xaa;
+constexpr int32_t kCse7766PulsesNotInitialized = -1;
+constexpr uint32_t kCse7766DefaultVoltageCoefficient = 191200;
+constexpr uint32_t kCse7766DefaultCurrentCoefficient = 16140;
+constexpr uint32_t kCse7766DefaultPowerCoefficient = 5364000;
+constexpr uint32_t kCse7766StaleMs = 5000;
 constexpr uint8_t kAde7953Address = 0x38;
 constexpr uint8_t kAde7953ModelShelly25 = 0;
 constexpr uint32_t kAde7953UpdateMs = 1000;
@@ -324,6 +338,9 @@ constexpr float kAnalogT0Kelvin = 298.15f;
 constexpr float kAnalogNtcBridgeResistance = 32000.0f;
 constexpr float kAnalogNtcResistance = 10000.0f;
 constexpr float kAnalogNtcBeta = 3350.0f;
+constexpr uint32_t kAdcInputUpdateMs = 50;
+constexpr uint32_t kNousA5tAdcStableMs = 150;
+constexpr int8_t kAdcButtonNone = -1;
 
 const uint8_t kTemplateSlotToPin[kTemplateSlotCount] = {
   0, 1, 2, 3, 4, 5, 9, 10, 12, 13, 14, 15, 16, kAdc0Pin
@@ -858,12 +875,17 @@ struct RuntimeTemplate {
   uint8_t energy_cf_pin;
   uint8_t energy_cf1_pin;
   uint8_t energy_sel_pin;
+  uint8_t cse7766_tx_pin;
+  uint8_t cse7766_rx_pin;
   uint8_t serial_tx_pin;
   uint8_t serial_rx_pin;
   uint8_t shelly_dimmer_boot0_pin;
   uint8_t shelly_dimmer_reset_pin;
   bool energy_sel_inverted;
   bool energy_hjl;
+  bool cse7766;
+  bool adc_input;
+  bool nous_a5t_adc_buttons;
   bool adc_temp;
   bool shelly_dimmer;
   uint8_t unsupported_count;
@@ -952,11 +974,24 @@ struct EnergyState {
   uint32_t last_integrate_ms;
   uint32_t last_success_ms;
   uint8_t power_retry;
+  bool cse_serial_claimed;
+  bool cse_receiving;
+  uint8_t cse_byte_count;
+  uint8_t cse_power_invalid;
+  uint8_t cse_rx_buffer[kCse7766FrameSize];
+  int32_t cse_power_cycle_first;
+  int32_t cse_cf_pulses_last;
   uint8_t ade7953_model;
   uint8_t ade7953_skip_reads;
   uint16_t i2c_error_count;
   uint32_t ade7953_acc_mode;
   uint32_t ade7953_sample_ms;
+  uint32_t cse_voltage_cycle;
+  uint32_t cse_current_cycle;
+  uint32_t cse_power_cycle;
+  uint32_t cse_cf_pulses;
+  uint32_t cse_checksum_errors;
+  uint32_t cse_frame_errors;
   EnergyChannelState channel[kEnergyMaxChannels];
   float voltage;
   float current;
@@ -1025,6 +1060,7 @@ uint32_t last_mqtt_state_publish = 0;
 uint32_t last_mqtt_energy_publish = 0;
 uint32_t last_mqtt_connect_attempt = 0;
 uint32_t last_mqtt_connect_duration = 0;
+uint32_t last_adc_input_update = 0;
 float last_mqtt_energy_power = NAN;
 float last_observed_energy_power = NAN;
 uint8_t last_mqtt_energy_report_reason = kMqttEnergyReportReasonNone;
@@ -1062,6 +1098,9 @@ uint64_t energy_journal_saved_ukwh = 0;
 bool energy_persist_requested = false;
 float adc_temperature_c = NAN;
 uint16_t adc_raw = 0;
+int8_t adc_button_raw = kAdcButtonNone;
+int8_t adc_button_stable = kAdcButtonNone;
+uint32_t adc_button_changed_at = 0;
 uint32_t perf_window_start_ms = 0;
 bool perf_window_started = false;
 uint32_t perf_loop_count = 0;
@@ -2798,6 +2837,9 @@ uint8_t effectiveInputMode(uint8_t input) {
 uint8_t defaultInputOnLevel(uint8_t input) {
   if (input >= kMaxButtons || !hasPin(runtime_template.buttons[input])) return kInputOnLevelLow;
   if (isSwitchInput(input)) return kInputOnLevelHigh;
+  if (runtime_template.buttons[input].pin == 16) {
+    return runtime_template.buttons[input].inverted ? kInputOnLevelLow : kInputOnLevelHigh;
+  }
   return runtime_template.buttons[input].inverted ? kInputOnLevelHigh : kInputOnLevelLow;
 }
 
@@ -3018,7 +3060,9 @@ void parseTemplateFunction(RuntimeTemplate &target, uint8_t pin, uint16_t code) 
   const uint16_t base = code & 0xffe0U;
   const uint8_t index = code & 0x1fU;
   if (pin == kAdc0Pin) {
-    if (code == kTplAdcTemp) {
+    if (code == kTplAdcInput) {
+      target.adc_input = true;
+    } else if (code == kTplAdcTemp) {
       target.adc_temp = true;
     } else {
       addUnsupportedTemplatePin(target, pin, code);
@@ -3151,6 +3195,16 @@ void parseTemplateFunction(RuntimeTemplate &target, uint8_t pin, uint16_t code) 
     return;
   }
 
+  if (code == kTplCse7766Tx) {
+    target.cse7766_tx_pin = pin;
+    return;
+  }
+
+  if (code == kTplCse7766Rx) {
+    target.cse7766_rx_pin = pin;
+    return;
+  }
+
   if (base == kTplRot1A || base == kTplRot1B) {
     if (index >= kMaxRotaries || !interruptPinSupported(pin)) {
       addUnsupportedTemplatePin(target, pin, code);
@@ -3191,6 +3245,9 @@ void detachEnergyInterrupts() {
       interruptPinSupported(runtime_template.energy_cf1_pin)) {
     detachInterrupt(digitalPinToInterrupt(runtime_template.energy_cf1_pin));
   }
+  if (energy.driver == kEnergyDriverCse7766 && energy.cse_serial_claimed) {
+    Serial.end();
+  }
   energy.present = false;
   energy.driver = kEnergyDriverNone;
 }
@@ -3212,6 +3269,8 @@ void resetRuntimeTemplate(RuntimeTemplate &target) {
   target.energy_cf_pin = kInvalidPin;
   target.energy_cf1_pin = kInvalidPin;
   target.energy_sel_pin = kInvalidPin;
+  target.cse7766_tx_pin = kInvalidPin;
+  target.cse7766_rx_pin = kInvalidPin;
   target.serial_tx_pin = kInvalidPin;
   target.serial_rx_pin = kInvalidPin;
   target.shelly_dimmer_boot0_pin = kInvalidPin;
@@ -3224,6 +3283,24 @@ void finalizeRuntimeTemplate(RuntimeTemplate &target) {
     digitalPinSupported(target.shelly_dimmer_boot0_pin) &&
     digitalPinSupported(target.shelly_dimmer_reset_pin);
   target.shelly_dimmer = has_shelly_serial && has_shelly_control;
+
+  target.cse7766 = target.cse7766_rx_pin == 3;
+  if (!target.cse7766) {
+    if (digitalPinSupported(target.cse7766_tx_pin)) {
+      addUnsupportedTemplatePin(target, target.cse7766_tx_pin, kTplCse7766Tx);
+    }
+    if (digitalPinSupported(target.cse7766_rx_pin)) {
+      addUnsupportedTemplatePin(target, target.cse7766_rx_pin, kTplCse7766Rx);
+    }
+  }
+
+  target.nous_a5t_adc_buttons =
+    target.adc_input &&
+    strcmp(target.name, "NOUS A5T") == 0 &&
+    target.relay_count >= 3 &&
+    hasPin(target.relays[0]) &&
+    hasPin(target.relays[1]) &&
+    hasPin(target.relays[2]);
 
   if (!target.shelly_dimmer) {
     if (digitalPinSupported(target.serial_tx_pin)) {
@@ -5521,8 +5598,14 @@ void writeEnergySelector(bool select_ui_flag) {
 const __FlashStringHelper *energyDriverName() {
   if (energy.driver == kEnergyDriverAde7953) return F("ADE7953");
   if (energy.driver == kEnergyDriverShellyDimmer) return F("Shelly Dimmer");
+  if (energy.driver == kEnergyDriverCse7766) return F("CSE7766");
   if (energy.driver == kEnergyDriverPulse) return energy.hjl ? F("HJL/BL0937") : F("HLW8012");
   return F("none");
+}
+
+bool serialClaimed() {
+  return shelly_dimmer.serial_claimed ||
+         (energy.driver == kEnergyDriverCse7766 && energy.cse_serial_claimed);
 }
 
 uint32_t absSigned32(uint32_t value) {
@@ -5708,6 +5791,188 @@ bool readAde7953Energy() {
   return true;
 }
 
+uint32_t readBe24(const uint8_t *buf) {
+  return (static_cast<uint32_t>(buf[0]) << 16) |
+         (static_cast<uint32_t>(buf[1]) << 8) |
+         static_cast<uint32_t>(buf[2]);
+}
+
+bool cse7766PowerOn() {
+  if (runtime_template.relay_count == 0) return true;
+  for (uint8_t i = 0; i < runtime_template.relay_count && i < kMaxRelays; i++) {
+    if (hasPin(runtime_template.relays[i]) && relay_state[i]) return true;
+  }
+  return false;
+}
+
+void cse7766ResetRx() {
+  energy.cse_receiving = false;
+  energy.cse_byte_count = 0;
+}
+
+void cse7766ApplyCalibration(const uint8_t *frame) {
+  if (energy.voltage_ratio == 0) {
+    uint32_t coefficient = kCse7766DefaultVoltageCoefficient;
+    if (frame[0] != kCse7766NotCalibrated) {
+      coefficient = readBe24(frame + 2);
+      if (coefficient == 0) coefficient = kCse7766DefaultVoltageCoefficient;
+    }
+    energy.voltage_ratio = coefficient / 100U;
+  }
+  if (energy.current_ratio == 0) {
+    uint32_t coefficient = kCse7766DefaultCurrentCoefficient;
+    if (frame[0] != kCse7766NotCalibrated) {
+      coefficient = readBe24(frame + 8);
+      if (coefficient == 0) coefficient = kCse7766DefaultCurrentCoefficient;
+    }
+    energy.current_ratio = coefficient;
+  }
+  if (energy.power_ratio == 0) {
+    uint32_t coefficient = kCse7766DefaultPowerCoefficient;
+    if (frame[0] != kCse7766NotCalibrated) {
+      coefficient = readBe24(frame + 14);
+      if (coefficient == 0) coefficient = kCse7766DefaultPowerCoefficient;
+    }
+    energy.power_ratio = coefficient / 1000U;
+  }
+}
+
+void cse7766ProcessFrame(const uint8_t *frame) {
+  if ((frame[0] & 0xfcU) == 0xfcU) {
+    energy.cse_frame_errors++;
+    return;
+  }
+
+  cse7766ApplyCalibration(frame);
+
+  const uint8_t adjustment = frame[20];
+  energy.cse_voltage_cycle = readBe24(frame + 5);
+  energy.cse_current_cycle = readBe24(frame + 11);
+  energy.cse_power_cycle = readBe24(frame + 17);
+  energy.cse_cf_pulses = (static_cast<uint32_t>(frame[21]) << 8) | frame[22];
+
+  EnergyChannelState &channel = energy.channel[0];
+  channel.voltage_raw = energy.cse_voltage_cycle;
+  channel.current_raw = energy.cse_current_cycle;
+  channel.active_power_raw = energy.cse_power_cycle;
+  channel.apparent_power_raw = energy.cse_cf_pulses;
+
+  if (!cse7766PowerOn()) {
+    energy.cse_power_cycle_first = 0;
+    channel.voltage = 0.0f;
+    channel.power = 0.0f;
+    channel.current = 0.0f;
+    updateEnergyAggregateFromChannels();
+    energy.last_success_ms = millis();
+    return;
+  }
+
+  if ((adjustment & 0x40U) && energy.cse_voltage_cycle > 0 && energy.voltage_ratio > 0) {
+    channel.voltage = (static_cast<float>(energy.voltage_ratio) * 100.0f) /
+                      static_cast<float>(energy.cse_voltage_cycle);
+  }
+
+  if (adjustment & 0x10U) {
+    energy.cse_power_invalid = 0;
+    if ((frame[0] & 0xf2U) == 0xf2U || energy.cse_power_cycle == 0 || energy.power_ratio == 0) {
+      channel.power = 0.0f;
+    } else if (energy.cse_power_cycle_first == 0) {
+      energy.cse_power_cycle_first = static_cast<int32_t>(energy.cse_power_cycle);
+      channel.power = 0.0f;
+    } else if (energy.cse_power_cycle_first != static_cast<int32_t>(energy.cse_power_cycle)) {
+      energy.cse_power_cycle_first = -1;
+      channel.power = (static_cast<float>(energy.power_ratio) * 1000.0f) /
+                      static_cast<float>(energy.cse_power_cycle);
+    } else {
+      channel.power = 0.0f;
+    }
+  } else if (energy.cse_power_invalid < kCse7766MaxInvalidPower) {
+    energy.cse_power_invalid++;
+  } else {
+    energy.cse_power_cycle_first = 0;
+    channel.power = 0.0f;
+  }
+
+  if ((adjustment & 0x20U) && channel.power > 0.0f &&
+      energy.cse_current_cycle > 0 && energy.current_ratio > 0) {
+    channel.current = static_cast<float>(energy.current_ratio) /
+                      static_cast<float>(energy.cse_current_cycle);
+  } else if (channel.power <= 0.0f) {
+    channel.current = 0.0f;
+  }
+
+  updateEnergyAggregateFromChannels();
+  energy.last_success_ms = millis();
+}
+
+bool cse7766SerialInput() {
+  if (energy.driver != kEnergyDriverCse7766 || !energy.cse_serial_claimed) return false;
+
+  bool got_frame = false;
+  while (Serial.available()) {
+    const int value = Serial.read();
+    if (value < 0) break;
+    const uint8_t byte = static_cast<uint8_t>(value);
+
+    if (!energy.cse_receiving) {
+      if (energy.cse_byte_count == 1 && byte == 0x5a) {
+        energy.cse_rx_buffer[energy.cse_byte_count++] = byte;
+        energy.cse_receiving = true;
+      } else {
+        energy.cse_rx_buffer[0] = byte;
+        energy.cse_byte_count = 1;
+      }
+      continue;
+    }
+
+    if (energy.cse_byte_count >= kCse7766FrameSize) {
+      energy.cse_frame_errors++;
+      cse7766ResetRx();
+      continue;
+    }
+
+    energy.cse_rx_buffer[energy.cse_byte_count++] = byte;
+    if (energy.cse_byte_count < kCse7766FrameSize) continue;
+
+    uint8_t checksum = 0;
+    for (uint8_t i = 2; i < 23; i++) checksum += energy.cse_rx_buffer[i];
+    if (checksum == energy.cse_rx_buffer[23]) {
+      cse7766ProcessFrame(energy.cse_rx_buffer);
+      got_frame = true;
+    } else {
+      energy.cse_checksum_errors++;
+    }
+    cse7766ResetRx();
+  }
+  return got_frame;
+}
+
+void cse7766ClearStaleEnergy() {
+  energy.channel[0].voltage = 0.0f;
+  energy.channel[0].current = 0.0f;
+  energy.channel[0].power = 0.0f;
+  updateEnergyAggregateFromChannels();
+}
+
+bool setupCse7766EnergyMonitor() {
+  if (!runtime_template.cse7766 || runtime_template.cse7766_rx_pin != 3) return false;
+
+  energy.present = true;
+  energy.driver = kEnergyDriverCse7766;
+  energy.channel_count = 1;
+  energy.power_ratio = 0;
+  energy.voltage_ratio = 0;
+  energy.current_ratio = 0;
+  energy.cse_power_invalid = kCse7766MaxInvalidPower;
+  energy.cse_power_cycle_first = 0;
+  energy.cse_cf_pulses_last = kCse7766PulsesNotInitialized;
+  Serial.begin(4800, SERIAL_8E1);
+  while (Serial.available()) Serial.read();
+  energy.cse_serial_claimed = true;
+  energy.last_success_ms = millis();
+  return true;
+}
+
 void setupEnergyMonitor() {
   memset(&energy, 0, sizeof(energy));
   energy.cf_pin = runtime_template.energy_cf_pin;
@@ -5734,6 +5999,10 @@ void setupEnergyMonitor() {
   }
 
   if (setupAde7953EnergyMonitor()) {
+    return;
+  }
+
+  if (setupCse7766EnergyMonitor()) {
     return;
   }
 
@@ -6446,13 +6715,62 @@ uint16_t readAdcRaw() {
   return total / 4;
 }
 
+int8_t nousA5tAdcRelayForRaw(uint16_t raw) {
+  if (raw < 250) return 2;                 // Factory Rule1: Power3
+  if (raw >= 400 && raw < 500) return 1;   // Factory Rule2: Power2
+  if (raw >= 700 && raw < 990) return 0;   // Factory Rule3: Power1
+  return kAdcButtonNone;
+}
+
+void resetAdcButtonState(uint32_t now) {
+  adc_button_raw = kAdcButtonNone;
+  adc_button_stable = kAdcButtonNone;
+  adc_button_changed_at = now;
+}
+
+void maintainNousA5tAdcButtons(uint32_t now) {
+  if (!runtime_template.nous_a5t_adc_buttons) {
+    resetAdcButtonState(now);
+    return;
+  }
+
+  const int8_t decoded = nousA5tAdcRelayForRaw(adc_raw);
+  if (decoded != adc_button_raw) {
+    adc_button_raw = decoded;
+    adc_button_changed_at = now;
+    return;
+  }
+
+  if (decoded == adc_button_stable || now - adc_button_changed_at < kNousA5tAdcStableMs) {
+    return;
+  }
+
+  adc_button_stable = decoded;
+  if (decoded >= 0 && decoded < static_cast<int8_t>(kMaxRelays) && relayAvailable(static_cast<uint8_t>(decoded))) {
+    toggleRelay(static_cast<uint8_t>(decoded));
+  }
+}
+
 void maintainAdc() {
-  if (!runtime_template.adc_temp) return;
   const uint32_t now = millis();
-  if (now - last_adc_update < kAdcUpdateMs) return;
-  last_adc_update = now;
-  adc_raw = readAdcRaw();
-  adc_temperature_c = readAdcTemperatureC(adc_raw);
+  if (!runtime_template.adc_temp && !runtime_template.adc_input) {
+    resetAdcButtonState(now);
+    return;
+  }
+
+  if (runtime_template.adc_input && now - last_adc_input_update >= kAdcInputUpdateMs) {
+    last_adc_input_update = now;
+    adc_raw = readAdcRaw();
+    maintainNousA5tAdcButtons(now);
+  }
+
+  if (runtime_template.adc_temp && now - last_adc_update >= kAdcUpdateMs) {
+    last_adc_update = now;
+    adc_raw = readAdcRaw();
+    adc_temperature_c = readAdcTemperatureC(adc_raw);
+  } else if (!runtime_template.adc_temp) {
+    adc_temperature_c = NAN;
+  }
 }
 
 void maintainButtons() {
@@ -6570,6 +6888,21 @@ void maintainEnergy() {
     return;
   }
 
+  if (energy.driver == kEnergyDriverCse7766) {
+    cse7766SerialInput();
+    if (now - energy.last_success_ms >= kCse7766StaleMs) {
+      cse7766ClearStaleEnergy();
+    }
+    if (now - energy.last_integrate_ms >= kEnergyIntegrateMs) {
+      const uint32_t elapsed = now - energy.last_integrate_ms;
+      energy.last_integrate_ms = now;
+      energy.total_kwh += (energy.power * static_cast<float>(elapsed)) / 3600000000.0f;
+    }
+    persistEnergyTotal(false);
+    observeEnergyPowerForZeroReport();
+    return;
+  }
+
   if (now - energy.last_update_ms >= kEnergyUpdateMs) {
     energy.last_update_ms = now;
     const uint32_t now_us = micros();
@@ -6674,7 +7007,11 @@ void setupDevicePins() {
 
   for (uint8_t i = 0; i < kMaxButtons; i++) {
     if (!hasPin(runtime_template.buttons[i])) continue;
-    pinMode(runtime_template.buttons[i].pin, runtime_template.buttons[i].no_pullup ? INPUT : INPUT_PULLUP);
+    const uint8_t pin = runtime_template.buttons[i].pin;
+    const uint8_t mode = runtime_template.buttons[i].no_pullup
+      ? INPUT
+      : (pin == 16 ? INPUT_PULLDOWN_16 : INPUT_PULLUP);
+    pinMode(pin, mode);
     const bool active = readInputActive(i);
     button_state[i] = {active, active, false, millis(), millis()};
     if (effectiveInputMode(i) == kInputModeSwitch) {
@@ -6975,6 +7312,12 @@ void appendTemplateStatus(String &page) {
         page += F("</code>, reset <code>");
         page += pinName(runtime_template.shelly_dimmer_reset_pin);
         page += F("</code>");
+      } else if (energy.driver == kEnergyDriverCse7766) {
+        page += F(" RX <code>");
+        page += pinName(runtime_template.cse7766_rx_pin);
+        page += F("</code>, TX <code>");
+        page += pinName(runtime_template.cse7766_tx_pin);
+        page += F("</code>");
       } else {
         page += F(" CF <code>");
         page += pinName(energy.cf_pin);
@@ -6997,6 +7340,14 @@ void appendTemplateStatus(String &page) {
       page += F("</code> raw <code id='live-adc-raw'>");
       page += String(adc_raw);
       page += F("</code></div>");
+    } else if (runtime_template.adc_input) {
+      page += F("<span>ADC input</span><div>raw <code id='live-adc-raw'>");
+      page += String(adc_raw);
+      page += F("</code>");
+      if (runtime_template.nous_a5t_adc_buttons) {
+        page += F(" outlet buttons enabled");
+      }
+      page += F("</div>");
     }
     if (hasPin(runtime_template.link_led)) {
       page += F("<span>Link LED</span><div><code>");
@@ -7473,6 +7824,8 @@ void appendTemplateForm(String &page) {
   page += F("'>Mi Desk Lamp</option><option data-json='");
   page += htmlEscape(String(FPSTR(kTemplateNousA1TJson)));
   page += F("'>NOUS A1T 16A</option><option data-json='");
+  page += htmlEscape(String(FPSTR(kTemplateNousA5TJson)));
+  page += F("'>NOUS A5T Power Strip</option><option data-json='");
   page += htmlEscape(String(FPSTR(kTemplateShelly1Json)));
   page += F("'>Shelly 1</option><option data-json='");
   page += htmlEscape(String(FPSTR(kTemplateShelly1LJson)));
@@ -9051,6 +9404,8 @@ void handleHealth() {
       out += F("ade7953");
     } else if (energy.driver == kEnergyDriverShellyDimmer) {
       out += F("shelly_dimmer");
+    } else if (energy.driver == kEnergyDriverCse7766) {
+      out += F("cse7766");
     } else {
       out += energy.hjl ? F("hjl_bl0937") : F("hlw8012");
     }
@@ -9147,6 +9502,24 @@ void handleHealth() {
       out += F(",\"current\":");
       out += shelly_dimmer.current_raw;
       out += F("}");
+    } else if (energy.driver == kEnergyDriverCse7766) {
+      out += F("\"last_success_ms_ago\":");
+      out += millis() - energy.last_success_ms;
+      out += F(",\"checksum_errors\":");
+      out += energy.cse_checksum_errors;
+      out += F(",\"frame_errors\":");
+      out += energy.cse_frame_errors;
+      out += F(",\"invalid_power_count\":");
+      out += energy.cse_power_invalid;
+      out += F(",\"raw\":{\"voltage_cycle\":");
+      out += energy.cse_voltage_cycle;
+      out += F(",\"current_cycle\":");
+      out += energy.cse_current_cycle;
+      out += F(",\"power_cycle\":");
+      out += energy.cse_power_cycle;
+      out += F(",\"cf_pulses\":");
+      out += energy.cse_cf_pulses;
+      out += F("}");
     } else {
       out += F("\"cf_us\":");
       out += energy.cf_power_pulse_length;
@@ -9176,7 +9549,7 @@ void handleHealth() {
     out += F("null");
   }
   out += F(",\"adc_raw\":");
-  if (runtime_template.adc_temp) {
+  if (runtime_template.adc_temp || runtime_template.adc_input) {
     out += adc_raw;
   } else {
     out += F("null");
@@ -9484,7 +9857,7 @@ void setup() {
   setupRoutes();
   server.begin();
 
-  if (!shelly_dimmer.serial_claimed) {
+  if (!serialClaimed()) {
     Serial.printf("HTTP server started; STA %s AP %s\n",
                   WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString().c_str() : "not-connected",
                   ap_started ? WiFi.softAPIP().toString().c_str() : "off");
