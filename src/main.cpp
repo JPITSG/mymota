@@ -59,7 +59,12 @@ constexpr uint32_t kBootRecoveryBootMarker = 0x4d594254;  // MYBT
 constexpr uint32_t kBootRecoveryStableMarker = kBootRecoveryMagic;
 constexpr uint32_t kBootRecoveryEmptyMarker = 0xffffffffUL;
 constexpr uint16_t kGracefulRelaySnapshotVersion = 1;
-constexpr uint32_t kGracefulRelaySnapshotRtcBlock = 64;
+constexpr uint32_t kRtcUserStartBlock = 64;
+constexpr uint32_t kEbootCommandRtcBlocks = 32;
+constexpr uint32_t kRtcUserEndBlock = 192;
+// Arduino ESP8266 stores the pending eboot OTA command at RTC blocks 64-95.
+// Keep myMota's graceful-restart relay snapshot after that reserved range.
+constexpr uint32_t kGracefulRelaySnapshotRtcBlock = kRtcUserStartBlock + kEbootCommandRtcBlocks;
 constexpr uint8_t kLastRelaySnapshotSectorCount = 1;
 constexpr uint8_t kPhyModeAuto = 0;
 constexpr uint8_t kPhyModeFailsafe = WIFI_PHY_MODE_11G;
@@ -1076,6 +1081,8 @@ struct GracefulRelaySnapshot {
 
 static_assert(sizeof(EnergyJournalRecord) % sizeof(uint32_t) == 0, "Energy journal records must be word aligned");
 static_assert(sizeof(GracefulRelaySnapshot) % sizeof(uint32_t) == 0, "Graceful relay snapshots must be word aligned");
+static_assert(kGracefulRelaySnapshotRtcBlock + (sizeof(GracefulRelaySnapshot) / sizeof(uint32_t)) <= kRtcUserEndBlock,
+              "Graceful relay snapshots must fit in ESP8266 RTC user memory");
 
 ESP8266WebServer server(80);
 WiFiClient mqtt_client;
