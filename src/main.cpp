@@ -44,7 +44,8 @@ constexpr uint16_t kConfigVersionV12 = 12;
 constexpr uint16_t kConfigVersionV13 = 13;
 constexpr uint16_t kConfigVersionV14 = 14;
 constexpr uint16_t kConfigVersionV15 = 15;
-constexpr uint16_t kConfigVersion = 16;
+constexpr uint16_t kConfigVersionV16 = 16;
+constexpr uint16_t kConfigVersion = 17;
 constexpr size_t kEepromSize = 4096;
 constexpr size_t kFlashSectorSize = 4096;
 constexpr uint8_t kEnergyJournalSectorCount = 2;
@@ -59,6 +60,7 @@ constexpr uint32_t kBootRecoveryStableMarker = kBootRecoveryMagic;
 constexpr uint32_t kBootRecoveryEmptyMarker = 0xffffffffUL;
 constexpr uint16_t kGracefulRelaySnapshotVersion = 1;
 constexpr uint32_t kGracefulRelaySnapshotRtcBlock = 64;
+constexpr uint8_t kLastRelaySnapshotSectorCount = 1;
 constexpr uint8_t kPhyModeAuto = 0;
 constexpr uint8_t kPhyModeFailsafe = WIFI_PHY_MODE_11G;
 constexpr uint8_t kBootRecoveryLimit = 5;
@@ -778,6 +780,56 @@ struct StoredConfigV15 {
   uint32_t crc;
 };
 
+struct StoredConfigV16 {
+  uint32_t magic;
+  uint16_t version;
+  uint16_t size;
+  char ssid[33];
+  char password[65];
+  char hostname[33];
+  uint8_t phy_mode;
+  uint8_t template_enabled;
+  uint16_t template_base;
+  uint32_t template_flag;
+  char template_name[33];
+  uint16_t template_gpio[kTemplateSlotCount];
+  uint16_t mqtt_port;
+  uint16_t mqtt_keepalive;
+  char mqtt_host[kMqttHostMaxLen + 1];
+  char mqtt_topic[kMqttTopicMaxLen + 1];
+  float energy_total_offset_kwh;
+  uint8_t led_attach[kMaxLedOutputs];
+  uint16_t button_hold_ms;
+  uint8_t button_press_action[kMaxButtons];
+  uint8_t button_hold_action[kMaxButtons];
+  uint16_t energy_mqtt_interval;
+  uint16_t energy_mqtt_change_percent_x10;
+  char button_press_target[kMaxButtons][kButtonActionTargetMaxLen + 1];
+  char button_press_payload[kMaxButtons][kButtonActionPayloadMaxLen + 1];
+  char button_hold_target[kMaxButtons][kButtonActionTargetMaxLen + 1];
+  char button_hold_payload[kMaxButtons][kButtonActionPayloadMaxLen + 1];
+  uint16_t button_debounce_ms;
+  uint8_t input_mode[kMaxButtons];
+  uint8_t input_relay[kMaxButtons];
+  uint8_t input_on_level[kMaxButtons];
+  uint8_t reserved[1];
+  uint8_t button_press_relay[kMaxButtons];
+  uint8_t button_hold_relay[kMaxButtons];
+  uint8_t light_power;
+  uint8_t light_dimmer;
+  uint16_t light_ct;
+  uint8_t light_on_dimmer;
+  uint8_t shelly_dimmer_edge;
+  uint8_t shelly_dimmer_range_min;
+  uint8_t shelly_dimmer_range_max;
+  uint8_t relay_on_boot[kMaxRelays];
+  uint8_t relay_time_enabled[kMaxRelays];
+  uint16_t relay_time_seconds[kMaxRelays];
+  uint16_t energy_mqtt_change_watts;
+  uint16_t energy_reserved;
+  uint32_t crc;
+};
+
 struct StoredConfig {
   uint32_t magic;
   uint16_t version;
@@ -825,6 +877,7 @@ struct StoredConfig {
   uint16_t relay_time_seconds[kMaxRelays];
   uint16_t energy_mqtt_change_watts;
   uint16_t energy_reserved;
+  uint8_t relay_restore_boot[kMaxRelays];
   uint32_t crc;
 };
 
@@ -1085,6 +1138,8 @@ bool boot_recovery_factory_reset = false;
 bool relay_state[kMaxRelays]{};
 bool graceful_relay_restore_valid = false;
 uint16_t graceful_relay_restore_mask = 0;
+bool last_relay_restore_valid = false;
+uint16_t last_relay_restore_mask = 0;
 bool relay_enforcement_pending[kMaxRelays]{};
 uint32_t relay_enforcement_due[kMaxRelays]{};
 bool rotary_suppress_button[kMaxButtons]{};
@@ -1318,6 +1373,7 @@ void setDefaultLightConfig() {
 }
 
 void setDefaultRelayEnforcementConfig(StoredConfig &target) {
+  memset(target.relay_restore_boot, 1, sizeof(target.relay_restore_boot));
   memset(target.relay_on_boot, 0, sizeof(target.relay_on_boot));
   memset(target.relay_time_enabled, 0, sizeof(target.relay_time_enabled));
   memset(target.relay_time_seconds, 0, sizeof(target.relay_time_seconds));
@@ -1663,6 +1719,136 @@ bool persistEnergyTotal(bool force) {
   return true;
 }
 
+uint32_t lastRelaySnapshotFlashBase() {
+  return energyJournalFlashBase() - (static_cast<uint32_t>(kLastRelaySnapshotSectorCount) * kFlashSectorSize);
+}
+
+uint8_t lastRelaySnapshotRecordCount() {
+  return kFlashSectorSize / sizeof(GracefulRelaySnapshot);
+}
+
+uint32_t lastRelaySnapshotSlotAddress(uint8_t slot) {
+  return lastRelaySnapshotFlashBase() + (static_cast<uint32_t>(slot) * sizeof(GracefulRelaySnapshot));
+}
+
+bool readLastRelaySnapshotSlot(uint8_t slot, GracefulRelaySnapshot &snapshot) {
+  if (slot >= lastRelaySnapshotRecordCount()) return false;
+  return ESP.flashRead(lastRelaySnapshotSlotAddress(slot),
+                       reinterpret_cast<uint32_t *>(&snapshot),
+                       sizeof(snapshot));
+}
+
+bool relaySnapshotRecordEmpty(const GracefulRelaySnapshot &snapshot) {
+  const uint32_t *words = reinterpret_cast<const uint32_t *>(&snapshot);
+  for (size_t i = 0; i < sizeof(snapshot) / sizeof(uint32_t); i++) {
+    if (words[i] != 0xffffffffUL) return false;
+  }
+  return true;
+}
+
+bool eraseLastRelaySnapshotSector() {
+  return ESP.flashEraseSector(lastRelaySnapshotFlashBase() / kFlashSectorSize);
+}
+
+bool writeLastRelaySnapshotSlot(uint8_t slot, const GracefulRelaySnapshot &snapshot) {
+  GracefulRelaySnapshot existing{};
+  if (!readLastRelaySnapshotSlot(slot, existing) || !relaySnapshotRecordEmpty(existing)) return false;
+  const uint32_t address = lastRelaySnapshotSlotAddress(slot);
+  GracefulRelaySnapshot writable = snapshot;
+  if (!ESP.flashWrite(address,
+                      reinterpret_cast<uint32_t *>(&writable),
+                      sizeof(writable))) {
+    return false;
+  }
+  GracefulRelaySnapshot verify{};
+  return readLastRelaySnapshotSlot(slot, verify) &&
+         memcmp(&verify, &snapshot, sizeof(snapshot)) == 0 &&
+         gracefulRelaySnapshotValid(verify);
+}
+
+bool clearLastRelaySnapshot() {
+  last_relay_restore_valid = false;
+  last_relay_restore_mask = 0;
+  return eraseLastRelaySnapshotSector();
+}
+
+void loadLastRelaySnapshot() {
+  last_relay_restore_valid = false;
+  last_relay_restore_mask = 0;
+
+  bool found = false;
+  uint16_t found_mask = 0;
+  const uint8_t count = lastRelaySnapshotRecordCount();
+  for (uint8_t slot = 0; slot < count; slot++) {
+    GracefulRelaySnapshot snapshot{};
+    if (!readLastRelaySnapshotSlot(slot, snapshot)) continue;
+    if (relaySnapshotRecordEmpty(snapshot)) break;
+    if (gracefulRelaySnapshotValid(snapshot)) {
+      found = true;
+      found_mask = snapshot.relay_mask;
+    }
+  }
+
+  if (found) {
+    last_relay_restore_valid = true;
+    last_relay_restore_mask = found_mask;
+  }
+}
+
+bool saveLastRelaySnapshot() {
+  if (runtime_template.relay_count == 0) return clearLastRelaySnapshot();
+
+  GracefulRelaySnapshot snapshot{};
+  snapshot.magic = kGracefulRelaySnapshotMagic;
+  snapshot.version = kGracefulRelaySnapshotVersion;
+  snapshot.size = sizeof(GracefulRelaySnapshot);
+  snapshot.chip_id = ESP.getChipId();
+  snapshot.relay_mask = relayStateMask();
+  snapshot.relay_count = runtime_template.relay_count;
+  snapshot.relay_signature = relayTemplateSignature();
+  snapshot.crc = configCrc(snapshot);
+
+  int16_t empty_slot = -1;
+  const uint8_t count = lastRelaySnapshotRecordCount();
+  for (uint8_t slot = 0; slot < count; slot++) {
+    GracefulRelaySnapshot existing{};
+    if (!readLastRelaySnapshotSlot(slot, existing)) continue;
+    if (relaySnapshotRecordEmpty(existing)) {
+      empty_slot = slot;
+      break;
+    }
+  }
+
+  if (empty_slot < 0) {
+    if (!eraseLastRelaySnapshotSector()) return false;
+    empty_slot = 0;
+  }
+  if (!writeLastRelaySnapshotSlot(static_cast<uint8_t>(empty_slot), snapshot)) return false;
+
+  last_relay_restore_mask = snapshot.relay_mask;
+  last_relay_restore_valid = true;
+  return true;
+}
+
+bool lastRelayRestoreState(uint8_t relay) {
+  return last_relay_restore_valid &&
+         relay < kMaxRelays &&
+         relay < runtime_template.relay_count &&
+         (last_relay_restore_mask & (1U << relay));
+}
+
+bool anyRelayRestoreBootEnabled() {
+  for (uint8_t i = 0; i < runtime_template.relay_count && i < kMaxRelays; i++) {
+    if (relayAvailable(i) && config.relay_restore_boot[i]) return true;
+  }
+  return false;
+}
+
+bool saveLastRelaySnapshotIfNeeded() {
+  if (!anyRelayRestoreBootEnabled()) return true;
+  return saveLastRelaySnapshot();
+}
+
 // Boot recovery uses append-only marker writes so normal boots do not erase the
 // EEPROM flash sector. Compaction falls back to EEPROM.commit() only when full.
 uint32_t bootRecoveryMarkerAt(size_t index) {
@@ -1792,9 +1978,10 @@ bool recordBootRecoveryStart() {
 
 bool factoryResetConfig() {
   const bool energy_erased = eraseEnergyJournal();
+  const bool relay_snapshot_erased = clearLastRelaySnapshot();
   setDefaultConfig();
   clearBootRecoveryLogShadow();
-  return energy_erased && commitConfig(true);
+  return energy_erased && relay_snapshot_erased && commitConfig(true);
 }
 
 void maintainBootRecovery() {
@@ -1923,7 +2110,9 @@ void normalizeConfigStrings() {
   }
   memset(config.reserved, 0, sizeof(config.reserved));
   for (uint8_t i = 0; i < kMaxRelays; i++) {
+    config.relay_restore_boot[i] = config.relay_restore_boot[i] ? 1 : 0;
     config.relay_on_boot[i] = config.relay_on_boot[i] ? 1 : 0;
+    if (config.relay_restore_boot[i]) config.relay_on_boot[i] = 0;
     config.relay_time_enabled[i] = config.relay_time_enabled[i] ? 1 : 0;
     if (config.relay_time_enabled[i] &&
         (config.relay_time_seconds[i] < kRelayEnforcementMinSeconds ||
@@ -1971,7 +2160,8 @@ bool saveMqttConfig(const char *host, uint16_t port, const char *topic, uint16_t
 bool saveEnergyConfig(float total_offset_kwh, uint16_t mqtt_interval, uint16_t mqtt_change_percent_x10,
                       uint16_t mqtt_change_watts);
 bool saveLedConfig(const uint8_t *attachments);
-bool saveRelayEnforcementConfig(const uint8_t *on_boot, const uint8_t *time_enabled, const uint16_t *time_seconds);
+bool saveRelayEnforcementConfig(const uint8_t *restore_boot, const uint8_t *on_boot,
+                                const uint8_t *time_enabled, const uint16_t *time_seconds);
 bool saveButtonConfig(uint16_t hold_ms, uint16_t debounce_ms,
                       const uint8_t *press_actions, const uint8_t *hold_actions,
                       const char press_targets[][kButtonActionTargetMaxLen + 1],
@@ -2010,6 +2200,28 @@ bool loadConfig() {
     return config_ok;
   }
 
+  if (header.version == kConfigVersionV16 && header.size == sizeof(StoredConfigV16)) {
+    StoredConfigV16 *old_config = new StoredConfigV16;
+    if (!old_config) {
+      setDefaultConfig();
+      return false;
+    }
+    EEPROM.get(0, *old_config);
+    if (old_config->crc != configCrc(*old_config)) {
+      delete old_config;
+      setDefaultConfig();
+      return false;
+    }
+    memset(&config, 0, sizeof(config));
+    memcpy(&config, old_config, offsetof(StoredConfigV16, crc));
+    for (uint8_t i = 0; i < kMaxRelays; i++) {
+      config.relay_restore_boot[i] = old_config->relay_on_boot[i] ? 0 : 1;
+    }
+    delete old_config;
+    commitConfig();
+    return config_ok;
+  }
+
   if (header.version == kConfigVersionV15 && header.size == sizeof(StoredConfigV15)) {
     StoredConfigV15 *old_config = new StoredConfigV15;
     if (!old_config) {
@@ -2026,6 +2238,9 @@ bool loadConfig() {
     memcpy(&config, old_config, offsetof(StoredConfigV15, crc));
     config.energy_mqtt_change_watts = 0;
     config.energy_reserved = 0;
+    for (uint8_t i = 0; i < kMaxRelays; i++) {
+      config.relay_restore_boot[i] = old_config->relay_on_boot[i] ? 0 : 1;
+    }
     delete old_config;
     commitConfig();
     return config_ok;
@@ -2528,12 +2743,15 @@ bool saveLedConfig(const uint8_t *attachments) {
   return commitConfig();
 }
 
-bool saveRelayEnforcementConfig(const uint8_t *on_boot, const uint8_t *time_enabled, const uint16_t *time_seconds) {
+bool saveRelayEnforcementConfig(const uint8_t *restore_boot, const uint8_t *on_boot,
+                                const uint8_t *time_enabled, const uint16_t *time_seconds) {
+  memcpy(config.relay_restore_boot, restore_boot, sizeof(config.relay_restore_boot));
   memcpy(config.relay_on_boot, on_boot, sizeof(config.relay_on_boot));
   memcpy(config.relay_time_enabled, time_enabled, sizeof(config.relay_time_enabled));
   memcpy(config.relay_time_seconds, time_seconds, sizeof(config.relay_time_seconds));
   if (!commitConfig()) return false;
   refreshRelayEnforcementRuntime(true);
+  saveLastRelaySnapshotIfNeeded();
   return true;
 }
 
@@ -3863,7 +4081,8 @@ bool ledConfigDiffers(const StoredConfig &a, const StoredConfig &b) {
 }
 
 bool relayEnforcementConfigDiffers(const StoredConfig &a, const StoredConfig &b) {
-  return memcmp(a.relay_on_boot, b.relay_on_boot, sizeof(a.relay_on_boot)) != 0 ||
+  return memcmp(a.relay_restore_boot, b.relay_restore_boot, sizeof(a.relay_restore_boot)) != 0 ||
+         memcmp(a.relay_on_boot, b.relay_on_boot, sizeof(a.relay_on_boot)) != 0 ||
          memcmp(a.relay_time_enabled, b.relay_time_enabled, sizeof(a.relay_time_enabled)) != 0 ||
          memcmp(a.relay_time_seconds, b.relay_time_seconds, sizeof(a.relay_time_seconds)) != 0;
 }
@@ -3968,7 +4187,9 @@ void appendSettingsExportJson(String &out) {
   out += F("],\"relay_enforcement\":[");
   for (uint8_t i = 0; i < kMaxRelays; i++) {
     if (i) out += ',';
-    out += F("{\"on_boot\":");
+    out += F("{\"restore_boot\":");
+    out += config.relay_restore_boot[i] ? F("true") : F("false");
+    out += F(",\"on_boot\":");
     out += config.relay_on_boot[i] ? F("true") : F("false");
     out += F(",\"time_based\":");
     out += config.relay_time_enabled[i] ? F("true") : F("false");
@@ -4278,10 +4499,22 @@ void importSettingsRelayEnforcement(JsonObjectConst root, StoredConfig &target, 
     }
     if (!relayAvailableIn(rt, i)) continue;
 
+    if (relay.containsKey("restore_boot")) {
+      JsonVariantConst restore_boot = relay["restore_boot"];
+      if (restore_boot.is<bool>()) {
+        target.relay_restore_boot[i] = restore_boot.as<bool>() ? 1 : 0;
+        if (target.relay_restore_boot[i]) target.relay_on_boot[i] = 0;
+        recordSettingsApplied(stats);
+      } else {
+        recordSettingsSkipped(stats, String(F("relay_enforcement[")) + String(i) + F("].restore_boot"));
+      }
+    }
+
     if (relay.containsKey("on_boot")) {
       JsonVariantConst on_boot = relay["on_boot"];
       if (on_boot.is<bool>()) {
         target.relay_on_boot[i] = on_boot.as<bool>() ? 1 : 0;
+        if (target.relay_on_boot[i]) target.relay_restore_boot[i] = 0;
         recordSettingsApplied(stats);
       } else {
         recordSettingsSkipped(stats, String(F("relay_enforcement[")) + String(i) + F("].on_boot"));
@@ -6541,6 +6774,7 @@ void setRelay(uint8_t relay, bool on) {
   }
   if (changed) {
     scheduleMqttRelayPublish(relay);
+    saveLastRelaySnapshotIfNeeded();
     if (energy.present && was_on && !on) {
       energy_persist_requested = true;
       scheduleMqttRelayOffEnergyReport(relay);
@@ -6561,23 +6795,14 @@ bool gracefulRelayRestoreState(uint8_t relay) {
          (graceful_relay_restore_mask & (1U << relay));
 }
 
-void applyGracefulRelayRestore() {
-  if (!graceful_relay_restore_valid) return;
-  for (uint8_t i = 0; i < runtime_template.relay_count && i < kMaxRelays; i++) {
-    if (!hasPin(runtime_template.relays[i])) continue;
-    const bool on = gracefulRelayRestoreState(i);
-    relay_state[i] = on;
-    writeAssignedPin(runtime_template.relays[i], on);
+bool relayBootState(uint8_t relay) {
+  if (relay < kMaxRelays && config.relay_restore_boot[relay]) {
+    if (last_relay_restore_valid) return lastRelayRestoreState(relay);
+    if (graceful_relay_restore_valid) return gracefulRelayRestoreState(relay);
+    return false;
   }
-  graceful_relay_restore_valid = false;
-  graceful_relay_restore_mask = 0;
-}
-
-void applyRelayOnBootEnforcement() {
-  for (uint8_t i = 0; i < runtime_template.relay_count && i < kMaxRelays; i++) {
-    if (!relayAvailable(i) || !config.relay_on_boot[i]) continue;
-    setRelay(i, true);
-  }
+  if (graceful_relay_restore_valid) return gracefulRelayRestoreState(relay);
+  return relay < kMaxRelays && config.relay_on_boot[relay];
 }
 
 void maintainRelayEnforcement() {
@@ -6990,7 +7215,7 @@ void setupDevicePins() {
   memset(relay_enforcement_due, 0, sizeof(relay_enforcement_due));
 
   for (uint8_t i = 0; i < kMaxRelays; i++) {
-    relay_state[i] = gracefulRelayRestoreState(i);
+    relay_state[i] = relayBootState(i);
     if (!hasPin(runtime_template.relays[i])) continue;
     writeAssignedPin(runtime_template.relays[i], relay_state[i]);
     pinMode(runtime_template.relays[i].pin, OUTPUT);
@@ -7023,8 +7248,9 @@ void setupDevicePins() {
       }
     }
   }
-  applyGracefulRelayRestore();
-  applyRelayOnBootEnforcement();
+  graceful_relay_restore_valid = false;
+  graceful_relay_restore_mask = 0;
+  saveLastRelaySnapshotIfNeeded();
 
   setupRotaryEncoder();
   setupEnergyMonitor();
@@ -7096,13 +7322,14 @@ void appendFooter(String &page, bool live_poll = true, bool reboot_wait = false)
   page += F("}).catch(function(){});}");
   page += F("function ba(s){var k=s.getAttribute('data-key'),v=s.value,b=document.getElementById('extra-'+k);if(!b)return;var t=b.querySelector('.target-input'),p=b.querySelector('.payload-input'),rr=b.querySelector('.relay-row'),tr=b.querySelector('.target-row'),pr=b.querySelector('.payload-row'),tl=b.querySelector('.target-label'),h=b.querySelector('.action-hint');b.className=(v=='1'||v=='2'||v=='3')?'action-extra show':'action-extra';if(rr)rr.className=v=='1'?'row relay-row':'row relay-row hidden';if(tr)tr.className=(v=='2'||v=='3')?'row target-row':'row target-row hidden';if(pr)pr.className=(v=='2')?'row payload-row':'row payload-row hidden';if(v=='1'){if(h)h.textContent='Toggles the configured output.';}else if(v=='2'){if(t&&(!t.value||t.value.indexOf('http://')==0))t.value=t.getAttribute('data-default-topic');if(p&&!p.value)p.value=p.getAttribute('data-default-payload');if(tl)tl.textContent='MQTT topic';if(h)h.textContent='Publishes this topic and payload through the configured MQTT broker.';}else if(v=='3'){if(tl)tl.textContent='Webhook URL';if(h)h.textContent='Executes an HTTP GET request; only http:// URLs are supported.';}}");
   page += F("function im(s){var k=s.getAttribute('data-input'),v=s.value,b=document.getElementById('input-button-'+k),w=document.getElementById('input-switch-'+k);if(b)b.className=v=='0'?'mode-extra show':'mode-extra';if(w)w.className=v=='1'?'mode-extra show':'mode-extra';}");
+  page += F("function rb(s){var k=s.getAttribute('data-relay'),o=document.getElementById('relay_on_boot'+k),r=document.getElementById('relay_restore_boot'+k);if(!o||!r||!s.checked)return;if(s==r)o.checked=false;else if(s==o)r.checked=false;}");
   page += F("function ts(){var s=document.getElementById('known-template'),t=document.getElementById('template-json');if(!s||!t)return;var v=t.value.trim(),m=0;for(var i=1;i<s.options.length;i++){if(s.options[i].getAttribute('data-json')==v){m=i;break;}}s.selectedIndex=m;}");
   page += F("function tp(s){var o=s.options[s.selectedIndex],t=document.getElementById('template-json');if(o&&t&&o.getAttribute('data-json')){t.value=o.getAttribute('data-json');ts();}}");
   page += F("function sf(i){var t=document.getElementById('settings-json');if(!i.files||!i.files[0]||!t)return;var r=new FileReader();r.onload=function(){t.value=String(r.result||'');};r.readAsText(i.files[0]);}");
   page += F("function vf(f){var t=(f.getAttribute('data-target')||'').toLowerCase(),i=f.querySelector('input[type=file]');if(!i||!t)return true;var n=i.files&&i.files[0]?i.files[0].name.toLowerCase():'';var o=!n||n.indexOf(t)>=0;i.setCustomValidity(o?'':'Firmware file name must include '+t);return o;}");
   page += F("function fw(){var a=document.querySelectorAll('.firmware-upload');for(var i=0;i<a.length;i++){(function(f){var x=f.querySelector('input[type=file]');if(x)x.onchange=function(){vf(f);this.reportValidity();};f.addEventListener('submit',function(e){if(!vf(f)){e.preventDefault();if(x)x.reportValidity();}},true);})(a[i]);}}");
   page += F("function lu(i){var e=i.getAttribute('data-live'),s=i.getAttribute('data-suffix')||'';if(e)t(e,i.value+s);}function la(i){lu(i);var fd=new FormData();fd.append(i.name,i.value);fd.append('_inline','1');fetch('/light',{method:'POST',body:fd,cache:'no-store'}).then(function(r){if(!r.ok)return r.text().then(function(x){throw Error(x||r.statusText)});live();}).catch(function(x){alert(x.message||x);});}");
-  page += F("function bi(){var a=document.querySelectorAll('.button-action');for(var i=0;i<a.length;i++){a[i].onchange=function(){ba(this)};ba(a[i]);}var m=document.querySelectorAll('.input-mode');for(var j=0;j<m.length;j++){m[j].onchange=function(){im(this)};im(m[j]);}var l=document.querySelectorAll('.light-auto');for(var k=0;k<l.length;k++){l[k].oninput=function(){lu(this)};l[k].onchange=function(){la(this)};}var t=document.getElementById('template-json');if(t){t.oninput=ts;t.onchange=ts;}ts();}bi();fw();");
+  page += F("function bi(){var a=document.querySelectorAll('.button-action');for(var i=0;i<a.length;i++){a[i].onchange=function(){ba(this)};ba(a[i]);}var m=document.querySelectorAll('.input-mode');for(var j=0;j<m.length;j++){m[j].onchange=function(){im(this)};im(m[j]);}var c=document.querySelectorAll('.relay-boot-choice');for(var q=0;q<c.length;q++){c[q].onchange=function(){rb(this)};rb(c[q]);}var l=document.querySelectorAll('.light-auto');for(var k=0;k<l.length;k++){l[k].oninput=function(){lu(this)};l[k].onchange=function(){la(this)};}var t=document.getElementById('template-json');if(t){t.oninput=ts;t.onchange=ts;}ts();}bi();fw();");
   page += F("document.addEventListener('click',function(e){var b=e.target;while(b&&b.tagName!='BUTTON'&&b.tagName!='INPUT')b=b.parentNode;if(!b||!b.form)return;var t=(b.type||'').toLowerCase();if(t=='submit'||t=='image')b.form._s=b;},true);");
   page += F("document.addEventListener('submit',function(e){var f=e.target;if(!f||f.getAttribute('data-inline')!='1')return;e.preventDefault();var fd=new FormData(f),b=e.submitter||f._s;if(b&&b.name)fd.append(b.name,b.value);fd.append('_inline','1');fetch(f.getAttribute('action')||location.pathname,{method:(f.method||'POST').toUpperCase(),body:fd,cache:'no-store'}).then(function(r){if(!r.ok)return r.text().then(function(x){throw Error(x||r.statusText)});live();}).catch(function(x){alert(x.message||x);});},true);");
   if (live_poll) {
@@ -7593,11 +7820,23 @@ void appendRelayEnforcementSettings(String &page) {
     page += String(i + 1);
     page += F("</strong> <span class='hint'>");
     page += pinName(runtime_template.relays[i].pin);
-    page += F("</span><div class='row'><label><input type='checkbox' name='relay_on_boot");
+    page += F("</span><div class='row'><label><input class='relay-boot-choice' id='relay_on_boot");
+    page += String(i);
+    page += F("' data-relay='");
+    page += String(i);
+    page += F("' type='checkbox' name='relay_on_boot");
     page += String(i);
     page += F("' value='1'");
     if (config.relay_on_boot[i]) page += F(" checked");
-    page += F(">Turn on at boot</label></div><div class='row'><label><input type='checkbox' name='relay_time_enabled");
+    page += F(">Turn on at boot</label></div><div class='row'><label><input class='relay-boot-choice' id='relay_restore_boot");
+    page += String(i);
+    page += F("' data-relay='");
+    page += String(i);
+    page += F("' type='checkbox' name='relay_restore_boot");
+    page += String(i);
+    page += F("' value='1'");
+    if (config.relay_restore_boot[i]) page += F(" checked");
+    page += F(">Restore last state at boot</label></div><div class='row'><label><input type='checkbox' name='relay_time_enabled");
     page += String(i);
     page += F("' value='1'");
     if (config.relay_time_enabled[i]) page += F(" checked");
@@ -8248,9 +8487,11 @@ void handleRelayEnforcementSave() {
     return;
   }
 
+  uint8_t restore_boot[kMaxRelays];
   uint8_t on_boot[kMaxRelays];
   uint8_t time_enabled[kMaxRelays];
   uint16_t time_seconds[kMaxRelays];
+  memcpy(restore_boot, config.relay_restore_boot, sizeof(restore_boot));
   memcpy(on_boot, config.relay_on_boot, sizeof(on_boot));
   memcpy(time_enabled, config.relay_time_enabled, sizeof(time_enabled));
   memcpy(time_seconds, config.relay_time_seconds, sizeof(time_seconds));
@@ -8258,6 +8499,8 @@ void handleRelayEnforcementSave() {
   for (uint8_t i = 0; i < runtime_template.relay_count && i < kMaxRelays; i++) {
     if (!relayAvailable(i)) continue;
 
+    String restore_boot_arg = F("relay_restore_boot");
+    restore_boot_arg += String(i);
     String on_boot_arg = F("relay_on_boot");
     on_boot_arg += String(i);
     String time_enabled_arg = F("relay_time_enabled");
@@ -8265,7 +8508,10 @@ void handleRelayEnforcementSave() {
     String seconds_arg = F("relay_time_seconds");
     seconds_arg += String(i);
 
+    restore_boot[i] = server.hasArg(restore_boot_arg) ? 1 : 0;
     on_boot[i] = server.hasArg(on_boot_arg) ? 1 : 0;
+    if (on_boot[i]) restore_boot[i] = 0;
+    else if (restore_boot[i]) on_boot[i] = 0;
     time_enabled[i] = server.hasArg(time_enabled_arg) ? 1 : 0;
 
     String seconds_text = server.hasArg(seconds_arg) ? server.arg(seconds_arg) : String();
@@ -8287,7 +8533,7 @@ void handleRelayEnforcementSave() {
     }
   }
 
-  if (!saveRelayEnforcementConfig(on_boot, time_enabled, time_seconds)) {
+  if (!saveRelayEnforcementConfig(restore_boot, on_boot, time_enabled, time_seconds)) {
     server.send(500, F("text/plain"), F("Could not save relay enforcement settings"));
     return;
   }
@@ -9154,7 +9400,10 @@ void handleSettingsImport() {
     }
     updateLightOutputs();
   }
-  if (relay_enforcement_changed) refreshRelayEnforcementRuntime(true);
+  if (relay_enforcement_changed) {
+    refreshRelayEnforcementRuntime(true);
+    saveLastRelaySnapshotIfNeeded();
+  }
   if (led_changed || input_changed) updateDeviceLeds(true);
 
   page += F("<p class='ok'>Settings imported.</p>");
@@ -9855,6 +10104,7 @@ void setup() {
   loadEnergyJournal();
   decodeTemplateConfig();
   loadGracefulRelaySnapshot();
+  loadLastRelaySnapshot();
   setupDevicePins();
   connectWifi();
   boot_id = makeBootId();
