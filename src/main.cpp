@@ -7901,7 +7901,7 @@ void appendFooter(String &page, bool live_poll = true, bool reboot_wait = false)
   page += F("function p(i,v,c){var e=document.getElementById(i);if(e){e.textContent=v;e.className=c;}}");
   page += F("function fmt(v,d,u){return v==null?'n/a':Number(v).toFixed(d)+(u||'');}");
   page += F("function live(){fh().then(function(d){");
-  page += F("t('live-heap',d.heap+' bytes');t('live-uptime',d.uptime+'s');t('live-active-phy',d.active_phy);");
+  page += F("t('live-heap',d.heap+' bytes');if(d.flash){t('live-flash-used',d.flash.used+' bytes');t('live-flash-total',d.flash.total+' bytes');t('live-flash-free',d.flash.free+' bytes');}t('live-uptime',d.uptime+'s');t('live-active-phy',d.active_phy);");
   page += F("if(d.perf){t('live-loop-load',d.perf.loop_load+'%');t('live-loop-hz',d.perf.loop_hz+'/s');t('live-loop-max',Number(d.perf.loop_max_us/1000).toFixed(1)+' ms');}");
   page += F("t('live-recovery',d.recovery.fast_boot_count+'/'+d.recovery.limit);");
   page += F("p('live-wifi',d.wifi?'connected':'disconnected',d.wifi?'pill ok':'pill bad');t('live-ssid',d.wifi_ssid||'n/a');t('live-ip',d.ip||'n/a');t('live-rssi',d.rssi==null?'n/a':d.rssi+' dBm');");
@@ -7961,6 +7961,20 @@ void endStreamedResponse(String &chunk) {
   server.chunkedResponseFinalize();
 }
 
+uint32_t flashUsedBytes() {
+  return ESP.getSketchSize();
+}
+
+uint32_t flashTotalBytes() {
+  return ESP.getFlashChipRealSize();
+}
+
+uint32_t flashFreeBytes() {
+  const uint32_t used = flashUsedBytes();
+  const uint32_t total = flashTotalBytes();
+  return total > used ? total - used : 0;
+}
+
 void appendStatusBlock(String &page) {
   page += F("<section class='panel wide'><h2>System Status</h2><div class='kv'>");
   page += F("<span>Version</span><div><code>");
@@ -7973,7 +7987,13 @@ void appendStatusBlock(String &page) {
   page += htmlEscape(config.hostname);
   page += F("</code></div><span>Heap</span><div><code id='live-heap'>");
   page += String(ESP.getFreeHeap());
-  page += F(" bytes</code></div><span>Uptime</span><div><code id='live-uptime'>");
+  page += F(" bytes</code></div><span>Flash</span><div><code id='live-flash-used'>");
+  page += String(flashUsedBytes());
+  page += F(" bytes</code> (used) / <code id='live-flash-total'>");
+  page += String(flashTotalBytes());
+  page += F(" bytes</code> (total) / <code id='live-flash-free'>");
+  page += String(flashFreeBytes());
+  page += F(" bytes</code> (free)</div><span>Uptime</span><div><code id='live-uptime'>");
   page += String(millis() / 1000);
   page += F("s</code></div><span>Loop load</span><div><code id='live-loop-load'>");
   page += String(perf_last_loop_load);
@@ -8789,8 +8809,8 @@ void handleRoot() {
   page += F("<input type='file' name='firmware' accept='.bin,.bin.gz' required>");
   page += F("<div class='row'><label><input class='firmware-verify' type='checkbox' checked>Verify firmware target on device</label></div>");
   page += F("<button type='submit'>Upload firmware</button></form>");
-  page += F("<div class='actions'><a class='btn secondary' href='/reboot-soft'>Reboot Soft</a><a class='btn secondary' href='/reboot-cold'>Reboot Cold</a><a class='btn danger' href='/force-reset' onclick=\"return confirm('Force reset skips normal shutdown and may drop unsaved runtime state. Continue?')\">Force Reset</a></div>");
-  page += F("<form method='post' action='/factory-reset' onsubmit=\"return confirm('Factory reset will delete Wi-Fi, template, MQTT, input, LED, relay enforcement, light, and energy settings. Continue?')\"><button class='danger' type='submit'>Factory reset</button></form></section>");
+  page += F("<div class='actions'><a class='btn secondary' href='/reboot-soft'>Reboot Soft</a><a class='btn secondary' href='/reboot-cold'>Reboot Cold</a></div>");
+  page += F("<div class='actions'><form class='inline' method='post' action='/factory-reset' onsubmit=\"return confirm('Factory reset will delete Wi-Fi, template, MQTT, input, LED, relay enforcement, light, and energy settings. Continue?')\"><button class='danger' type='submit'>Factory Reset</button></form><a class='btn danger' href='/force-reset' onclick=\"return confirm('Force reset skips normal shutdown and may drop unsaved runtime state. Continue?')\">Force Reset</a></div></section>");
   flushStreamChunk(page);
 
   appendSettingsForm(page);
@@ -10253,6 +10273,13 @@ void handleHealth() {
   out += boot_id;
   out += F(",\"heap\":");
   out += ESP.getFreeHeap();
+  out += F(",\"flash\":{\"used\":");
+  out += flashUsedBytes();
+  out += F(",\"total\":");
+  out += flashTotalBytes();
+  out += F(",\"free\":");
+  out += flashFreeBytes();
+  out += F("}");
   out += F(",\"uptime\":");
   out += millis() / 1000;
   out += F(",\"perf\":{\"loop_hz\":");
