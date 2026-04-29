@@ -58,6 +58,7 @@ constexpr uint32_t kBootRecoveryStableMs = 30000;
 constexpr uint32_t kBootRecoveryBootMarker = 0x4d594254;  // MYBT
 constexpr uint32_t kBootRecoveryStableMarker = kBootRecoveryMagic;
 constexpr uint32_t kBootRecoveryEmptyMarker = 0xffffffffUL;
+constexpr uint8_t kUpdateErrorTargetMismatch = 250;
 constexpr uint16_t kGracefulRelaySnapshotVersion = 1;
 constexpr uint32_t kRtcUserStartBlock = 64;
 constexpr uint32_t kEbootCommandRtcBlocks = 32;
@@ -172,6 +173,14 @@ constexpr uint8_t kButtonActionRelayToggle = 1;
 constexpr uint8_t kButtonActionMqtt = 2;
 constexpr uint8_t kButtonActionWebhook = 3;
 constexpr uint8_t kButtonRelayUnset = 255;
+
+enum RestartMode : uint8_t {
+  kRestartModeSoft = 0,
+  kRestartModeCold = 1,
+  kRestartModeForce = 2,
+  kRestartModeOta = 3,
+};
+
 constexpr uint8_t kInputKindButton = 0;
 constexpr uint8_t kInputKindSwitch = 1;
 constexpr uint8_t kInputModeButton = 0;
@@ -1103,7 +1112,7 @@ uint8_t update_error = UPDATE_ERROR_OK;
 uint32_t update_max_size = 0;
 uint32_t restart_at = 0;
 bool restart_pending = false;
-bool restart_preserve_relays = false;
+RestartMode restart_mode = kRestartModeCold;
 uint32_t disconnected_since = 0;
 bool disconnected_timer_active = false;
 uint32_t last_wifi_begin_attempt = 0;
@@ -1522,14 +1531,22 @@ void setDefaultConfig() {
 
 bool commitConfig(bool force_commit = false);
 
-void scheduleRestart(uint32_t delay_ms, bool preserve_relays = false) {
+void scheduleRestart(uint32_t delay_ms, RestartMode mode) {
   restart_at = millis() + delay_ms;
   restart_pending = true;
-  restart_preserve_relays = preserve_relays;
+  restart_mode = mode;
+}
+
+void scheduleRestart(uint32_t delay_ms, bool preserve_relays = false) {
+  scheduleRestart(delay_ms, preserve_relays ? kRestartModeSoft : kRestartModeCold);
 }
 
 bool restartDue() {
   return restart_pending && static_cast<int32_t>(millis() - restart_at) >= 0;
+}
+
+bool restartBypassesMaintainers() {
+  return restart_pending && (restart_mode == kRestartModeForce || restart_mode == kRestartModeOta);
 }
 
 uint32_t makeBootId() {
@@ -4978,8 +4995,24 @@ const __FlashStringHelper *updateErrorName(uint8_t error) {
     case UPDATE_ERROR_MAGIC_BYTE: return F("invalid image magic");
     case UPDATE_ERROR_BOOTSTRAP: return F("bad boot mode");
     case UPDATE_ERROR_SIGN: return F("signature failed");
+    case kUpdateErrorTargetMismatch: return F("filename target mismatch");
     default: return F("unknown");
   }
+}
+
+bool truthyUpdateVerifyArg() {
+  if (!server.hasArg(F("verify"))) return true;
+  String value = server.arg(F("verify"));
+  value.trim();
+  value.toLowerCase();
+  return !(value == F("0") || value == F("false") || value == F("off") || value == F("no"));
+}
+
+bool firmwareFilenameMatchesTarget(String filename) {
+  filename.toLowerCase();
+  String target = F(MYMOTA_TARGET);
+  target.toLowerCase();
+  return filename.indexOf(target) >= 0;
 }
 
 bool mqttConfigured() {
@@ -7333,8 +7366,9 @@ void appendFooter(String &page, bool live_poll = true, bool reboot_wait = false)
   page += F("function ts(){var s=document.getElementById('known-template'),t=document.getElementById('template-json');if(!s||!t)return;var v=t.value.trim(),m=0;for(var i=1;i<s.options.length;i++){if(s.options[i].getAttribute('data-json')==v){m=i;break;}}s.selectedIndex=m;}");
   page += F("function tp(s){var o=s.options[s.selectedIndex],t=document.getElementById('template-json');if(o&&t&&o.getAttribute('data-json')){t.value=o.getAttribute('data-json');ts();}}");
   page += F("function sf(i){var t=document.getElementById('settings-json');if(!i.files||!i.files[0]||!t)return;var r=new FileReader();r.onload=function(){t.value=String(r.result||'');};r.readAsText(i.files[0]);}");
-  page += F("function vf(f){var t=(f.getAttribute('data-target')||'').toLowerCase(),i=f.querySelector('input[type=file]');if(!i||!t)return true;var n=i.files&&i.files[0]?i.files[0].name.toLowerCase():'';var o=!n||n.indexOf(t)>=0;i.setCustomValidity(o?'':'Firmware file name must include '+t);return o;}");
-  page += F("function fw(){var a=document.querySelectorAll('.firmware-upload');for(var i=0;i<a.length;i++){(function(f){var x=f.querySelector('input[type=file]');if(x)x.onchange=function(){vf(f);this.reportValidity();};f.addEventListener('submit',function(e){if(!vf(f)){e.preventDefault();if(x)x.reportValidity();}},true);})(a[i]);}}");
+  page += F("function vf(f){var t=(f.getAttribute('data-target')||'').toLowerCase(),i=f.querySelector('input[type=file]'),c=f.querySelector('.firmware-verify');if(!i||!t)return true;if(c&&!c.checked){i.setCustomValidity('');return true;}var n=i.files&&i.files[0]?i.files[0].name.toLowerCase():'';var o=!n||n.indexOf(t)>=0;i.setCustomValidity(o?'':'Firmware file name must include '+t);return o;}");
+  page += F("function fu(f){var c=f.querySelector('.firmware-verify');f.action='/update?verify='+(!c||c.checked?'1':'0');}");
+  page += F("function fw(){var a=document.querySelectorAll('.firmware-upload');for(var i=0;i<a.length;i++){(function(f){var x=f.querySelector('input[type=file]'),c=f.querySelector('.firmware-verify');fu(f);if(x)x.onchange=function(){vf(f);this.reportValidity();};if(c)c.onchange=function(){fu(f);vf(f);if(x)x.reportValidity();};f.addEventListener('submit',function(e){fu(f);if(!vf(f)){e.preventDefault();if(x)x.reportValidity();}},true);})(a[i]);}}");
   page += F("function lu(i){var e=i.getAttribute('data-live'),s=i.getAttribute('data-suffix')||'';if(e)t(e,i.value+s);}function la(i){lu(i);var fd=new FormData();fd.append(i.name,i.value);fd.append('_inline','1');fetch('/light',{method:'POST',body:fd,cache:'no-store'}).then(function(r){if(!r.ok)return r.text().then(function(x){throw Error(x||r.statusText)});live();}).catch(function(x){alert(x.message||x);});}");
   page += F("function bi(){var a=document.querySelectorAll('.button-action');for(var i=0;i<a.length;i++){a[i].onchange=function(){ba(this)};ba(a[i]);}var m=document.querySelectorAll('.input-mode');for(var j=0;j<m.length;j++){m[j].onchange=function(){im(this)};im(m[j]);}var c=document.querySelectorAll('.relay-boot-choice');for(var q=0;q<c.length;q++){c[q].onchange=function(){rb(this)};rb(c[q]);}var l=document.querySelectorAll('.light-auto');for(var k=0;k<l.length;k++){l[k].oninput=function(){lu(this)};l[k].onchange=function(){la(this)};}var t=document.getElementById('template-json');if(t){t.oninput=ts;t.onchange=ts;}ts();}bi();fw();");
   page += F("document.addEventListener('click',function(e){var b=e.target;while(b&&b.tagName!='BUTTON'&&b.tagName!='INPUT')b=b.parentNode;if(!b||!b.form)return;var t=(b.type||'').toLowerCase();if(t=='submit'||t=='image')b.form._s=b;},true);");
@@ -8180,11 +8214,13 @@ void handleRoot() {
   appendMqttForm(page);
   flushStreamChunk(page);
 
-  page += F("<section class='panel'><h2>Firmware</h2><form class='firmware-upload' method='post' action='/update' enctype='multipart/form-data' data-target='");
+  page += F("<section class='panel'><h2>Firmware</h2><form class='firmware-upload' method='post' action='/update?verify=1' enctype='multipart/form-data' data-target='");
   page += F(MYMOTA_TARGET);
   page += F("'>");
-  page += F("<input type='file' name='firmware' accept='.bin,.bin.gz' required><br><button type='submit'>Upload firmware</button></form>");
-  page += F("<p><a class='btn secondary' href='/reboot'>Reboot</a></p>");
+  page += F("<input type='file' name='firmware' accept='.bin,.bin.gz' required>");
+  page += F("<div class='row'><label><input class='firmware-verify' type='checkbox' checked>Verify firmware target on device</label></div>");
+  page += F("<button type='submit'>Upload firmware</button></form>");
+  page += F("<div class='actions'><a class='btn secondary' href='/reboot-soft'>Reboot Soft</a><a class='btn secondary' href='/reboot-cold'>Reboot Cold</a><a class='btn danger' href='/force-reset' onclick=\"return confirm('Force reset skips normal shutdown and may drop unsaved runtime state. Continue?')\">Force Reset</a></div>");
   page += F("<form method='post' action='/factory-reset' onsubmit=\"return confirm('Factory reset will delete Wi-Fi, template, MQTT, input, LED, relay enforcement, light, and energy settings. Continue?')\"><button class='danger' type='submit'>Factory reset</button></form></section>");
   flushStreamChunk(page);
 
@@ -9115,15 +9151,37 @@ void handleCmnd() {
   server.send(200, F("application/json"), out);
 }
 
-void handleReboot() {
+void sendRestartPage(const __FlashStringHelper *title, const __FlashStringHelper *message,
+                     RestartMode mode, uint32_t delay_ms) {
   String page;
-  page.reserve(700);
-  appendHeader(page, F("myMota Reboot"));
-  page += F("<p class='ok'>Rebooting.</p>");
+  page.reserve(900);
+  appendHeader(page, title);
+  page += F("<p class='ok'>");
+  page += message;
+  page += F("</p>");
   page += F("<p>The page will return to the dashboard when the device is reachable again.</p>");
   appendFooter(page, false, true);
   sendHtml(page);
-  scheduleRestart(500, true);
+  scheduleRestart(delay_ms, mode);
+}
+
+void handleRebootSoft() {
+  sendRestartPage(F("myMota Reboot Soft"), F("Soft rebooting with relay state preserved."),
+                  kRestartModeSoft, 500);
+}
+
+void handleRebootCold() {
+  sendRestartPage(F("myMota Reboot Cold"), F("Cold rebooting without preserving relay state."),
+                  kRestartModeCold, 500);
+}
+
+void handleForceReset() {
+  sendRestartPage(F("myMota Force Reset"), F("Force reset armed."),
+                  kRestartModeForce, 250);
+}
+
+void handleReboot() {
+  handleRebootSoft();
 }
 
 void handleFactoryReset() {
@@ -9827,7 +9885,7 @@ void handleUpdateDone() {
     page += F("<p>The page will return to the dashboard when the device is reachable again.</p>");
     appendFooter(page, false, true);
     sendHtml(page);
-    scheduleRestart(1200, true);
+    scheduleRestart(350, kRestartModeOta);
     return;
   }
 
@@ -9847,16 +9905,23 @@ void handleUpdateUpload() {
   if (upload.status == UPLOAD_FILE_START) {
     update_started = false;
     update_ok = false;
-    update_mqtt_paused = true;
+    update_mqtt_paused = false;
     update_error = UPDATE_ERROR_OK;
     update_max_size = 0;
+    if (upload.filename.length() == 0) {
+      update_error = UPDATE_ERROR_SIZE;
+      return;
+    }
+    if (truthyUpdateVerifyArg() && !firmwareFilenameMatchesTarget(upload.filename)) {
+      update_error = kUpdateErrorTargetMismatch;
+      return;
+    }
+    update_mqtt_paused = true;
+    saveGracefulRelaySnapshot();
     persistLightConfig(true);
     persistEnergyTotal(true);
     mqttStop();
     WiFiUDP::stopAll();
-    if (upload.filename.length() == 0) {
-      update_error = UPDATE_ERROR_SIZE;
-    }
     return;
   }
 
@@ -10060,6 +10125,9 @@ void setupRoutes() {
   server.on(F("/light"), HTTP_POST, handleLightSave);
   server.on(F("/cm"), HTTP_GET, handleCmnd);
   server.on(F("/reboot"), HTTP_GET, handleReboot);
+  server.on(F("/reboot-soft"), HTTP_GET, handleRebootSoft);
+  server.on(F("/reboot-cold"), HTTP_GET, handleRebootCold);
+  server.on(F("/force-reset"), HTTP_GET, handleForceReset);
   server.on(F("/factory-reset"), HTTP_POST, handleFactoryReset);
   server.on(F("/settings/export"), HTTP_GET, handleSettingsExport);
   server.on(F("/settings/import"), HTTP_POST, handleSettingsImport);
@@ -10099,6 +10167,35 @@ void maintainWifi() {
   }
 }
 
+void executeScheduledRestart() {
+  const RestartMode mode = restart_mode;
+  restart_pending = false;
+
+  if (mode == kRestartModeSoft) {
+    saveGracefulRelaySnapshot();
+    persistLightConfig(true);
+    persistEnergyTotal(true);
+    delay(50);
+    ESP.restart();
+  } else if (mode == kRestartModeCold) {
+    clearGracefulRelaySnapshot();
+    persistLightConfig(true);
+    persistEnergyTotal(true);
+    delay(50);
+    ESP.restart();
+  } else if (mode == kRestartModeOta) {
+    delay(50);
+    ESP.restart();
+  } else {
+    delay(50);
+    ESP.reset();
+  }
+
+  while (true) {
+    delay(1000);
+  }
+}
+
 }  // namespace
 
 void setup() {
@@ -10129,6 +10226,15 @@ void loop() {
   const uint32_t loop_started_us = micros();
 
   server.handleClient();
+  if (restartBypassesMaintainers()) {
+    if (restartDue()) {
+      executeScheduledRestart();
+    }
+    recordLoopPerf(loop_started_us, micros());
+    yield();
+    return;
+  }
+
   maintainBootRecovery();
   maintainWifi();
   maintainDevice();
@@ -10136,15 +10242,7 @@ void loop() {
   maintainMqtt();
 
   if (restartDue()) {
-    if (restart_preserve_relays) {
-      saveGracefulRelaySnapshot();
-    } else {
-      clearGracefulRelaySnapshot();
-    }
-    persistLightConfig(true);
-    persistEnergyTotal(true);
-    delay(50);
-    ESP.restart();
+    executeScheduledRestart();
   }
 
   recordLoopPerf(loop_started_us, micros());
