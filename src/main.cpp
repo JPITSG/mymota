@@ -8100,7 +8100,7 @@ void appendButtonSettings(String &page) {
 
 void appendTemplateForm(String &page) {
   page += F("<section class='panel wide'><h2>Template</h2><form method='post' action='/template'>");
-  page += F("<div class='row'><label>Known template<br><select id='known-template' onchange='tp(this)'><option value=''>Select a template</option>");
+  page += F("<div class='row'><label>Known template<br><select id='known-template' onchange='tp(this)'><option value='custom'>Custom</option>");
   page += F("<option data-json='");
   page += htmlEscape(String(FPSTR(kTemplateMiDeskLampJson)));
   page += F("'>Mi Desk Lamp</option><option data-json='");
