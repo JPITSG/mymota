@@ -6,6 +6,7 @@
 #include <Updater.h>
 #include <WiFiUdp.h>
 #include <Wire.h>
+#include <ctype.h>
 #include <math.h>
 #include <stddef.h>
 
@@ -45,7 +46,8 @@ constexpr uint16_t kConfigVersionV13 = 13;
 constexpr uint16_t kConfigVersionV14 = 14;
 constexpr uint16_t kConfigVersionV15 = 15;
 constexpr uint16_t kConfigVersionV16 = 16;
-constexpr uint16_t kConfigVersion = 17;
+constexpr uint16_t kConfigVersionV17 = 17;
+constexpr uint16_t kConfigVersion = 18;
 constexpr size_t kEepromSize = 4096;
 constexpr size_t kFlashSectorSize = 4096;
 constexpr uint8_t kEnergyJournalSectorCount = 2;
@@ -108,7 +110,7 @@ constexpr uint8_t kMaxRelays = 8;
 constexpr uint8_t kMaxButtons = 4;
 constexpr uint8_t kMaxLeds = 4;
 constexpr uint8_t kMaxLedOutputs = kMaxLeds + 1;
-constexpr uint8_t kMaxLightPwms = 2;
+constexpr uint8_t kMaxLightPwms = 4;
 constexpr uint8_t kMaxRotaries = 1;
 constexpr uint16_t kRelayEnforcementMinSeconds = 1;
 constexpr uint16_t kRelayEnforcementMaxSeconds = 65535U;
@@ -126,6 +128,8 @@ constexpr uint8_t kLightDimmerMin = 1;
 constexpr uint8_t kLightDimmerMax = 100;
 constexpr uint8_t kLightDimmerDefault = 50;
 constexpr uint8_t kLightPowerOnDimmerDefault = 50;
+constexpr uint8_t kLightModeWhite = 0;
+constexpr uint8_t kLightModeRgb = 1;
 constexpr uint16_t kLightCtMin = 153;
 constexpr uint16_t kLightCtMax = 500;
 constexpr uint16_t kLightCtDefault = 326;
@@ -217,7 +221,8 @@ constexpr uint8_t kMqttConnectConnackRejected = 5;
 constexpr uint8_t kMqttConnectSubscribeFailed = 6;
 constexpr uint8_t kMqttLightPendingDimmer = 0x01;
 constexpr uint8_t kMqttLightPendingCt = 0x02;
-constexpr uint8_t kMqttLightPendingAll = kMqttLightPendingDimmer | kMqttLightPendingCt;
+constexpr uint8_t kMqttLightPendingColor = 0x04;
+constexpr uint8_t kMqttLightPendingAll = kMqttLightPendingDimmer | kMqttLightPendingCt | kMqttLightPendingColor;
 constexpr uint8_t kMqttEnergyReportReasonNone = 0;
 constexpr uint8_t kMqttEnergyReportReasonInitial = 1;
 constexpr uint8_t kMqttEnergyReportReasonInterval = 2;
@@ -285,6 +290,8 @@ const char kTemplateShelly1LJson[] PROGMEM =
   "{\"NAME\":\"Shelly 1L\",\"GPIO\":[320,0,0,0,192,224,0,0,0,0,193,0,0,4736],\"FLAG\":0,\"BASE\":18}";
 const char kTemplateShellyDimmer2Json[] PROGMEM =
   "{\"NAME\":\"Shelly Dimmer 2\",\"GPIO\":[0,3200,0,3232,5568,5600,0,0,193,0,192,0,320,4736],\"FLAG\":0,\"BASE\":18}";
+const char kTemplateShellyDuoRgbwJson[] PROGMEM =
+  "{\"NAME\":\"Shelly Duo RGBW\",\"GPIO\":[0,0,0,0,0,419,0,0,417,416,418,0,0,4736],\"FLAG\":0,\"BASE\":18}";
 
 enum Ade7953Register : uint16_t {
   kAde7953DisNoLoad = 0x001,
@@ -844,6 +851,57 @@ struct StoredConfigV16 {
   uint32_t crc;
 };
 
+struct StoredConfigV17 {
+  uint32_t magic;
+  uint16_t version;
+  uint16_t size;
+  char ssid[33];
+  char password[65];
+  char hostname[33];
+  uint8_t phy_mode;
+  uint8_t template_enabled;
+  uint16_t template_base;
+  uint32_t template_flag;
+  char template_name[33];
+  uint16_t template_gpio[kTemplateSlotCount];
+  uint16_t mqtt_port;
+  uint16_t mqtt_keepalive;
+  char mqtt_host[kMqttHostMaxLen + 1];
+  char mqtt_topic[kMqttTopicMaxLen + 1];
+  float energy_total_offset_kwh;
+  uint8_t led_attach[kMaxLedOutputs];
+  uint16_t button_hold_ms;
+  uint8_t button_press_action[kMaxButtons];
+  uint8_t button_hold_action[kMaxButtons];
+  uint16_t energy_mqtt_interval;
+  uint16_t energy_mqtt_change_percent_x10;
+  char button_press_target[kMaxButtons][kButtonActionTargetMaxLen + 1];
+  char button_press_payload[kMaxButtons][kButtonActionPayloadMaxLen + 1];
+  char button_hold_target[kMaxButtons][kButtonActionTargetMaxLen + 1];
+  char button_hold_payload[kMaxButtons][kButtonActionPayloadMaxLen + 1];
+  uint16_t button_debounce_ms;
+  uint8_t input_mode[kMaxButtons];
+  uint8_t input_relay[kMaxButtons];
+  uint8_t input_on_level[kMaxButtons];
+  uint8_t reserved[1];
+  uint8_t button_press_relay[kMaxButtons];
+  uint8_t button_hold_relay[kMaxButtons];
+  uint8_t light_power;
+  uint8_t light_dimmer;
+  uint16_t light_ct;
+  uint8_t light_on_dimmer;
+  uint8_t shelly_dimmer_edge;
+  uint8_t shelly_dimmer_range_min;
+  uint8_t shelly_dimmer_range_max;
+  uint8_t relay_on_boot[kMaxRelays];
+  uint8_t relay_time_enabled[kMaxRelays];
+  uint16_t relay_time_seconds[kMaxRelays];
+  uint16_t energy_mqtt_change_watts;
+  uint16_t energy_reserved;
+  uint8_t relay_restore_boot[kMaxRelays];
+  uint32_t crc;
+};
+
 struct StoredConfig {
   uint32_t magic;
   uint16_t version;
@@ -892,6 +950,8 @@ struct StoredConfig {
   uint16_t energy_mqtt_change_watts;
   uint16_t energy_reserved;
   uint8_t relay_restore_boot[kMaxRelays];
+  uint8_t light_mode;
+  uint8_t light_rgb[3];
   uint32_t crc;
 };
 
@@ -965,6 +1025,8 @@ struct LightState {
   bool power;
   uint8_t dimmer;
   uint16_t ct;
+  uint8_t mode;
+  uint8_t rgb[3];
   bool config_dirty;
   uint32_t config_save_at;
 };
@@ -1374,6 +1436,13 @@ void setDefaultEnergyMqttConfig() {
   config.energy_reserved = 0;
 }
 
+void setDefaultLightColorConfig(StoredConfig &target) {
+  target.light_mode = kLightModeWhite;
+  target.light_rgb[0] = 255;
+  target.light_rgb[1] = 255;
+  target.light_rgb[2] = 255;
+}
+
 void setDefaultLightConfig(StoredConfig &target) {
   target.light_power = 0;
   target.light_dimmer = kLightDimmerOff;
@@ -1382,6 +1451,7 @@ void setDefaultLightConfig(StoredConfig &target) {
   target.shelly_dimmer_edge = kShellyDimmerEdgeDefault;
   target.shelly_dimmer_range_min = kShellyDimmerRangeMinDefault;
   target.shelly_dimmer_range_max = kShellyDimmerRangeMaxDefault;
+  setDefaultLightColorConfig(target);
 }
 
 void setDefaultLightConfig() {
@@ -2078,6 +2148,9 @@ void normalizeConfigStrings() {
   if (config.light_ct < kLightCtMin || config.light_ct > kLightCtMax) {
     config.light_ct = kLightCtDefault;
   }
+  if (config.light_mode != kLightModeWhite && config.light_mode != kLightModeRgb) {
+    config.light_mode = kLightModeWhite;
+  }
   if (config.shelly_dimmer_edge > kShellyDimmerEdgeLeading) {
     config.shelly_dimmer_edge = kShellyDimmerEdgeDefault;
   }
@@ -2224,6 +2297,26 @@ bool loadConfig() {
     return config_ok;
   }
 
+  if (header.version == kConfigVersionV17 && header.size == sizeof(StoredConfigV17)) {
+    StoredConfigV17 *old_config = new StoredConfigV17;
+    if (!old_config) {
+      setDefaultConfig();
+      return false;
+    }
+    EEPROM.get(0, *old_config);
+    if (old_config->crc != configCrc(*old_config)) {
+      delete old_config;
+      setDefaultConfig();
+      return false;
+    }
+    memset(&config, 0, sizeof(config));
+    memcpy(&config, old_config, offsetof(StoredConfigV17, crc));
+    setDefaultLightColorConfig(config);
+    delete old_config;
+    commitConfig();
+    return config_ok;
+  }
+
   if (header.version == kConfigVersionV16 && header.size == sizeof(StoredConfigV16)) {
     StoredConfigV16 *old_config = new StoredConfigV16;
     if (!old_config) {
@@ -2241,6 +2334,7 @@ bool loadConfig() {
     for (uint8_t i = 0; i < kMaxRelays; i++) {
       config.relay_restore_boot[i] = old_config->relay_on_boot[i] ? 0 : 1;
     }
+    setDefaultLightColorConfig(config);
     delete old_config;
     commitConfig();
     return config_ok;
@@ -2265,6 +2359,7 @@ bool loadConfig() {
     for (uint8_t i = 0; i < kMaxRelays; i++) {
       config.relay_restore_boot[i] = old_config->relay_on_boot[i] ? 0 : 1;
     }
+    setDefaultLightColorConfig(config);
     delete old_config;
     commitConfig();
     return config_ok;
@@ -2288,6 +2383,7 @@ bool loadConfig() {
     config.shelly_dimmer_range_min = kShellyDimmerRangeMinDefault;
     config.shelly_dimmer_range_max = kShellyDimmerRangeMaxDefault;
     setDefaultRelayEnforcementConfig();
+    setDefaultLightColorConfig(config);
     delete old_config;
     commitConfig();
     return config_ok;
@@ -2312,6 +2408,7 @@ bool loadConfig() {
     config.shelly_dimmer_range_min = kShellyDimmerRangeMinDefault;
     config.shelly_dimmer_range_max = kShellyDimmerRangeMaxDefault;
     setDefaultRelayEnforcementConfig();
+    setDefaultLightColorConfig(config);
     delete old_config;
     commitConfig();
     return config_ok;
@@ -3209,12 +3306,31 @@ bool lightAvailableIn(const RuntimeTemplate &rt) {
 }
 
 bool lightSupportsColorTemperatureIn(const RuntimeTemplate &rt) {
-  if (rt.shelly_dimmer || rt.pwm_count < 2) return false;
+  if (rt.shelly_dimmer) return false;
+  if (rt.pwm_count >= 4) return hasPin(rt.light_pwm[3]);
+  if (rt.pwm_count < 2) return false;
   return hasPin(rt.light_pwm[0]) && hasPin(rt.light_pwm[1]);
 }
 
 bool lightSupportsColorTemperature() {
   return lightSupportsColorTemperatureIn(runtime_template);
+}
+
+bool lightSupportsColorIn(const RuntimeTemplate &rt) {
+  if (rt.shelly_dimmer || rt.pwm_count < 3) return false;
+  return hasPin(rt.light_pwm[0]) && hasPin(rt.light_pwm[1]) && hasPin(rt.light_pwm[2]);
+}
+
+bool lightSupportsColor() {
+  return lightSupportsColorIn(runtime_template);
+}
+
+bool lightSupportsWhiteChannelIn(const RuntimeTemplate &rt) {
+  return lightSupportsColorIn(rt) && rt.pwm_count >= 4 && hasPin(rt.light_pwm[3]);
+}
+
+bool lightSupportsWhiteChannel() {
+  return lightSupportsWhiteChannelIn(runtime_template);
 }
 
 bool defaultButtonRelayTarget(uint8_t button, uint8_t &relay) {
@@ -3827,6 +3943,259 @@ String commandArgument(const char *p, size_t len) {
   return out;
 }
 
+bool parseUint16Token(const char *p, size_t len, uint16_t min_value, uint16_t max_value, uint16_t &out) {
+  if (!p) return false;
+  while (len > 0) {
+    const char c = p[0];
+    if (c != ' ' && c != '\t' && c != '\r' && c != '\n') break;
+    p++;
+    len--;
+  }
+  while (len > 0) {
+    const char c = p[len - 1];
+    if (c != ' ' && c != '\t' && c != '\r' && c != '\n') break;
+    len--;
+  }
+  if (len == 0) return false;
+  uint32_t value = 0;
+  for (size_t i = 0; i < len; i++) {
+    const char c = p[i];
+    if (c < '0' || c > '9') return false;
+    value = (value * 10U) + static_cast<uint32_t>(c - '0');
+    if (value > max_value) return false;
+  }
+  if (value < min_value) return false;
+  out = static_cast<uint16_t>(value);
+  return true;
+}
+
+int8_t hexNibble(char c) {
+  if (c >= '0' && c <= '9') return static_cast<int8_t>(c - '0');
+  if (c >= 'a' && c <= 'f') return static_cast<int8_t>(10 + c - 'a');
+  if (c >= 'A' && c <= 'F') return static_cast<int8_t>(10 + c - 'A');
+  return -1;
+}
+
+void appendHexByte(String &out, uint8_t value) {
+  static constexpr char kHex[] = "0123456789ABCDEF";
+  out += kHex[(value >> 4) & 0x0f];
+  out += kHex[value & 0x0f];
+}
+
+void appendLightRgbHex(String &out) {
+  for (uint8_t i = 0; i < 3; i++) appendHexByte(out, light.rgb[i]);
+}
+
+uint8_t lightWhiteColorLevel() {
+  return light.mode == kLightModeWhite && light.power && light.dimmer > 0 ? 255 : 0;
+}
+
+void appendLightColorHex(String &out) {
+  if (lightSupportsColor()) {
+    for (uint8_t i = 0; i < 3; i++) {
+      appendHexByte(out, light.mode == kLightModeRgb ? light.rgb[i] : 0);
+    }
+    if (lightSupportsWhiteChannel()) appendHexByte(out, lightWhiteColorLevel());
+    return;
+  }
+  appendLightRgbHex(out);
+}
+
+bool parseLightModeName(const String &input, uint8_t &mode) {
+  String value = input;
+  value.trim();
+  if (value.equalsIgnoreCase(F("white"))) {
+    mode = kLightModeWhite;
+    return true;
+  }
+  if (value.equalsIgnoreCase(F("rgb")) || value.equalsIgnoreCase(F("color")) || value.equalsIgnoreCase(F("colour"))) {
+    mode = kLightModeRgb;
+    return true;
+  }
+  return false;
+}
+
+bool parseIndexedCommand(const char *p, size_t len, const char *name, uint8_t &index,
+                         char *response_key, size_t key_size) {
+  const size_t name_len = strlen(name);
+  if (len < name_len || strncasecmp(p, name, name_len) != 0) return false;
+  if (len == name_len) {
+    index = 0;
+    if (key_size > 0) {
+      const size_t copy_len = min(name_len, key_size - 1);
+      memcpy(response_key, name, copy_len);
+      response_key[copy_len] = '\0';
+      if (copy_len > 0) response_key[0] = toupper(response_key[0]);
+    }
+    return true;
+  }
+  uint16_t parsed = 0;
+  for (size_t i = name_len; i < len; i++) {
+    const char c = p[i];
+    if (c < '0' || c > '9') return false;
+    parsed = (parsed * 10U) + static_cast<uint16_t>(c - '0');
+    if (parsed > 9) return false;
+  }
+  index = static_cast<uint8_t>(parsed);
+  if (snprintf(response_key, key_size, "%c%s%u", toupper(name[0]), name + 1, static_cast<unsigned>(index)) >=
+      static_cast<int>(key_size)) {
+    return false;
+  }
+  return true;
+}
+
+bool parseLightColor(const char *p, size_t len, uint8_t rgba[4]) {
+  if (!p || !rgba) return false;
+  while (len > 0) {
+    const char c = p[0];
+    if (c != ' ' && c != '\t' && c != '\r' && c != '\n') break;
+    p++;
+    len--;
+  }
+  while (len > 0) {
+    const char c = p[len - 1];
+    if (c != ' ' && c != '\t' && c != '\r' && c != '\n') break;
+    len--;
+  }
+  if (len > 0 && p[0] == '#') {
+    p++;
+    len--;
+  }
+  if (len == 6 || len == 8) {
+    for (uint8_t i = 0; i < 4; i++) rgba[i] = 0;
+    for (uint8_t i = 0; i < len / 2; i++) {
+      const int8_t hi = hexNibble(p[i * 2]);
+      const int8_t lo = hexNibble(p[i * 2 + 1]);
+      if (hi < 0 || lo < 0) return false;
+      rgba[i] = static_cast<uint8_t>((hi << 4) | lo);
+    }
+    return true;
+  }
+
+  uint8_t parsed_count = 0;
+  size_t start = 0;
+  for (uint8_t i = 0; i < 4; i++) rgba[i] = 0;
+  while (start <= len) {
+    if (parsed_count >= 4) return false;
+    size_t end = start;
+    while (end < len && p[end] != ',') end++;
+    uint16_t value = 0;
+    if (!parseUint16Token(p + start, end - start, 0, 255, value)) return false;
+    rgba[parsed_count++] = static_cast<uint8_t>(value);
+    if (end == len) break;
+    start = end + 1;
+  }
+  return parsed_count == 3 || parsed_count == 4;
+}
+
+bool parseHsbColor(const char *p, size_t len, uint16_t &hue, uint8_t &sat, uint8_t &bri) {
+  if (!p) return false;
+  while (len > 0) {
+    const char c = p[0];
+    if (c != ' ' && c != '\t' && c != '\r' && c != '\n') break;
+    p++;
+    len--;
+  }
+  if (len == 0) return false;
+
+  size_t first_space = 0;
+  while (first_space < len) {
+    const char c = p[first_space];
+    if (c == ' ' || c == '\t') break;
+    first_space++;
+  }
+  uint8_t prefix_index = 0;
+  if (first_space < len) {
+    uint16_t prefix = 0;
+    if (parseUint16Token(p, first_space, 1, 3, prefix)) {
+      prefix_index = static_cast<uint8_t>(prefix);
+      p += first_space + 1;
+      len -= first_space + 1;
+      while (len > 0) {
+        const char c = p[0];
+        if (c != ' ' && c != '\t') break;
+        p++;
+        len--;
+      }
+    }
+  }
+
+  uint16_t values[3] = {hue, sat, bri};
+  if (prefix_index >= 1 && prefix_index <= 3) {
+    const uint16_t max_value = prefix_index == 1 ? 360 : 100;
+    if (!parseUint16Token(p, len, 0, max_value, values[prefix_index - 1])) return false;
+    hue = values[0];
+    sat = static_cast<uint8_t>(values[1]);
+    bri = static_cast<uint8_t>(values[2]);
+    return true;
+  }
+
+  uint8_t count = 0;
+  size_t start = 0;
+  while (start <= len && count < 3) {
+    size_t end = start;
+    while (end < len && p[end] != ',') end++;
+    const uint16_t max_value = count == 0 ? 360 : 100;
+    if (!parseUint16Token(p + start, end - start, 0, max_value, values[count])) return false;
+    count++;
+    if (end == len) break;
+    start = end + 1;
+  }
+  if (count == 0) return false;
+  hue = values[0];
+  sat = static_cast<uint8_t>(values[1]);
+  bri = static_cast<uint8_t>(values[2]);
+  return true;
+}
+
+void hsbToRgb(uint16_t hue, uint8_t sat, uint8_t bri, uint8_t rgb[3]) {
+  hue %= 360;
+  const uint16_t scaled_sat = sat > 100 ? 100 : sat;
+  const uint16_t scaled_bri = bri > 100 ? 100 : bri;
+  const uint8_t v = static_cast<uint8_t>((scaled_bri * 255U + 50U) / 100U);
+  if (scaled_sat == 0) {
+    rgb[0] = v;
+    rgb[1] = v;
+    rgb[2] = v;
+    return;
+  }
+  const uint16_t region = hue / 60U;
+  const uint16_t remainder = (hue - (region * 60U)) * 255U / 60U;
+  const uint8_t p = static_cast<uint8_t>((static_cast<uint32_t>(v) * (100U - scaled_sat) + 50U) / 100U);
+  const uint8_t q = static_cast<uint8_t>((static_cast<uint32_t>(v) * (255U - (scaled_sat * remainder / 100U)) + 127U) / 255U);
+  const uint8_t t = static_cast<uint8_t>((static_cast<uint32_t>(v) * (255U - (scaled_sat * (255U - remainder) / 100U)) + 127U) / 255U);
+  switch (region) {
+    case 0: rgb[0] = v; rgb[1] = t; rgb[2] = p; break;
+    case 1: rgb[0] = q; rgb[1] = v; rgb[2] = p; break;
+    case 2: rgb[0] = p; rgb[1] = v; rgb[2] = t; break;
+    case 3: rgb[0] = p; rgb[1] = q; rgb[2] = v; break;
+    case 4: rgb[0] = t; rgb[1] = p; rgb[2] = v; break;
+    default: rgb[0] = v; rgb[1] = p; rgb[2] = q; break;
+  }
+}
+
+void lightCurrentHsb(uint16_t &hue, uint8_t &sat, uint8_t &bri) {
+  const uint8_t r = light.rgb[0];
+  const uint8_t g = light.rgb[1];
+  const uint8_t b = light.rgb[2];
+  const uint8_t max_c = max(r, max(g, b));
+  const uint8_t min_c = min(r, min(g, b));
+  const uint8_t delta = max_c - min_c;
+  bri = light.power && light.mode == kLightModeRgb ? light.dimmer : kLightDimmerOff;
+  sat = max_c == 0 ? 0 : static_cast<uint8_t>((static_cast<uint16_t>(delta) * 100U + (max_c / 2U)) / max_c);
+  if (delta == 0) {
+    hue = 0;
+  } else if (max_c == r) {
+    int16_t h = static_cast<int16_t>(60 * (static_cast<int16_t>(g) - static_cast<int16_t>(b)) / delta);
+    if (h < 0) h += 360;
+    hue = static_cast<uint16_t>(h);
+  } else if (max_c == g) {
+    hue = static_cast<uint16_t>(120 + 60 * (static_cast<int16_t>(b) - static_cast<int16_t>(r)) / delta);
+  } else {
+    hue = static_cast<uint16_t>(240 + 60 * (static_cast<int16_t>(r) - static_cast<int16_t>(g)) / delta);
+  }
+}
+
 bool parseDimmerRangeCommandArgument(const char *p, size_t len, uint8_t &range_min, uint8_t &range_max) {
   String value = commandArgument(p, len);
   value.trim();
@@ -4095,6 +4464,8 @@ bool lightConfigDiffers(const StoredConfig &a, const StoredConfig &b) {
          a.light_dimmer != b.light_dimmer ||
          a.light_ct != b.light_ct ||
          a.light_on_dimmer != b.light_on_dimmer ||
+         a.light_mode != b.light_mode ||
+         memcmp(a.light_rgb, b.light_rgb, sizeof(a.light_rgb)) != 0 ||
          a.shelly_dimmer_edge != b.shelly_dimmer_edge ||
          a.shelly_dimmer_range_min != b.shelly_dimmer_range_min ||
          a.shelly_dimmer_range_max != b.shelly_dimmer_range_max;
@@ -4192,6 +4563,13 @@ void appendSettingsExportJson(String &out) {
   out += config.light_ct;
   out += F(",\"on_dimmer\":");
   out += config.light_on_dimmer;
+  if (lightSupportsColor()) {
+    out += F(",\"mode\":\"");
+    out += config.light_mode == kLightModeRgb ? F("rgb") : F("white");
+    out += F("\",\"color\":\"");
+    appendLightRgbHex(out);
+    out += F("\"");
+  }
   if (runtime_template.shelly_dimmer) {
     out += F(",\"shelly_dimmer\":{\"edge\":\"");
     out += shellyDimmerEdgeName(config.shelly_dimmer_edge);
@@ -4428,6 +4806,30 @@ void importSettingsLight(JsonObjectConst root, StoredConfig &target, const Runti
       recordSettingsApplied(stats);
     } else {
       recordSettingsSkipped(stats, F("light.on_dimmer"));
+    }
+  }
+  if (lightSupportsColorIn(rt) && light_settings.containsKey("mode")) {
+    String mode_name;
+    uint8_t mode = kLightModeWhite;
+    if (settingsReadString(light_settings["mode"], mode_name, 12) && parseLightModeName(mode_name, mode)) {
+      target.light_mode = mode;
+      recordSettingsApplied(stats);
+    } else {
+      recordSettingsSkipped(stats, F("light.mode"));
+    }
+  }
+  if (lightSupportsColorIn(rt) && light_settings.containsKey("color")) {
+    String color;
+    uint8_t rgba[4];
+    if (settingsReadString(light_settings["color"], color, 9) &&
+        parseLightColor(color.c_str(), color.length(), rgba)) {
+      target.light_rgb[0] = rgba[0];
+      target.light_rgb[1] = rgba[1];
+      target.light_rgb[2] = rgba[2];
+      if (rgba[0] || rgba[1] || rgba[2]) target.light_mode = kLightModeRgb;
+      recordSettingsApplied(stats);
+    } else {
+      recordSettingsSkipped(stats, F("light.color"));
     }
   }
   if (light_settings.containsKey("shelly_dimmer")) {
@@ -5359,7 +5761,7 @@ bool mqttPublishLightState(uint8_t mask) {
   if (!mask) return true;
 
   String payload;
-  payload.reserve(32);
+  payload.reserve(64);
   payload += '{';
   bool needs_comma = false;
   if (mask & kMqttLightPendingDimmer) {
@@ -5371,6 +5773,13 @@ bool mqttPublishLightState(uint8_t mask) {
     if (needs_comma) payload += ',';
     payload += F("\"CT\":");
     payload += light.ct;
+    needs_comma = true;
+  }
+  if (mask & kMqttLightPendingColor) {
+    if (needs_comma) payload += ',';
+    payload += F("\"Color\":\"");
+    appendLightColorHex(payload);
+    payload += F("\"");
   }
   payload += '}';
 
@@ -6566,10 +6975,25 @@ uint16_t sanitizeLightCtValue(uint16_t value) {
   return value;
 }
 
+uint8_t sanitizeLightModeValue(uint8_t value) {
+  return value == kLightModeRgb ? kLightModeRgb : kLightModeWhite;
+}
+
+bool lightRgbHasColor() {
+  return light.rgb[0] || light.rgb[1] || light.rgb[2];
+}
+
 void loadLightStateFromConfig() {
   light.power = config.light_power != 0;
   light.dimmer = light.power ? sanitizeLightDimmerValue(config.light_dimmer) : kLightDimmerOff;
   light.ct = sanitizeLightCtValue(config.light_ct);
+  light.mode = lightSupportsColor() ? sanitizeLightModeValue(config.light_mode) : kLightModeWhite;
+  memcpy(light.rgb, config.light_rgb, sizeof(light.rgb));
+  if (!lightRgbHasColor()) {
+    light.rgb[0] = 255;
+    light.rgb[1] = 255;
+    light.rgb[2] = 255;
+  }
   light.config_dirty = false;
   light.config_save_at = 0;
 }
@@ -6579,9 +7003,23 @@ uint16_t lightBrightnessDuty() {
   return static_cast<uint16_t>(((static_cast<uint32_t>(light.dimmer) * kLightPwmRange) + 50U) / 100U);
 }
 
+uint16_t scaleLightRgbDuty(uint8_t value) {
+  if (!light.present || !light.power) return 0;
+  return static_cast<uint16_t>(
+    ((static_cast<uint32_t>(value) * kLightPwmRange * light.dimmer) + 12750U) / 25500U
+  );
+}
+
 uint16_t lightPwmDuty(uint8_t index) {
   const uint16_t brightness = lightBrightnessDuty();
   if (brightness == 0 || runtime_template.pwm_count <= 1) return brightness;
+
+  if (lightSupportsColor()) {
+    if (light.mode == kLightModeRgb) {
+      return index < 3 ? scaleLightRgbDuty(light.rgb[index]) : 0;
+    }
+    return index == 3 ? brightness : 0;
+  }
 
   const uint16_t ct = sanitizeLightCtValue(light.ct);
   const uint16_t ct_range = kLightCtMax - kLightCtMin;
@@ -6617,6 +7055,8 @@ void scheduleLightConfigPersist() {
   config.light_power = light.power ? 1 : 0;
   config.light_dimmer = light.dimmer;
   config.light_ct = light.ct;
+  config.light_mode = light.mode;
+  memcpy(config.light_rgb, light.rgb, sizeof(config.light_rgb));
   light.config_dirty = true;
   light.config_save_at = millis() + kLightPersistDelayMs;
 }
@@ -6627,6 +7067,8 @@ bool persistLightConfig(bool force = false) {
   config.light_power = light.power ? 1 : 0;
   config.light_dimmer = light.dimmer;
   config.light_ct = light.ct;
+  config.light_mode = light.mode;
+  memcpy(config.light_rgb, light.rgb, sizeof(config.light_rgb));
   if (!commitConfig()) return false;
   light.config_dirty = false;
   return true;
@@ -6639,6 +7081,11 @@ void setLightPower(bool on, bool persist = true) {
   const uint8_t target_dimmer = on ? on_dimmer : kLightDimmerOff;
   const bool dimmer_changed = light.dimmer != target_dimmer;
   light.power = on;
+  if (on && light.mode == kLightModeRgb && !lightRgbHasColor()) {
+    light.rgb[0] = 255;
+    light.rgb[1] = 255;
+    light.rgb[2] = 255;
+  }
   light.dimmer = target_dimmer;
   updateLightOutputs();
   if (changed || dimmer_changed) scheduleMqttLightPublish(kMqttLightPendingDimmer);
@@ -6664,14 +7111,121 @@ void setLightDimmer(uint16_t dimmer, bool persist = true) {
   if (persist && changed) scheduleLightConfigPersist();
 }
 
+void setLightModeDimmer(uint8_t mode, uint16_t dimmer, bool persist = true) {
+  if (!light.present) return;
+  if (!lightSupportsColor()) {
+    setLightDimmer(dimmer, persist);
+    return;
+  }
+  mode = sanitizeLightModeValue(mode);
+  if (dimmer == 0) {
+    if (light.mode == mode) {
+      setLightPower(false, persist);
+    }
+    return;
+  }
+  const uint8_t sanitized = sanitizeLightDimmerValue(dimmer);
+  const bool changed = light.mode != mode || light.dimmer != sanitized || !light.power;
+  light.mode = mode;
+  if (mode == kLightModeRgb && !lightRgbHasColor()) {
+    light.rgb[0] = 255;
+    light.rgb[1] = 255;
+    light.rgb[2] = 255;
+  }
+  light.power = true;
+  light.dimmer = sanitized;
+  updateLightOutputs();
+  if (changed) scheduleMqttLightPublish(kMqttLightPendingDimmer | kMqttLightPendingColor);
+  if (persist && changed) scheduleLightConfigPersist();
+}
+
+void setLightChannelPower(uint8_t mode, bool on, bool persist = true) {
+  if (!light.present) return;
+  if (!lightSupportsColor()) {
+    setLightPower(on, persist);
+    return;
+  }
+  mode = sanitizeLightModeValue(mode);
+  if (on) {
+    setLightModeDimmer(mode, config.light_on_dimmer, persist);
+    return;
+  }
+  if (light.mode == mode) {
+    setLightPower(false, persist);
+  }
+}
+
 void setLightCt(uint16_t ct, bool persist = true) {
   if (!light.present) return;
   const uint16_t sanitized = sanitizeLightCtValue(ct);
-  const bool changed = light.ct != sanitized;
+  const bool changed = light.ct != sanitized || (lightSupportsColor() && light.mode != kLightModeWhite);
   light.ct = sanitized;
+  if (lightSupportsColor()) light.mode = kLightModeWhite;
   updateLightOutputs();
-  if (changed) scheduleMqttLightPublish(kMqttLightPendingCt);
+  if (changed) scheduleMqttLightPublish(kMqttLightPendingCt | kMqttLightPendingColor);
   if (persist && changed) scheduleLightConfigPersist();
+}
+
+uint8_t lightModeDimmer(uint8_t mode) {
+  return light.power && light.mode == mode ? light.dimmer : kLightDimmerOff;
+}
+
+uint8_t lightColorDimmerFrom8(uint8_t value) {
+  if (value == 0) return kLightDimmerOff;
+  const uint16_t scaled = static_cast<uint16_t>((static_cast<uint16_t>(value) * 100U + 127U) / 255U);
+  return sanitizeLightDimmerValue(scaled == 0 ? 1 : scaled);
+}
+
+void setLightColorChannels(const uint8_t rgba[4], bool persist = true) {
+  if (!light.present || !rgba) return;
+  if (!lightSupportsColor()) return;
+
+  const bool rgb_any = rgba[0] || rgba[1] || rgba[2];
+  const bool white_any = rgba[3] && lightSupportsWhiteChannel();
+  uint8_t next_mode = light.mode;
+  uint8_t next_rgb[3];
+  memcpy(next_rgb, light.rgb, sizeof(next_rgb));
+  bool next_power = light.power;
+  uint8_t next_dimmer = light.dimmer;
+
+  if (rgb_any) {
+    next_mode = kLightModeRgb;
+    next_rgb[0] = rgba[0];
+    next_rgb[1] = rgba[1];
+    next_rgb[2] = rgba[2];
+    next_power = true;
+    if (next_dimmer == kLightDimmerOff) {
+      const uint8_t max_rgb = max(rgba[0], max(rgba[1], rgba[2]));
+      next_dimmer = lightColorDimmerFrom8(max_rgb);
+    }
+  } else if (white_any) {
+    next_mode = kLightModeWhite;
+    next_power = true;
+    if (next_dimmer == kLightDimmerOff) {
+      next_dimmer = lightColorDimmerFrom8(rgba[3]);
+    }
+  } else {
+    next_power = false;
+    next_dimmer = kLightDimmerOff;
+  }
+
+  const bool changed = light.mode != next_mode ||
+                       light.power != next_power ||
+                       light.dimmer != next_dimmer ||
+                       memcmp(light.rgb, next_rgb, sizeof(light.rgb)) != 0;
+  light.mode = next_mode;
+  light.power = next_power;
+  light.dimmer = next_power ? sanitizeLightDimmerValue(next_dimmer) : kLightDimmerOff;
+  memcpy(light.rgb, next_rgb, sizeof(light.rgb));
+  updateLightOutputs();
+  if (changed) scheduleMqttLightPublish(kMqttLightPendingColor | kMqttLightPendingDimmer);
+  if (persist && changed) scheduleLightConfigPersist();
+}
+
+void setLightRgbColor(const uint8_t rgb[3], bool persist = true) {
+  if (!rgb) return;
+  uint8_t rgba[4] = {rgb[0], rgb[1], rgb[2], 0};
+  setLightColorChannels(rgba, persist);
 }
 
 bool deferButtonPressForRotary(uint8_t button) {
@@ -7353,7 +7907,7 @@ void appendFooter(String &page, bool live_poll = true, bool reboot_wait = false)
   page += F("p('live-wifi',d.wifi?'connected':'disconnected',d.wifi?'pill ok':'pill bad');t('live-ssid',d.wifi_ssid||'n/a');t('live-ip',d.ip||'n/a');t('live-rssi',d.rssi==null?'n/a':d.rssi+' dBm');");
   page += F("p('live-mqtt',d.mqtt.enabled?(d.mqtt.connected?'connected':'disconnected'):'not configured',d.mqtt.enabled?(d.mqtt.connected?'pill ok':'pill bad'):'pill');");
   page += F("if(d.mqtt){t('live-mqtt-pending',d.mqtt.pending);t('live-mqtt-result',d.mqtt.last_connect_result);t('live-mqtt-connect-ms',d.mqtt.last_connect_ms+' ms');t('live-mqtt-attempt',d.mqtt.last_attempt_ms_ago==null?'n/a':d.mqtt.last_attempt_ms_ago+' ms ago');}");
-  page += F("if(d.light){p('live-light-power',d.light.power?'on':'off',d.light.power?'pill ok':'pill bad');t('live-light-dimmer',d.light.dimmer+'%');t('live-light-ct',d.light.ct+' mired');t('live-light-on-dimmer',d.light.on_dimmer+'%');sv('dimmer',d.light.dimmer);sv('ct',d.light.ct);if(d.light.shelly_dimmer){var sd=d.light.shelly_dimmer;t('live-shelly-edge',sd.edge||'auto');t('live-shelly-range-min',sd.range_min);t('live-shelly-range-max',sd.range_max);sv('shelly_edge',sd.edge||'auto');sv('shelly_range_min',sd.range_min);sv('shelly_range_max',sd.range_max);}}");
+  page += F("if(d.light){p('live-light-power',d.light.power?'on':'off',d.light.power?'pill ok':'pill bad');t('live-light-dimmer',d.light.dimmer+'%');t('live-light-ct',d.light.ct+' mired');t('live-light-mode',d.light.mode||'white');t('live-light-color',d.light.color||'');t('live-light-on-dimmer',d.light.on_dimmer+'%');sv('dimmer',d.light.dimmer);sv('ct',d.light.ct);sv('color',d.light.color||'');if(d.light.shelly_dimmer){var sd=d.light.shelly_dimmer;t('live-shelly-edge',sd.edge||'auto');t('live-shelly-range-min',sd.range_min);t('live-shelly-range-max',sd.range_max);sv('shelly_edge',sd.edge||'auto');sv('shelly_range_min',sd.range_min);sv('shelly_range_max',sd.range_max);}}");
   page += F("if(d.power){for(var i=0;i<d.power.length;i++){if(d.power[i]!==null)p('live-relay-'+i,d.power[i]?'on':'off',d.power[i]?'pill ok':'pill bad');}}");
   page += F("if(d.buttons){for(var b=0;b<d.buttons.length;b++){if(d.buttons[b])p('live-button-'+b,d.buttons[b].state||(d.buttons[b].pressed?'pressed':'released'),d.buttons[b].pressed?'pill ok':'pill bad');}}");
   page += F("if(d.leds){for(var l=0;l<d.leds.length;l++){if(d.leds[l])p('live-led-'+l,d.leds[l].on?'on':'off',d.leds[l].on?'pill ok':'pill bad');}}");
@@ -7645,6 +8199,7 @@ void appendDeviceControls(String &page) {
   page += F("<section class='panel'><h2>Device</h2>");
   if (light.present) {
     const bool has_ct = lightSupportsColorTemperature();
+    const bool has_color = lightSupportsColor();
     page += F("<div class='row'><strong>Light</strong> ");
     page += F("<span id='live-light-power' class='");
     page += light.power ? F("pill ok'>on") : F("pill bad'>off");
@@ -7655,6 +8210,13 @@ void appendDeviceControls(String &page) {
       page += F("<span>Color temp</span><div><code id='live-light-ct'>");
       page += String(light.ct);
       page += F(" mired</code></div>");
+    }
+    if (has_color) {
+      page += F("<span>Mode</span><div><code id='live-light-mode'>");
+      page += light.mode == kLightModeRgb ? F("rgb") : F("white");
+      page += F("</code></div><span>Color</span><div><code id='live-light-color'>");
+      appendLightRgbHex(page);
+      page += F("</code></div>");
     }
     if (runtime_template.shelly_dimmer) {
       page += F("<span>Dimmer MCU</span><div><code>");
@@ -7689,6 +8251,11 @@ void appendDeviceControls(String &page) {
       page += String(kLightCtMax);
       page += F("' step='1' value='");
       page += String(light.ct);
+      page += F("'></label></div>");
+    }
+    if (has_color) {
+      page += F("<div class='row'><label>Color RGB<br><input class='light-auto' data-live='live-light-color' name='color' maxlength='7' value='");
+      appendLightRgbHex(page);
       page += F("'></label></div>");
     }
     page += F("<div class='row'><label>ON dimmer<br><input class='light-auto' data-live='live-light-on-dimmer' data-suffix='%' name='on_dimmer' type='number' min='");
@@ -8116,6 +8683,8 @@ void appendTemplateForm(String &page) {
   page += F("'>Shelly 2.5</option><option data-json='");
   page += htmlEscape(String(FPSTR(kTemplateShellyDimmer2Json)));
   page += F("'>Shelly Dimmer 2</option><option data-json='");
+  page += htmlEscape(String(FPSTR(kTemplateShellyDuoRgbwJson)));
+  page += F("'>Shelly Duo RGBW</option><option data-json='");
   page += htmlEscape(String(FPSTR(kTemplateShellyPlugSJson)));
   page += F("'>Shelly Plug S</option></select></label></div>");
   page += F("<div class='row'><label>Tasmota ESP8266 template JSON<br><textarea id='template-json' name='template' rows='5' maxlength='");
@@ -8860,6 +9429,21 @@ void handleLightSave() {
     setLightCt(ct);
   }
 
+  if (server.hasArg("color")) {
+    if (!lightSupportsColor()) {
+      server.send(400, F("text/plain"), F("No color output is configured"));
+      return;
+    }
+    String color = server.arg("color");
+    color.trim();
+    uint8_t rgba[4];
+    if (!parseLightColor(color.c_str(), color.length(), rgba)) {
+      server.send(400, F("text/plain"), F("Invalid color"));
+      return;
+    }
+    setLightRgbColor(rgba);
+  }
+
   if (server.hasArg("on_dimmer")) {
     uint16_t on_dimmer = 0;
     if (!parseUint16Input(server.arg("on_dimmer"), kLightDimmerMin, kLightDimmerMax, on_dimmer)) {
@@ -8952,8 +9536,47 @@ bool executeDeviceCommand(const char *raw, size_t cmd_len, const char *arg, size
     arg_len--;
   }
 
+  if (commandEquals(raw, cmd_len, "backlog")) {
+    String script = commandArgument(arg, arg_len);
+    size_t start = 0;
+    bool executed = false;
+    while (start < script.length()) {
+      size_t end = start;
+      while (end < script.length() && script[end] != ';') end++;
+      String item = script.substring(start, end);
+      item.trim();
+      if (item.length() > 0) {
+        const char *item_raw = item.c_str();
+        size_t item_len = item.length();
+        size_t item_cmd_len = 0;
+        while (item_cmd_len < item_len) {
+          const char c = item_raw[item_cmd_len];
+          if (c == ' ' || c == '\t' || c == '\r' || c == '\n') break;
+          item_cmd_len++;
+        }
+        size_t item_arg_start = item_cmd_len;
+        while (item_arg_start < item_len) {
+          const char c = item_raw[item_arg_start];
+          if (c != ' ' && c != '\t' && c != '\r' && c != '\n') break;
+          item_arg_start++;
+        }
+        String item_out;
+        if (!executeDeviceCommand(item_raw, item_cmd_len, item_raw + item_arg_start,
+                                  item_arg_start < item_len ? item_len - item_arg_start : 0,
+                                  item_out, error)) {
+          return false;
+        }
+        out = item_out;
+        executed = true;
+      }
+      start = end + 1;
+    }
+    if (!executed) out = F("{\"Backlog\":\"Done\"}");
+    return true;
+  }
+
   uint8_t relay = 0;
-  char response_key[12];
+  char response_key[16];
   if (parsePowerCommand(raw, cmd_len, relay, response_key, sizeof(response_key))) {
     bool on = false;
     if (relay < kMaxRelays && hasPin(runtime_template.relays[relay])) {
@@ -8969,17 +9592,37 @@ bool executeDeviceCommand(const char *raw, size_t cmd_len, const char *arg, size
         setRelay(relay, on);
         updateDeviceLeds(true);
       }
-    } else if (relay == 0 && light.present) {
-      if (arg_len == 0) {
-        on = light.power;
-      } else {
-        uint8_t state = kPowerStateOff;
-        if (!parsePowerState(arg, arg_len, state)) {
-          error = F("Invalid power state");
-          return false;
+    } else if (light.present) {
+      const bool indexed_power = cmd_len > 5;
+      if (lightSupportsColor() && indexed_power && relay < 2) {
+        const uint8_t mode = relay == 0 ? kLightModeRgb : kLightModeWhite;
+        snprintf(response_key, sizeof(response_key), "POWER%u", static_cast<unsigned>(relay + 1));
+        if (arg_len == 0) {
+          on = lightModeDimmer(mode) > 0;
+        } else {
+          uint8_t state = kPowerStateOff;
+          if (!parsePowerState(arg, arg_len, state)) {
+            error = F("Invalid power state");
+            return false;
+          }
+          on = state == kPowerStateToggle ? lightModeDimmer(mode) == 0 : state == kPowerStateOn;
+          setLightChannelPower(mode, on);
         }
-        on = state == kPowerStateToggle ? !light.power : state == kPowerStateOn;
-        setLightPower(on);
+      } else if (relay == 0) {
+        if (arg_len == 0) {
+          on = light.power;
+        } else {
+          uint8_t state = kPowerStateOff;
+          if (!parsePowerState(arg, arg_len, state)) {
+            error = F("Invalid power state");
+            return false;
+          }
+          on = state == kPowerStateToggle ? !light.power : state == kPowerStateOn;
+          setLightPower(on);
+        }
+      } else {
+        error = F("Invalid relay");
+        return false;
       }
     } else {
       error = F("Invalid relay");
@@ -8995,7 +9638,8 @@ bool executeDeviceCommand(const char *raw, size_t cmd_len, const char *arg, size
     return true;
   }
 
-  if (commandEquals(raw, cmd_len, "dimmer")) {
+  uint8_t indexed_command = 0;
+  if (parseIndexedCommand(raw, cmd_len, "dimmer", indexed_command, response_key, sizeof(response_key))) {
     if (!light.present) {
       error = F("No light output is configured");
       return false;
@@ -9008,12 +9652,129 @@ bool executeDeviceCommand(const char *raw, size_t cmd_len, const char *arg, size
         error = F("Invalid dimmer");
         return false;
       }
-      setLightDimmer(dimmer);
+      if (indexed_command == 0) {
+        setLightDimmer(dimmer);
+      } else if (lightSupportsColor() && indexed_command == 1) {
+        setLightModeDimmer(kLightModeRgb, dimmer);
+      } else if (lightSupportsColor() && indexed_command == 2) {
+        setLightModeDimmer(kLightModeWhite, dimmer);
+      } else if (!lightSupportsColor() && indexed_command == 1) {
+        setLightDimmer(dimmer);
+      } else {
+        error = F("Invalid dimmer channel");
+        return false;
+      }
     }
     out.reserve(20);
-    out += F("{\"Dimmer\":");
-    out += light.dimmer;
+    out += F("{\"");
+    out += response_key;
+    out += F("\":");
+    if (lightSupportsColor() && indexed_command == 1) {
+      out += lightModeDimmer(kLightModeRgb);
+    } else if (lightSupportsColor() && indexed_command == 2) {
+      out += lightModeDimmer(kLightModeWhite);
+    } else {
+      out += light.dimmer;
+    }
     out += F("}");
+    return true;
+  }
+
+  if (commandEquals(raw, cmd_len, "white")) {
+    if (!light.present || !lightSupportsWhiteChannel()) {
+      error = F("No white light output is configured");
+      return false;
+    }
+    if (arg_len > 0) {
+      String value = commandArgument(arg, arg_len);
+      value.trim();
+      uint16_t dimmer = 0;
+      if (!parseUint16Input(value, kLightDimmerOff, kLightDimmerMax, dimmer)) {
+        error = F("Invalid white dimmer");
+        return false;
+      }
+      setLightModeDimmer(kLightModeWhite, dimmer);
+    }
+    out.reserve(16);
+    out += F("{\"White\":");
+    out += lightModeDimmer(kLightModeWhite);
+    out += F("}");
+    return true;
+  }
+
+  if (parseIndexedCommand(raw, cmd_len, "color", indexed_command, response_key, sizeof(response_key))) {
+    if (!light.present || !lightSupportsColor()) {
+      error = F("No color light output is configured");
+      return false;
+    }
+    if (arg_len > 0) {
+      uint8_t rgba[4];
+      if (!parseLightColor(arg, arg_len, rgba)) {
+        error = F("Invalid color");
+        return false;
+      }
+      setLightColorChannels(rgba);
+    }
+    out.reserve(32);
+    out += F("{\"Color\":\"");
+    appendLightColorHex(out);
+    out += F("\"}");
+    return true;
+  }
+
+  if (parseIndexedCommand(raw, cmd_len, "hsbcolor", indexed_command, response_key, sizeof(response_key))) {
+    if (!light.present || !lightSupportsColor()) {
+      error = F("No color light output is configured");
+      return false;
+    }
+    if (arg_len > 0) {
+      uint16_t hue = 0;
+      uint8_t sat = 0;
+      uint8_t bri = 0;
+      lightCurrentHsb(hue, sat, bri);
+      if (bri == kLightDimmerOff) bri = config.light_on_dimmer;
+      if (indexed_command >= 1 && indexed_command <= 3) {
+        const uint16_t max_value = indexed_command == 1 ? 360 : 100;
+        uint16_t component = 0;
+        if (!parseUint16Token(arg, arg_len, 0, max_value, component)) {
+          error = F("Invalid HSB color");
+          return false;
+        }
+        if (indexed_command == 1) hue = component;
+        else if (indexed_command == 2) sat = static_cast<uint8_t>(component);
+        else bri = static_cast<uint8_t>(component);
+      } else if (!parseHsbColor(arg, arg_len, hue, sat, bri)) {
+        error = F("Invalid HSB color");
+        return false;
+      }
+      uint8_t rgb[3];
+      hsbToRgb(hue, sat, 100, rgb);
+      const uint8_t next_dimmer = bri == 0 ? kLightDimmerOff : sanitizeLightDimmerValue(bri);
+      const bool next_power = next_dimmer != kLightDimmerOff;
+      const bool changed = light.mode != kLightModeRgb ||
+                           light.power != next_power ||
+                           light.dimmer != next_dimmer ||
+                           memcmp(light.rgb, rgb, sizeof(light.rgb)) != 0;
+      light.mode = kLightModeRgb;
+      light.power = next_power;
+      light.dimmer = next_dimmer;
+      memcpy(light.rgb, rgb, sizeof(light.rgb));
+      updateLightOutputs();
+      if (changed) scheduleMqttLightPublish(kMqttLightPendingColor | kMqttLightPendingDimmer);
+      if (changed) scheduleLightConfigPersist();
+    }
+    uint16_t hue = 0;
+    uint8_t sat = 0;
+    uint8_t bri = 0;
+    lightCurrentHsb(hue, sat, bri);
+    out.reserve(28);
+    out += F("{\"HSBColor\":\"");
+    out += hue;
+    out += ',';
+    out += sat;
+    out += ',';
+    out += bri;
+    out += F("\"}");
     return true;
   }
 
@@ -9583,6 +10344,15 @@ void handleHealth() {
     out += light.ct;
     out += F(",\"ct_supported\":");
     out += lightSupportsColorTemperature() ? F("true") : F("false");
+    out += F(",\"color_supported\":");
+    out += lightSupportsColor() ? F("true") : F("false");
+    out += F(",\"white_supported\":");
+    out += lightSupportsWhiteChannel() ? F("true") : F("false");
+    out += F(",\"mode\":\"");
+    out += light.mode == kLightModeRgb ? F("rgb") : F("white");
+    out += F("\",\"color\":\"");
+    appendLightRgbHex(out);
+    out += F("\"");
     out += F(",\"on_dimmer\":");
     out += config.light_on_dimmer;
     out += F(",\"pwm\":[");
