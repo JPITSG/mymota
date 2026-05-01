@@ -47,7 +47,8 @@ constexpr uint16_t kConfigVersionV14 = 14;
 constexpr uint16_t kConfigVersionV15 = 15;
 constexpr uint16_t kConfigVersionV16 = 16;
 constexpr uint16_t kConfigVersionV17 = 17;
-constexpr uint16_t kConfigVersion = 18;
+constexpr uint16_t kConfigVersionV18 = 18;
+constexpr uint16_t kConfigVersion = 19;
 constexpr size_t kEepromSize = 4096;
 constexpr size_t kFlashSectorSize = 4096;
 constexpr uint8_t kEnergyJournalSectorCount = 2;
@@ -56,6 +57,10 @@ constexpr uint32_t kConnectTimeoutMs = 20000;
 constexpr uint32_t kWifiReconnectBeginMs = 60000;
 constexpr uint32_t kInitialFallbackApMs = 300000;
 constexpr uint32_t kApRetryMs = 10000;
+constexpr uint32_t kWifiDynamicPowerSettleMs = 30000;
+constexpr uint32_t kWifiDynamicPowerSampleMs = 2000;
+constexpr uint8_t kWifiDynamicPowerSampleCount = 5;
+constexpr uint8_t kWifiDynamicPowerDisconnectLimit = 2;
 constexpr uint32_t kBootRecoveryStableMs = 30000;
 constexpr uint32_t kBootRecoveryBootMarker = 0x4d594254;  // MYBT
 constexpr uint32_t kBootRecoveryStableMarker = kBootRecoveryMagic;
@@ -71,6 +76,10 @@ constexpr uint32_t kGracefulRelaySnapshotRtcBlock = kRtcUserStartBlock + kEbootC
 constexpr uint8_t kLastRelaySnapshotSectorCount = 1;
 constexpr uint8_t kPhyModeAuto = 0;
 constexpr uint8_t kPhyModeFailsafe = WIFI_PHY_MODE_11G;
+constexpr uint8_t kWifiDynamicPowerDefault = 1;
+constexpr float kWifiTxPowerMaxDbm = 20.5f;
+constexpr float kWifiTxPowerStrongDbm = 10.0f;
+constexpr float kWifiTxPowerMediumDbm = 13.0f;
 constexpr uint8_t kBootRecoveryLimit = 5;
 constexpr size_t kTemplateSlotCount = 14;
 constexpr size_t kTemplateJsonMaxLen = 640;
@@ -908,6 +917,59 @@ struct StoredConfigV17 {
   uint32_t crc;
 };
 
+struct StoredConfigV18 {
+  uint32_t magic;
+  uint16_t version;
+  uint16_t size;
+  char ssid[33];
+  char password[65];
+  char hostname[33];
+  uint8_t phy_mode;
+  uint8_t template_enabled;
+  uint16_t template_base;
+  uint32_t template_flag;
+  char template_name[33];
+  uint16_t template_gpio[kTemplateSlotCount];
+  uint16_t mqtt_port;
+  uint16_t mqtt_keepalive;
+  char mqtt_host[kMqttHostMaxLen + 1];
+  char mqtt_topic[kMqttTopicMaxLen + 1];
+  float energy_total_offset_kwh;
+  uint8_t led_attach[kMaxLedOutputs];
+  uint16_t button_hold_ms;
+  uint8_t button_press_action[kMaxButtons];
+  uint8_t button_hold_action[kMaxButtons];
+  uint16_t energy_mqtt_interval;
+  uint16_t energy_mqtt_change_percent_x10;
+  char button_press_target[kMaxButtons][kButtonActionTargetMaxLen + 1];
+  char button_press_payload[kMaxButtons][kButtonActionPayloadMaxLen + 1];
+  char button_hold_target[kMaxButtons][kButtonActionTargetMaxLen + 1];
+  char button_hold_payload[kMaxButtons][kButtonActionPayloadMaxLen + 1];
+  uint16_t button_debounce_ms;
+  uint8_t input_mode[kMaxButtons];
+  uint8_t input_relay[kMaxButtons];
+  uint8_t input_on_level[kMaxButtons];
+  uint8_t reserved[1];
+  uint8_t button_press_relay[kMaxButtons];
+  uint8_t button_hold_relay[kMaxButtons];
+  uint8_t light_power;
+  uint8_t light_dimmer;
+  uint16_t light_ct;
+  uint8_t light_on_dimmer;
+  uint8_t shelly_dimmer_edge;
+  uint8_t shelly_dimmer_range_min;
+  uint8_t shelly_dimmer_range_max;
+  uint8_t relay_on_boot[kMaxRelays];
+  uint8_t relay_time_enabled[kMaxRelays];
+  uint16_t relay_time_seconds[kMaxRelays];
+  uint16_t energy_mqtt_change_watts;
+  uint16_t power_saving_mode;
+  uint8_t relay_restore_boot[kMaxRelays];
+  uint8_t light_mode;
+  uint8_t light_rgb[3];
+  uint32_t crc;
+};
+
 struct StoredConfig {
   uint32_t magic;
   uint16_t version;
@@ -958,6 +1020,8 @@ struct StoredConfig {
   uint8_t relay_restore_boot[kMaxRelays];
   uint8_t light_mode;
   uint8_t light_rgb[3];
+  uint8_t wifi_dynamic_power;
+  uint8_t wifi_reserved[3];
   uint32_t crc;
 };
 
@@ -1187,6 +1251,17 @@ uint32_t last_wifi_begin_attempt = 0;
 uint32_t wifi_begin_attempt_count = 0;
 bool sta_connected_once = false;
 uint32_t last_ap_attempt = 0;
+bool wifi_dynamic_power_was_connected = false;
+bool wifi_dynamic_power_applied = false;
+bool wifi_dynamic_power_suspended = false;
+bool wifi_dynamic_power_known = false;
+uint32_t wifi_dynamic_power_connected_since = 0;
+uint32_t wifi_dynamic_power_last_sample = 0;
+uint8_t wifi_dynamic_power_samples = 0;
+uint8_t wifi_dynamic_power_disconnects = 0;
+int16_t wifi_dynamic_power_rssi_sum = 0;
+int16_t wifi_dynamic_power_last_rssi = 0;
+int16_t wifi_tx_power_dbm_x10 = static_cast<int16_t>(kWifiTxPowerMaxDbm * 10.0f);
 uint32_t last_led_update = 0;
 uint32_t last_rotary_handler = 0;
 uint32_t last_adc_update = 0;
@@ -1450,6 +1525,15 @@ void setDefaultPowerSavingConfig() {
   setDefaultPowerSavingConfig(config);
 }
 
+void setDefaultWifiPowerConfig(StoredConfig &target) {
+  target.wifi_dynamic_power = kWifiDynamicPowerDefault;
+  memset(target.wifi_reserved, 0, sizeof(target.wifi_reserved));
+}
+
+void setDefaultWifiPowerConfig() {
+  setDefaultWifiPowerConfig(config);
+}
+
 uint8_t sanitizePowerSavingMode(uint16_t mode) {
   switch (mode) {
     case kPowerSavingLight:
@@ -1654,6 +1738,7 @@ void setDefaultConfig() {
   setDefaultLightConfig();
   setDefaultRelayEnforcementConfig();
   setDefaultPowerSavingConfig();
+  setDefaultWifiPowerConfig();
   config.crc = configCrc(config);
   config_ok = false;
 }
@@ -2177,6 +2262,8 @@ void normalizeConfigStrings() {
     strlcpy(config.hostname, defaultHostname().c_str(), sizeof(config.hostname));
   }
   config.phy_mode = sanitizePhyMode(config.phy_mode);
+  config.wifi_dynamic_power = config.wifi_dynamic_power ? 1 : 0;
+  memset(config.wifi_reserved, 0, sizeof(config.wifi_reserved));
   if (config.mqtt_port == 0) {
     config.mqtt_port = kMqttDefaultPort;
   }
@@ -2295,7 +2382,18 @@ bool storedConfigMatchesCurrentConfig() {
   return memcmp(stored, &config, sizeof(config)) == 0;
 }
 
+void applyConfigMigrationDefaults(uint16_t previous_version) {
+  if (previous_version < kConfigVersion) {
+    setDefaultWifiPowerConfig();
+  }
+}
+
 bool commitConfig(bool force_commit) {
+  const uint16_t previous_version = config.version;
+  const uint16_t previous_size = config.size;
+  if (previous_version != kConfigVersion || previous_size != sizeof(StoredConfig)) {
+    applyConfigMigrationDefaults(previous_version);
+  }
   config.magic = kConfigMagic;
   config.version = kConfigVersion;
   config.size = sizeof(StoredConfig);
@@ -2311,7 +2409,8 @@ bool commitConfig(bool force_commit) {
   return committed;
 }
 
-bool saveWifiConfig(const char *ssid, const char *password, const char *hostname, uint8_t phy_mode);
+bool saveWifiConfig(const char *ssid, const char *password, const char *hostname, uint8_t phy_mode,
+                    bool dynamic_power);
 bool saveMqttConfig(const char *host, uint16_t port, const char *topic, uint16_t keepalive);
 bool saveEnergyConfig(float total_offset_kwh, uint16_t mqtt_interval, uint16_t mqtt_change_percent_x10,
                       uint16_t mqtt_change_watts);
@@ -2353,6 +2452,25 @@ bool loadConfig() {
     }
     normalizeConfigStrings();
     config_ok = config.ssid[0] != '\0';
+    return config_ok;
+  }
+
+  if (header.version == kConfigVersionV18 && header.size == sizeof(StoredConfigV18)) {
+    StoredConfigV18 *old_config = new StoredConfigV18;
+    if (!old_config) {
+      setDefaultConfig();
+      return false;
+    }
+    EEPROM.get(0, *old_config);
+    if (old_config->crc != configCrc(*old_config)) {
+      delete old_config;
+      setDefaultConfig();
+      return false;
+    }
+    memset(&config, 0, sizeof(config));
+    memcpy(&config, old_config, offsetof(StoredConfigV18, crc));
+    delete old_config;
+    commitConfig();
     return config_ok;
   }
 
@@ -2736,6 +2854,7 @@ bool loadConfig() {
     setDefaultEnergyMqttConfig();
     setDefaultLedConfig();
     setDefaultButtonConfig();
+    setDefaultWifiPowerConfig();
     commitConfig();
     return config_ok;
   }
@@ -2771,6 +2890,7 @@ bool loadConfig() {
     setDefaultEnergyMqttConfig();
     setDefaultLedConfig();
     setDefaultButtonConfig();
+    setDefaultWifiPowerConfig();
     commitConfig();
     return config_ok;
   }
@@ -2824,6 +2944,7 @@ bool loadConfig() {
     setDefaultEnergyMqttConfig();
     setDefaultLedConfig();
     setDefaultButtonConfig();
+    setDefaultWifiPowerConfig();
     commitConfig();
     return config_ok;
   }
@@ -2851,6 +2972,7 @@ bool loadConfig() {
     setDefaultEnergyMqttConfig();
     setDefaultLedConfig();
     setDefaultButtonConfig();
+    setDefaultWifiPowerConfig();
     commitConfig();
     return config_ok;
   }
@@ -2859,7 +2981,8 @@ bool loadConfig() {
   return false;
 }
 
-bool saveWifiConfig(const char *ssid, const char *password, const char *hostname, uint8_t phy_mode) {
+bool saveWifiConfig(const char *ssid, const char *password, const char *hostname, uint8_t phy_mode,
+                    bool dynamic_power) {
   strlcpy(config.ssid, ssid, sizeof(config.ssid));
   strlcpy(config.password, password, sizeof(config.password));
   if (hostname && hostname[0]) {
@@ -2868,6 +2991,7 @@ bool saveWifiConfig(const char *ssid, const char *password, const char *hostname
     strlcpy(config.hostname, defaultHostname().c_str(), sizeof(config.hostname));
   }
   config.phy_mode = sanitizePhyMode(phy_mode);
+  config.wifi_dynamic_power = dynamic_power ? 1 : 0;
   return commitConfig();
 }
 
@@ -4365,6 +4489,36 @@ bool settingsReadUint16(JsonVariantConst value, uint16_t min_value, uint16_t max
   return true;
 }
 
+bool parseBoolText(String value, bool &out) {
+  value.trim();
+  value.toLowerCase();
+  if (value == F("1") || value == F("true") || value == F("on") || value == F("yes")) {
+    out = true;
+    return true;
+  }
+  if (value == F("0") || value == F("false") || value == F("off") || value == F("no")) {
+    out = false;
+    return true;
+  }
+  return false;
+}
+
+bool settingsReadBool(JsonVariantConst value, bool &out) {
+  if (value.is<bool>()) {
+    out = value.as<bool>();
+    return true;
+  }
+  if (value.is<long>() || value.is<unsigned long>() || value.is<int>() || value.is<unsigned int>()) {
+    const long raw = value.as<long>();
+    if (raw == 0 || raw == 1) {
+      out = raw != 0;
+      return true;
+    }
+  }
+  String text;
+  return settingsReadString(value, text, 8) && parseBoolText(text, out);
+}
+
 bool settingsReadPowerSavingMode(JsonVariantConst value, uint8_t &mode) {
   String mode_name;
   if (settingsReadString(value, mode_name, 12)) {
@@ -4610,7 +4764,9 @@ void appendSettingsExportJson(String &out) {
   out += chipIdHex();
   out += F("\"},\"system\":{\"power_saving\":\"");
   out += powerSavingModeName(config.power_saving_mode);
-  out += F("\"},\"template\":{\"enabled\":");
+  out += F("\"},\"wifi\":{\"dynamic_power\":");
+  out += config.wifi_dynamic_power ? F("true") : F("false");
+  out += F("},\"template\":{\"enabled\":");
   out += config.template_enabled ? F("true") : F("false");
   if (config.template_enabled) {
     const String tpl = currentTemplateJson();
@@ -4725,6 +4881,27 @@ void importSettingsSystem(JsonObjectConst root, StoredConfig &target, SettingsIm
       recordSettingsApplied(stats);
     } else {
       recordSettingsSkipped(stats, F("system.power_saving"));
+    }
+  }
+}
+
+void importSettingsWifi(JsonObjectConst root, StoredConfig &target, SettingsImportStats &stats) {
+  JsonVariantConst wifi_value = root["wifi"];
+  if (wifi_value.isNull()) return;
+  JsonObjectConst wifi = wifi_value.as<JsonObjectConst>();
+  if (wifi.isNull()) {
+    recordSettingsSkipped(stats, F("wifi"));
+    return;
+  }
+
+  JsonVariantConst dynamic_value = wifi.containsKey("dynamic_power") ? wifi["dynamic_power"] : wifi["dynamic_tx_power"];
+  if (!dynamic_value.isNull()) {
+    bool enabled = false;
+    if (settingsReadBool(dynamic_value, enabled)) {
+      target.wifi_dynamic_power = enabled ? 1 : 0;
+      recordSettingsApplied(stats);
+    } else {
+      recordSettingsSkipped(stats, F("wifi.dynamic_power"));
     }
   }
 }
@@ -5269,6 +5446,8 @@ void appendApiSettingsJson(String &out) {
   out += powerSavingModeName(config.power_saving_mode);
   out += F("\",\"delay_ms\":");
   out += powerSavingDelayMs(config.power_saving_mode);
+  out += F("},\"wifi\":{\"dynamic_power\":");
+  out += config.wifi_dynamic_power ? F("true") : F("false");
   out += F("},\"inputs\":[");
   bool first = true;
   for (uint8_t i = 0; i < runtime_template.button_count && i < kMaxButtons; i++) {
@@ -5402,6 +5581,17 @@ void applyApiPowerSavingSetting(JsonVariantConst value, StoredConfig &target, Se
   }
 }
 
+void applyApiWifiDynamicPowerSetting(JsonVariantConst value, StoredConfig &target, SettingsImportStats &stats,
+                                     const String &field) {
+  bool enabled = false;
+  if (settingsReadBool(value, enabled)) {
+    target.wifi_dynamic_power = enabled ? 1 : 0;
+    recordSettingsApplied(stats);
+  } else {
+    recordSettingsSkipped(stats, field);
+  }
+}
+
 void applyApiSystemSettings(JsonObjectConst root, StoredConfig &target, SettingsImportStats &stats) {
   if (root.containsKey("power_saving")) {
     applyApiPowerSavingSetting(root["power_saving"], target, stats, F("power_saving"));
@@ -5418,6 +5608,23 @@ void applyApiSystemSettings(JsonObjectConst root, StoredConfig &target, Settings
     }
   } else if (root.containsKey("system")) {
     recordSettingsSkipped(stats, F("system"));
+  }
+
+  if (root.containsKey("wifi_dynamic_power")) {
+    applyApiWifiDynamicPowerSetting(root["wifi_dynamic_power"], target, stats, F("wifi_dynamic_power"));
+  }
+  if (root.containsKey("wifi_dynamic_tx_power")) {
+    applyApiWifiDynamicPowerSetting(root["wifi_dynamic_tx_power"], target, stats, F("wifi_dynamic_tx_power"));
+  }
+
+  JsonObjectConst wifi = root["wifi"].as<JsonObjectConst>();
+  if (!wifi.isNull()) {
+    JsonVariantConst dynamic_value = wifi.containsKey("dynamic_power") ? wifi["dynamic_power"] : wifi["dynamic_tx_power"];
+    if (!dynamic_value.isNull()) {
+      applyApiWifiDynamicPowerSetting(dynamic_value, target, stats, F("wifi.dynamic_power"));
+    }
+  } else if (root.containsKey("wifi")) {
+    recordSettingsSkipped(stats, F("wifi"));
   }
 }
 
@@ -5476,6 +5683,7 @@ bool apiSettingsIndexedArgPresent(uint8_t input_number, const char *primary_suff
 
 bool apiSettingsGetHasUpdateArgs() {
   if (server.hasArg(F("power_saving")) || server.hasArg(F("power_saving_mode"))) return true;
+  if (server.hasArg(F("wifi_dynamic_power")) || server.hasArg(F("wifi_dynamic_tx_power"))) return true;
   if (server.hasArg(F("input")) || server.hasArg(F("id"))) return true;
   for (uint8_t input_number = 1; input_number <= kMaxButtons; input_number++) {
     if (apiSettingsIndexedArgPresent(input_number, "_mqtt_topic", "_topic") ||
@@ -5498,6 +5706,18 @@ bool applyApiSettingsGetArgs(StoredConfig &target, SettingsImportStats &stats) {
       recordSettingsApplied(stats);
     } else {
       recordSettingsSkipped(stats, F("query.power_saving"));
+    }
+  }
+
+  String wifi_dynamic_power;
+  if (apiSettingsGetArg(F("wifi_dynamic_power"), F("wifi_dynamic_tx_power"), wifi_dynamic_power)) {
+    saw_setting_arg = true;
+    bool enabled = false;
+    if (parseBoolText(wifi_dynamic_power, enabled)) {
+      target.wifi_dynamic_power = enabled ? 1 : 0;
+      recordSettingsApplied(stats);
+    } else {
+      recordSettingsSkipped(stats, F("query.wifi_dynamic_power"));
     }
   }
 
@@ -5576,6 +5796,135 @@ const __FlashStringHelper *wifiDisplayClass(wl_status_t status, bool has_station
   if (status == WL_CONNECTED) return F("pill ok");
   if (has_station_ip) return F("pill warn");
   return F("pill bad");
+}
+
+int16_t wifiDbmToX10(float dbm) {
+  return static_cast<int16_t>((dbm * 10.0f) + 0.5f);
+}
+
+float wifiX10ToDbm(int16_t dbm_x10) {
+  return static_cast<float>(dbm_x10) / 10.0f;
+}
+
+bool wifiTxPowerIsMax() {
+  return wifi_tx_power_dbm_x10 >= wifiDbmToX10(kWifiTxPowerMaxDbm);
+}
+
+void setWifiTxPowerDbm(float dbm) {
+  if (dbm < 0.0f) dbm = 0.0f;
+  if (dbm > kWifiTxPowerMaxDbm) dbm = kWifiTxPowerMaxDbm;
+  const int16_t dbm_x10 = wifiDbmToX10(dbm);
+  if (wifi_dynamic_power_known && wifi_tx_power_dbm_x10 == dbm_x10) return;
+  WiFi.setOutputPower(dbm);
+  wifi_tx_power_dbm_x10 = dbm_x10;
+  wifi_dynamic_power_known = true;
+  delay(1);
+}
+
+void resetWifiDynamicPowerRuntime(bool restore_max) {
+  wifi_dynamic_power_was_connected = WiFi.status() == WL_CONNECTED;
+  wifi_dynamic_power_applied = false;
+  wifi_dynamic_power_suspended = false;
+  wifi_dynamic_power_connected_since = wifi_dynamic_power_was_connected ? millis() : 0;
+  wifi_dynamic_power_last_sample = 0;
+  wifi_dynamic_power_samples = 0;
+  wifi_dynamic_power_disconnects = 0;
+  wifi_dynamic_power_rssi_sum = 0;
+  wifi_dynamic_power_last_rssi = 0;
+  if (restore_max) setWifiTxPowerDbm(kWifiTxPowerMaxDbm);
+}
+
+float wifiDynamicPowerTargetDbm(int16_t rssi) {
+  if (rssi >= -40) return kWifiTxPowerStrongDbm;
+  if (rssi >= -50) return kWifiTxPowerMediumDbm;
+  return kWifiTxPowerMaxDbm;
+}
+
+void prepareWifiTxPowerForConnect() {
+  if (!config.wifi_dynamic_power || !wifi_dynamic_power_applied || !wifiTxPowerIsMax()) {
+    setWifiTxPowerDbm(kWifiTxPowerMaxDbm);
+  }
+  wifi_dynamic_power_applied = false;
+  wifi_dynamic_power_connected_since = 0;
+  wifi_dynamic_power_last_sample = 0;
+  wifi_dynamic_power_samples = 0;
+  wifi_dynamic_power_rssi_sum = 0;
+}
+
+void maintainWifiDynamicPower() {
+  const bool connected = WiFi.status() == WL_CONNECTED;
+  const uint32_t now = millis();
+
+  if (!config.wifi_dynamic_power) {
+    if (!wifiTxPowerIsMax()) setWifiTxPowerDbm(kWifiTxPowerMaxDbm);
+    wifi_dynamic_power_was_connected = connected;
+    wifi_dynamic_power_applied = false;
+    wifi_dynamic_power_suspended = false;
+    return;
+  }
+
+  if (!connected) {
+    if (wifi_dynamic_power_was_connected && wifi_dynamic_power_applied && !wifiTxPowerIsMax()) {
+      wifi_dynamic_power_disconnects++;
+      setWifiTxPowerDbm(kWifiTxPowerMaxDbm);
+      if (wifi_dynamic_power_disconnects >= kWifiDynamicPowerDisconnectLimit) {
+        wifi_dynamic_power_suspended = true;
+      }
+    }
+    wifi_dynamic_power_was_connected = false;
+    wifi_dynamic_power_applied = false;
+    wifi_dynamic_power_connected_since = 0;
+    wifi_dynamic_power_last_sample = 0;
+    wifi_dynamic_power_samples = 0;
+    wifi_dynamic_power_rssi_sum = 0;
+    return;
+  }
+
+  if (!wifi_dynamic_power_was_connected) {
+    wifi_dynamic_power_was_connected = true;
+    wifi_dynamic_power_connected_since = now;
+    wifi_dynamic_power_last_sample = 0;
+    wifi_dynamic_power_samples = 0;
+    wifi_dynamic_power_rssi_sum = 0;
+    setWifiTxPowerDbm(kWifiTxPowerMaxDbm);
+    return;
+  }
+
+  if (wifi_dynamic_power_suspended || wifi_dynamic_power_applied) return;
+  if (wifi_dynamic_power_connected_since == 0) {
+    wifi_dynamic_power_connected_since = now;
+    return;
+  }
+  if (now - wifi_dynamic_power_connected_since < kWifiDynamicPowerSettleMs) return;
+  if (wifi_dynamic_power_last_sample && now - wifi_dynamic_power_last_sample < kWifiDynamicPowerSampleMs) return;
+
+  const int16_t rssi = static_cast<int16_t>(WiFi.RSSI());
+  wifi_dynamic_power_last_sample = now;
+  wifi_dynamic_power_rssi_sum += rssi;
+  wifi_dynamic_power_samples++;
+  if (wifi_dynamic_power_samples < kWifiDynamicPowerSampleCount) return;
+
+  wifi_dynamic_power_last_rssi = wifi_dynamic_power_rssi_sum / static_cast<int16_t>(wifi_dynamic_power_samples);
+  setWifiTxPowerDbm(wifiDynamicPowerTargetDbm(wifi_dynamic_power_last_rssi));
+  wifi_dynamic_power_applied = true;
+}
+
+const __FlashStringHelper *wifiTxPowerStatusName() {
+  if (!config.wifi_dynamic_power) return F("max");
+  if (wifi_dynamic_power_suspended) return F("max-suspended");
+  if (!wifi_dynamic_power_applied) return WiFi.status() == WL_CONNECTED ? F("settling") : F("pending");
+  return wifiTxPowerIsMax() ? F("max-dynamic") : F("dynamic");
+}
+
+void appendWifiTxPowerText(String &out) {
+  out += String(wifiX10ToDbm(wifi_tx_power_dbm_x10), 1);
+  out += F(" dBm ");
+  out += wifiTxPowerStatusName();
+  if (wifi_dynamic_power_applied && wifi_dynamic_power_last_rssi != 0) {
+    out += F(" @ ");
+    out += String(wifi_dynamic_power_last_rssi);
+    out += F(" dBm");
+  }
 }
 
 const __FlashStringHelper *updateErrorName(uint8_t error) {
@@ -8101,7 +8450,7 @@ void appendFooter(String &page, bool live_poll = true, bool reboot_wait = false)
   page += F("if(d.perf){t('live-loop-load',d.perf.loop_load+'%');t('live-loop-hz',d.perf.loop_hz+'/s');t('live-loop-max',Number(d.perf.loop_max_us/1000).toFixed(1)+' ms');}");
   page += F("if(d.power_saving){sv('power_saving',d.power_saving.mode||'off');}");
   page += F("t('live-recovery',d.recovery.fast_boot_count+'/'+d.recovery.limit);");
-  page += F("var wu=d.wifi_usable!=null?d.wifi_usable:d.wifi,ws=!!d.wifi_sdk_connected,wl=ws?'connected':(wu?'usable':'disconnected'),wc=ws?'pill ok':(wu?'pill warn':'pill bad');p('live-wifi',wl,wc);t('live-ssid',d.wifi_ssid||'n/a');t('live-ip',d.ip||'n/a');t('live-rssi',d.rssi==null?'n/a':d.rssi+' dBm');t('live-wifi-sdk',(d.wifi_status_name||'unknown')+' ('+(d.wifi_status==null?'?':d.wifi_status)+')');t('live-gateway',d.gateway_ip||'n/a');t('live-dns',d.dns_ip||'n/a');");
+  page += F("var wu=d.wifi_usable!=null?d.wifi_usable:d.wifi,ws=!!d.wifi_sdk_connected,wl=ws?'connected':(wu?'usable':'disconnected'),wc=ws?'pill ok':(wu?'pill warn':'pill bad');p('live-wifi',wl,wc);t('live-ssid',d.wifi_ssid||'n/a');t('live-ip',d.ip||'n/a');t('live-rssi',d.rssi==null?'n/a':d.rssi+' dBm');if(d.wifi_tx_power){var tx=(d.wifi_tx_power.dbm==null?'n/a':Number(d.wifi_tx_power.dbm).toFixed(1)+' dBm')+' '+(d.wifi_tx_power.status||'');if(d.wifi_tx_power.sample_rssi!=null)tx+=' @ '+d.wifi_tx_power.sample_rssi+' dBm';t('live-wifi-tx-power',tx);}t('live-wifi-sdk',(d.wifi_status_name||'unknown')+' ('+(d.wifi_status==null?'?':d.wifi_status)+')');t('live-gateway',d.gateway_ip||'n/a');t('live-dns',d.dns_ip||'n/a');");
   page += F("p('live-mqtt',d.mqtt.enabled?(d.mqtt.connected?'connected':'disconnected'):'not configured',d.mqtt.enabled?(d.mqtt.connected?'pill ok':'pill bad'):'pill');");
   page += F("if(d.mqtt){t('live-mqtt-pending',d.mqtt.pending);t('live-mqtt-result',d.mqtt.last_connect_result);t('live-mqtt-connect-ms',d.mqtt.last_connect_ms+' ms');t('live-mqtt-attempt',d.mqtt.last_attempt_ms_ago==null?'n/a':d.mqtt.last_attempt_ms_ago+' ms ago');}");
   page += F("if(d.light){p('live-light-power',d.light.power?'on':'off',d.light.power?'pill ok':'pill bad');t('live-light-dimmer',d.light.dimmer+'%');t('live-light-ct',d.light.ct+' mired');t('live-light-mode',d.light.mode||'white');t('live-light-color',d.light.color||'');t('live-light-on-dimmer',d.light.on_dimmer+'%');sv('dimmer',d.light.dimmer);sv('ct',d.light.ct);sv('color',d.light.color||'');if(d.light.shelly_dimmer){var sd=d.light.shelly_dimmer;t('live-shelly-edge',sd.edge||'auto');t('live-shelly-range-min',sd.range_min);t('live-shelly-range-max',sd.range_max);sv('shelly_edge',sd.edge||'auto');sv('shelly_range_min',sd.range_min);sv('shelly_range_max',sd.range_max);}}");
@@ -8245,6 +8594,8 @@ void appendStatusBlock(String &page) {
   } else {
     page += F("n/a");
   }
+  page += F("</code></div><span>Tx power</span><div><code id='live-wifi-tx-power'>");
+  appendWifiTxPowerText(page);
   page += F("</code></div>");
 
   if (ap_started) {
@@ -9033,6 +9384,9 @@ void handleRoot() {
   page += htmlEscape(config.hostname);
   page += F("'></label></div>");
   appendPhyModeSelect(page);
+  page += F("<div class='row'><label><input type='checkbox' name='wifi_dynamic_power' value='1'");
+  if (config.wifi_dynamic_power) page += F(" checked");
+  page += F(">Dynamic Wi-Fi power</label></div>");
   page += F("<button type='submit'>Save Wi-Fi</button></form>");
   page += F("<p><a class='btn secondary' href='/scan'>Scan networks</a></p></section>");
   flushStreamChunk(page);
@@ -9094,6 +9448,9 @@ void handleScan() {
     page += htmlEscape(config.hostname);
     page += F("'></label></div>");
     appendPhyModeSelect(page);
+    page += F("<div class='row'><label><input type='checkbox' name='wifi_dynamic_power' value='1'");
+    if (config.wifi_dynamic_power) page += F(" checked");
+    page += F(">Dynamic Wi-Fi power</label></div>");
     page += F("<ul class='list'>");
     for (int i = 0; i < count; i++) {
       page += F("<li><label><input type='radio' name='ssid' required value='");
@@ -9119,6 +9476,7 @@ void handleWifiSave() {
   const String password = server.arg("password");
   const String hostname = server.arg("hostname");
   uint8_t phy_mode = config.phy_mode;
+  const bool dynamic_power = server.hasArg("wifi_dynamic_power");
   char password_to_save[sizeof(config.password)];
 
   if (ssid.length() == 0 || ssid.length() > 32 || password.length() > 64 || hostname.length() > 32) {
@@ -9135,7 +9493,7 @@ void handleWifiSave() {
     strlcpy(password_to_save, password.c_str(), sizeof(password_to_save));
   }
 
-  if (!saveWifiConfig(ssid.c_str(), password_to_save, hostname.c_str(), phy_mode)) {
+  if (!saveWifiConfig(ssid.c_str(), password_to_save, hostname.c_str(), phy_mode, dynamic_power)) {
     server.send(500, F("text/plain"), F("Could not save Wi-Fi settings"));
     return;
   }
@@ -10298,6 +10656,7 @@ void finishApiSettingsUpdate(const StoredConfig &before, const StoredConfig &can
   }
 
   const bool input_changed = inputConfigDiffers(before, candidate);
+  const bool wifi_dynamic_power_changed = before.wifi_dynamic_power != candidate.wifi_dynamic_power;
   config = candidate;
   if (!commitConfig()) {
     config = before;
@@ -10305,6 +10664,7 @@ void finishApiSettingsUpdate(const StoredConfig &before, const StoredConfig &can
     return;
   }
   if (input_changed) updateDeviceLeds(true);
+  if (wifi_dynamic_power_changed) resetWifiDynamicPowerRuntime(true);
 
   String out;
   out.reserve(2200);
@@ -10445,6 +10805,7 @@ void handleSettingsImport() {
   SettingsImportStats stats = {0, 0, String()};
 
   importSettingsSystem(root, candidate, stats);
+  importSettingsWifi(root, candidate, stats);
   importSettingsTemplate(root, candidate, stats);
   RuntimeTemplate candidate_runtime{};
   decodeTemplateConfigInto(candidate, candidate_runtime);
@@ -10474,6 +10835,7 @@ void handleSettingsImport() {
   const bool led_changed = ledConfigDiffers(before, candidate);
   const bool relay_enforcement_changed = relayEnforcementConfigDiffers(before, candidate);
   const bool input_changed = inputConfigDiffers(before, candidate);
+  const bool wifi_dynamic_power_changed = before.wifi_dynamic_power != candidate.wifi_dynamic_power;
 
   config = candidate;
   if (!commitConfig()) {
@@ -10514,6 +10876,7 @@ void handleSettingsImport() {
     saveLastRelaySnapshotIfNeeded();
   }
   if (led_changed || input_changed) updateDeviceLeds(true);
+  if (wifi_dynamic_power_changed) resetWifiDynamicPowerRuntime(true);
 
   page += F("<p class='ok'>Settings imported.</p>");
   appendSettingsImportSummary(page, stats);
@@ -10588,6 +10951,23 @@ void handleHealth() {
   } else {
     out += F("null");
   }
+  out += F(",\"wifi_tx_power\":{\"dynamic\":");
+  out += config.wifi_dynamic_power ? F("true") : F("false");
+  out += F(",\"status\":\"");
+  out += wifiTxPowerStatusName();
+  out += F("\",\"dbm\":");
+  out += String(wifiX10ToDbm(wifi_tx_power_dbm_x10), 1);
+  out += F(",\"sample_rssi\":");
+  if (wifi_dynamic_power_applied && wifi_dynamic_power_last_rssi != 0) {
+    out += wifi_dynamic_power_last_rssi;
+  } else {
+    out += F("null");
+  }
+  out += F(",\"samples\":");
+  out += wifi_dynamic_power_samples;
+  out += F(",\"disconnects\":");
+  out += wifi_dynamic_power_disconnects;
+  out += F("}");
   out += F(",\"wifi_reconnects\":");
   out += wifi_begin_attempt_count;
   out += F(",\"wifi_last_begin_ms_ago\":");
@@ -11151,6 +11531,7 @@ void beginWifiReconnect(uint32_t now) {
   if (!config_ok || WiFi.status() == WL_CONNECTED) return;
   WiFi.mode(ap_started ? WIFI_AP_STA : WIFI_STA);
   applyPhyMode(config.phy_mode);
+  prepareWifiTxPowerForConnect();
   WiFi.begin(config.ssid, config.password);
   last_wifi_begin_attempt = now;
   wifi_begin_attempt_count++;
@@ -11170,6 +11551,7 @@ bool connectWifiWithPhy(uint8_t phy_mode, uint32_t timeout_ms) {
   delay(100);
   WiFi.mode(WIFI_STA);
   applyPhyMode(phy_mode);
+  prepareWifiTxPowerForConnect();
   WiFi.begin(config.ssid, config.password);
   last_wifi_begin_attempt = millis();
   wifi_begin_attempt_count++;
@@ -11183,6 +11565,7 @@ void prepareWifi() {
   WiFi.hostname(config.hostname);
   WiFi.setSleepMode(WIFI_NONE_SLEEP);
   wifi_set_sleep_type(NONE_SLEEP_T);
+  resetWifiDynamicPowerRuntime(true);
 }
 
 void connectWifi() {
@@ -11347,6 +11730,7 @@ void loop() {
 
   maintainBootRecovery();
   maintainWifi();
+  maintainWifiDynamicPower();
   maintainDevice();
   server.handleClient();
   maintainMqtt();
