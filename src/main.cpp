@@ -112,6 +112,12 @@ constexpr uint8_t kMaxLeds = 4;
 constexpr uint8_t kMaxLedOutputs = kMaxLeds + 1;
 constexpr uint8_t kMaxLightPwms = 4;
 constexpr uint8_t kMaxRotaries = 1;
+constexpr uint8_t kPowerSavingOff = 0;
+constexpr uint8_t kPowerSavingLight = 1;
+constexpr uint8_t kPowerSavingDeep = 2;
+constexpr uint16_t kPowerSavingOffDelayMs = 0;
+constexpr uint16_t kPowerSavingLightDelayMs = 1;
+constexpr uint16_t kPowerSavingDeepDelayMs = 10;
 constexpr uint16_t kRelayEnforcementMinSeconds = 1;
 constexpr uint16_t kRelayEnforcementMaxSeconds = 65535U;
 constexpr uint16_t kButtonDebounceDefaultMs = 50;
@@ -948,7 +954,7 @@ struct StoredConfig {
   uint8_t relay_time_enabled[kMaxRelays];
   uint16_t relay_time_seconds[kMaxRelays];
   uint16_t energy_mqtt_change_watts;
-  uint16_t energy_reserved;
+  uint16_t power_saving_mode;
   uint8_t relay_restore_boot[kMaxRelays];
   uint8_t light_mode;
   uint8_t light_rgb[3];
@@ -1434,7 +1440,58 @@ void setDefaultEnergyMqttConfig() {
   config.energy_mqtt_interval = 0;
   config.energy_mqtt_change_percent_x10 = 0;
   config.energy_mqtt_change_watts = 0;
-  config.energy_reserved = 0;
+}
+
+void setDefaultPowerSavingConfig(StoredConfig &target) {
+  target.power_saving_mode = kPowerSavingOff;
+}
+
+void setDefaultPowerSavingConfig() {
+  setDefaultPowerSavingConfig(config);
+}
+
+uint8_t sanitizePowerSavingMode(uint16_t mode) {
+  switch (mode) {
+    case kPowerSavingLight:
+    case kPowerSavingDeep:
+      return static_cast<uint8_t>(mode);
+    default:
+      return kPowerSavingOff;
+  }
+}
+
+const __FlashStringHelper *powerSavingModeName(uint8_t mode) {
+  switch (sanitizePowerSavingMode(mode)) {
+    case kPowerSavingLight: return F("light");
+    case kPowerSavingDeep: return F("deep");
+    default: return F("off");
+  }
+}
+
+uint16_t powerSavingDelayMs(uint8_t mode) {
+  switch (sanitizePowerSavingMode(mode)) {
+    case kPowerSavingLight: return kPowerSavingLightDelayMs;
+    case kPowerSavingDeep: return kPowerSavingDeepDelayMs;
+    default: return kPowerSavingOffDelayMs;
+  }
+}
+
+bool parsePowerSavingMode(String value, uint8_t &mode) {
+  value.trim();
+  value.toLowerCase();
+  if (value == F("off") || value == F("none") || value == F("0")) {
+    mode = kPowerSavingOff;
+    return true;
+  }
+  if (value == F("light") || value == F("1")) {
+    mode = kPowerSavingLight;
+    return true;
+  }
+  if (value == F("deep") || value == F("2")) {
+    mode = kPowerSavingDeep;
+    return true;
+  }
+  return false;
 }
 
 void setDefaultLightColorConfig(StoredConfig &target) {
@@ -1596,6 +1653,7 @@ void setDefaultConfig() {
   setDefaultButtonConfig();
   setDefaultLightConfig();
   setDefaultRelayEnforcementConfig();
+  setDefaultPowerSavingConfig();
   config.crc = configCrc(config);
   config_ok = false;
 }
@@ -2133,7 +2191,7 @@ void normalizeConfigStrings() {
   if (config.energy_mqtt_change_percent_x10 > static_cast<uint16_t>(kMqttEnergyChangeMaxPercent * 10.0f)) {
     config.energy_mqtt_change_percent_x10 = 0;
   }
-  config.energy_reserved = 0;
+  config.power_saving_mode = sanitizePowerSavingMode(config.power_saving_mode);
   config.light_power = config.light_power ? 1 : 0;
   if (config.light_dimmer > kLightDimmerMax) {
     config.light_dimmer = kLightDimmerDefault;
@@ -2356,7 +2414,7 @@ bool loadConfig() {
     memset(&config, 0, sizeof(config));
     memcpy(&config, old_config, offsetof(StoredConfigV15, crc));
     config.energy_mqtt_change_watts = 0;
-    config.energy_reserved = 0;
+    config.power_saving_mode = kPowerSavingOff;
     for (uint8_t i = 0; i < kMaxRelays; i++) {
       config.relay_restore_boot[i] = old_config->relay_on_boot[i] ? 0 : 1;
     }
@@ -2857,6 +2915,11 @@ bool saveEnergyConfig(float total_offset_kwh, uint16_t mqtt_interval, uint16_t m
   last_mqtt_energy_report_reason = kMqttEnergyReportReasonNone;
   mqtt_pending_energy_zero_relay_mask = 0;
   mqtt_pending_energy_report_reason = kMqttEnergyReportReasonNone;
+  return commitConfig();
+}
+
+bool savePowerSavingConfig(uint8_t mode) {
+  config.power_saving_mode = sanitizePowerSavingMode(mode);
   return commitConfig();
 }
 
@@ -4302,6 +4365,19 @@ bool settingsReadUint16(JsonVariantConst value, uint16_t min_value, uint16_t max
   return true;
 }
 
+bool settingsReadPowerSavingMode(JsonVariantConst value, uint8_t &mode) {
+  String mode_name;
+  if (settingsReadString(value, mode_name, 12)) {
+    return parsePowerSavingMode(mode_name, mode);
+  }
+  uint16_t raw = 0;
+  if (settingsReadUint16(value, kPowerSavingOff, kPowerSavingDeep, raw)) {
+    mode = sanitizePowerSavingMode(raw);
+    return true;
+  }
+  return false;
+}
+
 bool settingsReadFloat(JsonVariantConst value, float min_value, float max_value, float &out) {
   if (!value.is<float>() && !value.is<double>() && !value.is<long>() && !value.is<unsigned long>() &&
       !value.is<int>() && !value.is<unsigned int>()) {
@@ -4532,6 +4608,8 @@ void appendSettingsExportJson(String &out) {
   out += F(MYMOTA_TARGET);
   out += F("\",\"chip\":\"");
   out += chipIdHex();
+  out += F("\"},\"system\":{\"power_saving\":\"");
+  out += powerSavingModeName(config.power_saving_mode);
   out += F("\"},\"template\":{\"enabled\":");
   out += config.template_enabled ? F("true") : F("false");
   if (config.template_enabled) {
@@ -4626,6 +4704,29 @@ void appendSettingsExportJson(String &out) {
     out += F("}");
   }
   out += F("]}}");
+}
+
+void importSettingsSystem(JsonObjectConst root, StoredConfig &target, SettingsImportStats &stats) {
+  JsonVariantConst system_value = root["system"];
+  if (system_value.isNull()) return;
+  JsonObjectConst system = system_value.as<JsonObjectConst>();
+  if (system.isNull()) {
+    recordSettingsSkipped(stats, F("system"));
+    return;
+  }
+
+  JsonVariantConst power_value = system.containsKey("power_saving") ? system["power_saving"] : system["power_saving_mode"];
+  if (!power_value.isNull()) {
+    JsonObjectConst power_object = power_value.as<JsonObjectConst>();
+    JsonVariantConst mode_value = power_object.isNull() ? power_value : power_object["mode"];
+    uint8_t mode = kPowerSavingOff;
+    if (settingsReadPowerSavingMode(mode_value, mode)) {
+      target.power_saving_mode = mode;
+      recordSettingsApplied(stats);
+    } else {
+      recordSettingsSkipped(stats, F("system.power_saving"));
+    }
+  }
 }
 
 bool importSettingsTemplate(JsonObjectConst root, StoredConfig &target, SettingsImportStats &stats) {
@@ -5164,7 +5265,11 @@ void importSettingsInputs(JsonObjectConst root, StoredConfig &target, const Runt
 void appendApiSettingsJson(String &out) {
   out += F("{\"format\":\"mymota-api-settings\",\"api_version\":");
   out += kApiSettingsVersion;
-  out += F(",\"inputs\":[");
+  out += F(",\"power_saving\":{\"mode\":\"");
+  out += powerSavingModeName(config.power_saving_mode);
+  out += F("\",\"delay_ms\":");
+  out += powerSavingDelayMs(config.power_saving_mode);
+  out += F("},\"inputs\":[");
   bool first = true;
   for (uint8_t i = 0; i < runtime_template.button_count && i < kMaxButtons; i++) {
     if (!first) out += ',';
@@ -5281,6 +5386,41 @@ bool applyApiInputPressMqttSetting(JsonObjectConst item, StoredConfig &target, S
   return applyApiInputPressMqttValues(input_number, has_topic, topic, has_payload, payload, target, stats, field);
 }
 
+void applyApiPowerSavingSetting(JsonVariantConst value, StoredConfig &target, SettingsImportStats &stats,
+                                const String &field) {
+  JsonVariantConst mode_value = value;
+  JsonObjectConst object = value.as<JsonObjectConst>();
+  if (!object.isNull()) {
+    mode_value = object["mode"];
+  }
+  uint8_t mode = kPowerSavingOff;
+  if (settingsReadPowerSavingMode(mode_value, mode)) {
+    target.power_saving_mode = mode;
+    recordSettingsApplied(stats);
+  } else {
+    recordSettingsSkipped(stats, field);
+  }
+}
+
+void applyApiSystemSettings(JsonObjectConst root, StoredConfig &target, SettingsImportStats &stats) {
+  if (root.containsKey("power_saving")) {
+    applyApiPowerSavingSetting(root["power_saving"], target, stats, F("power_saving"));
+  }
+  if (root.containsKey("power_saving_mode")) {
+    applyApiPowerSavingSetting(root["power_saving_mode"], target, stats, F("power_saving_mode"));
+  }
+
+  JsonObjectConst system = root["system"].as<JsonObjectConst>();
+  if (!system.isNull()) {
+    JsonVariantConst power_value = system.containsKey("power_saving") ? system["power_saving"] : system["power_saving_mode"];
+    if (!power_value.isNull()) {
+      applyApiPowerSavingSetting(power_value, target, stats, F("system.power_saving"));
+    }
+  } else if (root.containsKey("system")) {
+    recordSettingsSkipped(stats, F("system"));
+  }
+}
+
 void applyApiInputSettings(JsonObjectConst root, StoredConfig &target, SettingsImportStats &stats) {
   JsonVariantConst inputs_value = root["inputs"];
   if (inputs_value.isNull()) return;
@@ -5335,6 +5475,7 @@ bool apiSettingsIndexedArgPresent(uint8_t input_number, const char *primary_suff
 }
 
 bool apiSettingsGetHasUpdateArgs() {
+  if (server.hasArg(F("power_saving")) || server.hasArg(F("power_saving_mode"))) return true;
   if (server.hasArg(F("input")) || server.hasArg(F("id"))) return true;
   for (uint8_t input_number = 1; input_number <= kMaxButtons; input_number++) {
     if (apiSettingsIndexedArgPresent(input_number, "_mqtt_topic", "_topic") ||
@@ -5347,6 +5488,18 @@ bool apiSettingsGetHasUpdateArgs() {
 
 bool applyApiSettingsGetArgs(StoredConfig &target, SettingsImportStats &stats) {
   bool saw_setting_arg = false;
+
+  String power_saving;
+  if (apiSettingsGetArg(F("power_saving"), F("power_saving_mode"), power_saving)) {
+    saw_setting_arg = true;
+    uint8_t mode = kPowerSavingOff;
+    if (parsePowerSavingMode(power_saving, mode)) {
+      target.power_saving_mode = mode;
+      recordSettingsApplied(stats);
+    } else {
+      recordSettingsSkipped(stats, F("query.power_saving"));
+    }
+  }
 
   if (server.hasArg(F("input")) || server.hasArg(F("id"))) {
     saw_setting_arg = true;
@@ -7919,11 +8072,11 @@ void appendHeader(String &page, const __FlashStringHelper *title, bool show_spin
   page += F(".brand{font-size:28px;font-weight:700;letter-spacing:0;color:inherit;text-decoration:none}.brand span{color:#7dd3aa}.sub{color:#c7d0dc;font-size:13px}.meta{display:flex;align-items:center;gap:8px}");
   page += F(".spin{width:13px;height:13px;border:2px solid rgba(255,255,255,.35);border-top-color:#7dd3aa;border-radius:50%;opacity:.55}.spin.active{opacity:1;animation:rot .7s linear infinite}@keyframes rot{to{transform:rotate(360deg)}}main{max-width:1080px;margin:18px auto 28px;padding:0 14px}");
   page += F(".grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px}.panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:14px;box-shadow:0 1px 2px rgba(0,0,0,.04)}.wide{grid-column:1/-1}");
-  page += F(".panel h2{font-size:17px;margin:0 0 12px}.panel-title{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 12px}.panel-title h2{margin:0}.kv{display:grid;grid-template-columns:minmax(110px,42%) 1fr;gap:8px 12px}.kv span,.hint{color:var(--muted)}.kv div{min-width:0}");
+  page += F(".panel h2{font-size:17px;margin:0 0 12px}.panel h3{font-size:14px;margin:0 0 10px}.panel-title{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 12px}.panel-title h2{margin:0}.system-section{border-top:1px solid var(--line);margin-top:14px;padding-top:12px}.system-section.first{border-top:0;margin-top:0;padding-top:0}.kv{display:grid;grid-template-columns:minmax(110px,42%) 1fr;gap:8px 12px}.kv span,.hint{color:var(--muted)}.kv div{min-width:0}");
   page += F("code{background:#eef2f6;border:1px solid #dce3ea;border-radius:4px;padding:1px 4px;word-break:break-word}.pill{display:inline-block;border-radius:999px;padding:2px 8px;background:#eef2f6;color:#364152}.pill.ok{background:var(--ok);color:#fff}.pill.warn{background:var(--warn);color:#fff}.pill.bad{background:var(--bad);color:#fff}.panel h2 .pill{font-size:13px;font-weight:400;vertical-align:1px}.ok{color:var(--ok)}.bad{color:var(--bad)}.muted{color:var(--muted)}");
   page += F(".note{background:#eef2f6;border:1px solid #dce3ea;border-radius:6px;padding:10px;margin:10px 0}.note p{margin:0 0 7px}.tokens{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px}.tokens div{display:flex;flex-direction:column;gap:3px}.help{position:relative;margin-left:auto}.help-q{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border:1px solid var(--line);border-radius:50%;background:#eef2f6;color:var(--accent2);font-size:14px;font-weight:700;cursor:help}.help-box{display:none;position:absolute;right:0;top:30px;z-index:30;width:520px;max-width:calc(100vw - 48px);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px;box-shadow:0 8px 24px rgba(0,0,0,.18);color:var(--text);font-size:14px;font-weight:400;line-height:1.4}.help:hover .help-box,.help:focus-within .help-box{display:block}.help-box p{margin:0 0 8px}.button-block{border-top:1px solid var(--line);margin-top:12px;padding-top:12px}.action-extra,.mode-extra{display:none}.action-extra.show,.mode-extra.show{display:block}.hidden{display:none}");
   page += F("form{margin:0}.row{margin:10px 0}label{display:block;font-weight:600;color:#344054}input,button,select,textarea{font:inherit}input,select,textarea{width:100%;margin-top:4px;padding:9px;border:1px solid #b9c4d0;border-radius:6px;background:#fff}input[type=checkbox]{width:auto;margin:0 6px 0 0;padding:0;vertical-align:-1px}textarea{min-height:92px;resize:vertical}");
-  page += F("button,.btn{display:inline-block;margin:4px 4px 0 0;padding:8px 12px;border:1px solid var(--accent);border-radius:6px;background:var(--accent);color:#fff;text-decoration:none;cursor:pointer}.secondary{background:#fff;color:var(--accent2);border-color:#9eb7cf}.danger{background:#fff;color:var(--bad);border-color:#d4aaa7}.inline{display:inline}.actions{display:flex;flex-wrap:wrap;gap:6px}.inline button{margin:0 4px 0 0}.list{margin:0;padding-left:18px}@media(max-width:520px){.kv{grid-template-columns:1fr}.brand{font-size:24px}}</style></head><body>");
+  page += F("button,.btn{display:inline-block;margin:4px 4px 0 0;padding:8px 12px;border:1px solid var(--accent);border-radius:6px;background:var(--accent);color:#fff;text-decoration:none;cursor:pointer}.secondary{background:#fff;color:var(--accent2);border-color:#9eb7cf}.danger{background:#fff;color:var(--bad);border-color:#d4aaa7}.inline{display:inline}.actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:8px 0 0}.actions form{margin:0}.actions .btn,.actions button{margin:0}.list{margin:0;padding-left:18px}@media(max-width:520px){.kv{grid-template-columns:1fr}.brand{font-size:24px}}</style></head><body>");
   page += F("<header class='top'><div class='topin'><div><a class='brand' href='/'>my<span>Mota</span></a><div class='sub'>ESP8266/ESP8285 firmware</div></div><div class='sub meta'><span>");
   page += F(MYMOTA_VERSION);
   page += F(" / ");
@@ -7946,6 +8099,7 @@ void appendFooter(String &page, bool live_poll = true, bool reboot_wait = false)
   page += F("function live(){fh().then(function(d){");
   page += F("t('live-heap',d.heap+' bytes');if(d.flash){t('live-flash-used',d.flash.used+' bytes');t('live-flash-total',d.flash.total+' bytes');t('live-flash-free',d.flash.free+' bytes');}t('live-uptime',d.uptime+'s');t('live-active-phy',d.active_phy);");
   page += F("if(d.perf){t('live-loop-load',d.perf.loop_load+'%');t('live-loop-hz',d.perf.loop_hz+'/s');t('live-loop-max',Number(d.perf.loop_max_us/1000).toFixed(1)+' ms');}");
+  page += F("if(d.power_saving){sv('power_saving',d.power_saving.mode||'off');}");
   page += F("t('live-recovery',d.recovery.fast_boot_count+'/'+d.recovery.limit);");
   page += F("var wu=d.wifi_usable!=null?d.wifi_usable:d.wifi,ws=!!d.wifi_sdk_connected,wl=ws?'connected':(wu?'usable':'disconnected'),wc=ws?'pill ok':(wu?'pill warn':'pill bad');p('live-wifi',wl,wc);t('live-ssid',d.wifi_ssid||'n/a');t('live-ip',d.ip||'n/a');t('live-rssi',d.rssi==null?'n/a':d.rssi+' dBm');t('live-wifi-sdk',(d.wifi_status_name||'unknown')+' ('+(d.wifi_status==null?'?':d.wifi_status)+')');t('live-gateway',d.gateway_ip||'n/a');t('live-dns',d.dns_ip||'n/a');");
   page += F("p('live-mqtt',d.mqtt.enabled?(d.mqtt.connected?'connected':'disconnected'):'not configured',d.mqtt.enabled?(d.mqtt.connected?'pill ok':'pill bad'):'pill');");
@@ -8830,6 +8984,26 @@ void appendPhyModeSelect(String &page) {
   page += F("</select></label></div>");
 }
 
+void appendPowerSavingOption(String &page, uint8_t mode, const __FlashStringHelper *label) {
+  page += F("<option value='");
+  page += powerSavingModeName(mode);
+  page += F("'");
+  if (sanitizePowerSavingMode(config.power_saving_mode) == mode) {
+    page += F(" selected");
+  }
+  page += F(">");
+  page += label;
+  page += F("</option>");
+}
+
+void appendPowerSavingSelect(String &page) {
+  page += F("<div class='row'><label>Mode<br><select id='power-saving-mode' name='power_saving'>");
+  appendPowerSavingOption(page, kPowerSavingOff, F("Off"));
+  appendPowerSavingOption(page, kPowerSavingLight, F("Light"));
+  appendPowerSavingOption(page, kPowerSavingDeep, F("Deep"));
+  page += F("</select></label></div>");
+}
+
 void handleRoot() {
   String page;
   page.reserve(kHtmlStreamChunkReserve);
@@ -8866,14 +9040,17 @@ void handleRoot() {
   appendMqttForm(page);
   flushStreamChunk(page);
 
-  page += F("<section class='panel'><h2>Firmware</h2><form class='firmware-upload' method='post' action='/update?verify=1' enctype='multipart/form-data' data-target='");
+  page += F("<section class='panel'><h2>System</h2><div class='system-section first'><h3>Firmware</h3><form class='firmware-upload' method='post' action='/update?verify=1' enctype='multipart/form-data' data-target='");
   page += F(MYMOTA_TARGET);
   page += F("'>");
   page += F("<input type='file' name='firmware' accept='.bin,.bin.gz' required>");
   page += F("<div class='row'><label><input class='firmware-verify' type='checkbox' checked>Verify firmware target on device</label></div>");
-  page += F("<button type='submit'>Upload firmware</button></form>");
-  page += F("<div class='actions'><a class='btn secondary' href='/reboot-soft'>Reboot Soft</a><a class='btn secondary' href='/reboot-cold'>Reboot Cold</a></div>");
-  page += F("<div class='actions'><form class='inline' method='post' action='/factory-reset' onsubmit=\"return confirm('Factory reset will delete Wi-Fi, template, MQTT, input, LED, relay enforcement, light, and energy settings. Continue?')\"><button class='danger' type='submit'>Factory Reset</button></form><a class='btn danger' href='/force-reset' onclick=\"return confirm('Force reset skips normal shutdown and may drop unsaved runtime state. Continue?')\">Force Reset</a></div></section>");
+  page += F("<button type='submit'>Upload firmware</button></form></div>");
+  page += F("<div class='system-section'><h3>Power Saving</h3><form data-inline='1' method='post' action='/system'>");
+  appendPowerSavingSelect(page);
+  page += F("<button type='submit'>Save power saving</button></form></div>");
+  page += F("<div class='system-section'><h3>Reboot</h3><div class='actions'><a class='btn secondary' href='/reboot-soft'>Reboot Soft</a><a class='btn secondary' href='/reboot-cold'>Reboot Cold</a></div>");
+  page += F("<div class='actions'><form class='inline' method='post' action='/factory-reset' onsubmit=\"return confirm('Factory reset will delete Wi-Fi, template, MQTT, input, LED, relay enforcement, light, energy, and system settings. Continue?')\"><button class='danger' type='submit'>Factory Reset</button></form><a class='btn danger' href='/force-reset' onclick=\"return confirm('Force reset skips normal shutdown and may drop unsaved runtime state. Continue?')\">Force Reset</a></div></div></section>");
   flushStreamChunk(page);
 
   appendSettingsForm(page);
@@ -9035,6 +9212,27 @@ void handleTemplateSave() {
   appendFooter(page, false, true);
   sendHtml(page);
   scheduleRestart(1200);
+}
+
+void handleSystemSave() {
+  String mode_arg = server.hasArg("power_saving") ? server.arg("power_saving") : server.arg("power_saving_mode");
+  uint8_t mode = kPowerSavingOff;
+  if (!parsePowerSavingMode(mode_arg, mode)) {
+    server.send(400, F("text/plain"), F("Invalid power saving mode"));
+    return;
+  }
+  if (!savePowerSavingConfig(mode)) {
+    server.send(500, F("text/plain"), F("Could not save system settings"));
+    return;
+  }
+
+  String page;
+  page.reserve(700);
+  appendHeader(page, F("myMota System"));
+  page += F("<p class='ok'>System settings saved.</p>");
+  page += F("<p><a href='/'>Back</a></p>");
+  appendFooter(page);
+  sendHtml(page);
 }
 
 void handleMqttSave() {
@@ -10177,6 +10375,7 @@ void handleApiSettingsUpdate() {
   if (!allocateApiSettingsConfigs(before, candidate)) return;
 
   SettingsImportStats stats = {0, 0, String()};
+  applyApiSystemSettings(root, *candidate, stats);
   applyApiInputSettings(root, *candidate, stats);
 
   finishApiSettingsUpdate(*before, *candidate, stats);
@@ -10245,6 +10444,7 @@ void handleSettingsImport() {
   StoredConfig candidate = config;
   SettingsImportStats stats = {0, 0, String()};
 
+  importSettingsSystem(root, candidate, stats);
   importSettingsTemplate(root, candidate, stats);
   RuntimeTemplate candidate_runtime{};
   decodeTemplateConfigInto(candidate, candidate_runtime);
@@ -10351,6 +10551,10 @@ void handleHealth() {
   out += perf_last_loop_load;
   out += F(",\"loop_max_us\":");
   out += perf_last_loop_max_us;
+  out += F("},\"power_saving\":{\"mode\":\"");
+  out += powerSavingModeName(config.power_saving_mode);
+  out += F("\",\"delay_ms\":");
+  out += powerSavingDelayMs(config.power_saving_mode);
   out += F("}");
   const wl_status_t wifi_status = WiFi.status();
   const IPAddress station_ip = WiFi.localIP();
@@ -11012,6 +11216,7 @@ void setupRoutes() {
   server.on(F("/scan"), HTTP_GET, handleScan);
   server.on(F("/wifi"), HTTP_POST, handleWifiSave);
   server.on(F("/template"), HTTP_POST, handleTemplateSave);
+  server.on(F("/system"), HTTP_POST, handleSystemSave);
   server.on(F("/mqtt"), HTTP_POST, handleMqttSave);
   server.on(F("/energy"), HTTP_POST, handleEnergySave);
   server.on(F("/leds"), HTTP_POST, handleLedSave);
@@ -11092,6 +11297,15 @@ void executeScheduledRestart() {
   }
 }
 
+void idleAfterLoopWork() {
+  const uint16_t delay_ms = powerSavingDelayMs(config.power_saving_mode);
+  if (delay_ms > 0 && !restart_pending && !update_started) {
+    delay(delay_ms);
+  } else {
+    yield();
+  }
+}
+
 }  // namespace
 
 void setup() {
@@ -11142,5 +11356,5 @@ void loop() {
   }
 
   recordLoopPerf(loop_started_us, micros());
-  yield();
+  idleAfterLoopWork();
 }
