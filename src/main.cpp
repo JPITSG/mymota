@@ -48,7 +48,8 @@ constexpr uint16_t kConfigVersionV15 = 15;
 constexpr uint16_t kConfigVersionV16 = 16;
 constexpr uint16_t kConfigVersionV17 = 17;
 constexpr uint16_t kConfigVersionV18 = 18;
-constexpr uint16_t kConfigVersion = 19;
+constexpr uint16_t kConfigVersionV19 = 19;
+constexpr uint16_t kConfigVersion = 20;
 constexpr size_t kEepromSize = 4096;
 constexpr size_t kFlashSectorSize = 4096;
 constexpr uint8_t kEnergyJournalSectorCount = 2;
@@ -88,13 +89,14 @@ constexpr size_t kMqttHostMaxLen = 64;
 constexpr size_t kMqttTopicMaxLen = 150;
 constexpr uint16_t kMqttDefaultPort = 1883;
 constexpr uint16_t kMqttKeepaliveMax = 65535U;
-constexpr uint16_t kMqttProtocolKeepaliveSec = 30;
+constexpr uint16_t kMqttProtocolKeepaliveDefaultSec = 30;
+constexpr uint16_t kMqttProtocolKeepaliveMinSec = 5;
+constexpr uint16_t kMqttProtocolKeepaliveMaxSec = 65535U;
 constexpr uint32_t kMqttReconnectMs = 5000;
 constexpr uint32_t kMqttConnectTimeoutMs = 650;
 constexpr uint32_t kMqttConnackTimeoutMs = 250;
 constexpr uint32_t kMqttIoTimeoutMs = 250;
 constexpr uint32_t kMqttInboundReadTimeoutMs = 20;
-constexpr uint32_t kMqttBrokerSilenceTimeoutMs = static_cast<uint32_t>(kMqttProtocolKeepaliveSec) * 2000UL;
 constexpr uint32_t kMqttConnackMaxRemainingLength = 2;
 constexpr uint32_t kMqttSubackMaxRemainingLength = 16;
 constexpr uint32_t kMqttInboundMaxRemainingLength = 512;
@@ -970,6 +972,61 @@ struct StoredConfigV18 {
   uint32_t crc;
 };
 
+struct StoredConfigV19 {
+  uint32_t magic;
+  uint16_t version;
+  uint16_t size;
+  char ssid[33];
+  char password[65];
+  char hostname[33];
+  uint8_t phy_mode;
+  uint8_t template_enabled;
+  uint16_t template_base;
+  uint32_t template_flag;
+  char template_name[33];
+  uint16_t template_gpio[kTemplateSlotCount];
+  uint16_t mqtt_port;
+  uint16_t mqtt_keepalive;
+  char mqtt_host[kMqttHostMaxLen + 1];
+  char mqtt_topic[kMqttTopicMaxLen + 1];
+  float energy_total_offset_kwh;
+  uint8_t led_attach[kMaxLedOutputs];
+  uint16_t button_hold_ms;
+  uint8_t button_press_action[kMaxButtons];
+  uint8_t button_hold_action[kMaxButtons];
+  uint16_t energy_mqtt_interval;
+  uint16_t energy_mqtt_change_percent_x10;
+  char button_press_target[kMaxButtons][kButtonActionTargetMaxLen + 1];
+  char button_press_payload[kMaxButtons][kButtonActionPayloadMaxLen + 1];
+  char button_hold_target[kMaxButtons][kButtonActionTargetMaxLen + 1];
+  char button_hold_payload[kMaxButtons][kButtonActionPayloadMaxLen + 1];
+  uint16_t button_debounce_ms;
+  uint8_t input_mode[kMaxButtons];
+  uint8_t input_relay[kMaxButtons];
+  uint8_t input_on_level[kMaxButtons];
+  uint8_t reserved[1];
+  uint8_t button_press_relay[kMaxButtons];
+  uint8_t button_hold_relay[kMaxButtons];
+  uint8_t light_power;
+  uint8_t light_dimmer;
+  uint16_t light_ct;
+  uint8_t light_on_dimmer;
+  uint8_t shelly_dimmer_edge;
+  uint8_t shelly_dimmer_range_min;
+  uint8_t shelly_dimmer_range_max;
+  uint8_t relay_on_boot[kMaxRelays];
+  uint8_t relay_time_enabled[kMaxRelays];
+  uint16_t relay_time_seconds[kMaxRelays];
+  uint16_t energy_mqtt_change_watts;
+  uint16_t power_saving_mode;
+  uint8_t relay_restore_boot[kMaxRelays];
+  uint8_t light_mode;
+  uint8_t light_rgb[3];
+  uint8_t wifi_dynamic_power;
+  uint8_t wifi_reserved[3];
+  uint32_t crc;
+};
+
 struct StoredConfig {
   uint32_t magic;
   uint16_t version;
@@ -1022,6 +1079,8 @@ struct StoredConfig {
   uint8_t light_rgb[3];
   uint8_t wifi_dynamic_power;
   uint8_t wifi_reserved[3];
+  uint16_t mqtt_protocol_keepalive;
+  uint16_t mqtt_reserved;
   uint32_t crc;
 };
 
@@ -1508,7 +1567,18 @@ void setDefaultMqttConfig() {
   memset(config.mqtt_host, 0, sizeof(config.mqtt_host));
   config.mqtt_port = kMqttDefaultPort;
   config.mqtt_keepalive = 600;
+  config.mqtt_protocol_keepalive = kMqttProtocolKeepaliveDefaultSec;
+  config.mqtt_reserved = 0;
   strlcpy(config.mqtt_topic, defaultMqttTopic().c_str(), sizeof(config.mqtt_topic));
+}
+
+void setDefaultMqttProtocolKeepaliveConfig(StoredConfig &target) {
+  target.mqtt_protocol_keepalive = kMqttProtocolKeepaliveDefaultSec;
+  target.mqtt_reserved = 0;
+}
+
+void setDefaultMqttProtocolKeepaliveConfig() {
+  setDefaultMqttProtocolKeepaliveConfig(config);
 }
 
 void setDefaultEnergyMqttConfig() {
@@ -2270,6 +2340,11 @@ void normalizeConfigStrings() {
   if (config.mqtt_topic[0] == '\0') {
     strlcpy(config.mqtt_topic, defaultMqttTopic().c_str(), sizeof(config.mqtt_topic));
   }
+  if (config.mqtt_protocol_keepalive < kMqttProtocolKeepaliveMinSec ||
+      config.mqtt_protocol_keepalive > kMqttProtocolKeepaliveMaxSec) {
+    config.mqtt_protocol_keepalive = kMqttProtocolKeepaliveDefaultSec;
+  }
+  config.mqtt_reserved = 0;
   if (isnan(config.energy_total_offset_kwh) ||
       config.energy_total_offset_kwh < kEnergyTotalOffsetMinKwh ||
       config.energy_total_offset_kwh > kEnergyTotalOffsetMaxKwh) {
@@ -2383,8 +2458,11 @@ bool storedConfigMatchesCurrentConfig() {
 }
 
 void applyConfigMigrationDefaults(uint16_t previous_version) {
-  if (previous_version < kConfigVersion) {
+  if (previous_version < kConfigVersionV19) {
     setDefaultWifiPowerConfig();
+  }
+  if (previous_version < kConfigVersion) {
+    setDefaultMqttProtocolKeepaliveConfig();
   }
 }
 
@@ -2411,7 +2489,8 @@ bool commitConfig(bool force_commit) {
 
 bool saveWifiConfig(const char *ssid, const char *password, const char *hostname, uint8_t phy_mode,
                     bool dynamic_power);
-bool saveMqttConfig(const char *host, uint16_t port, const char *topic, uint16_t keepalive);
+bool saveMqttConfig(const char *host, uint16_t port, const char *topic, uint16_t protocol_keepalive,
+                    uint16_t state_keepalive);
 bool saveEnergyConfig(float total_offset_kwh, uint16_t mqtt_interval, uint16_t mqtt_change_percent_x10,
                       uint16_t mqtt_change_watts);
 bool saveLedConfig(const uint8_t *attachments);
@@ -2452,6 +2531,26 @@ bool loadConfig() {
     }
     normalizeConfigStrings();
     config_ok = config.ssid[0] != '\0';
+    return config_ok;
+  }
+
+  if (header.version == kConfigVersionV19 && header.size == sizeof(StoredConfigV19)) {
+    StoredConfigV19 *old_config = new StoredConfigV19;
+    if (!old_config) {
+      setDefaultConfig();
+      return false;
+    }
+    EEPROM.get(0, *old_config);
+    if (old_config->crc != configCrc(*old_config)) {
+      delete old_config;
+      setDefaultConfig();
+      return false;
+    }
+    memset(&config, 0, sizeof(config));
+    memcpy(&config, old_config, offsetof(StoredConfigV19, crc));
+    setDefaultMqttProtocolKeepaliveConfig();
+    delete old_config;
+    commitConfig();
     return config_ok;
   }
 
@@ -3018,11 +3117,13 @@ void resetMqttRuntimeState() {
   mqtt_ping_pending = false;
 }
 
-bool saveMqttConfig(const char *host, uint16_t port, const char *topic, uint16_t keepalive) {
+bool saveMqttConfig(const char *host, uint16_t port, const char *topic, uint16_t protocol_keepalive,
+                    uint16_t state_keepalive) {
   strlcpy(config.mqtt_host, host ? host : "", sizeof(config.mqtt_host));
   config.mqtt_port = port;
   strlcpy(config.mqtt_topic, topic ? topic : "", sizeof(config.mqtt_topic));
-  config.mqtt_keepalive = keepalive;
+  config.mqtt_protocol_keepalive = protocol_keepalive;
+  config.mqtt_keepalive = state_keepalive;
   resetMqttRuntimeState();
   return commitConfig();
 }
@@ -4678,6 +4779,7 @@ bool templatesDiffer(const StoredConfig &a, const StoredConfig &b) {
 
 bool mqttConfigDiffers(const StoredConfig &a, const StoredConfig &b) {
   return a.mqtt_port != b.mqtt_port ||
+         a.mqtt_protocol_keepalive != b.mqtt_protocol_keepalive ||
          a.mqtt_keepalive != b.mqtt_keepalive ||
          strcmp(a.mqtt_host, b.mqtt_host) != 0 ||
          strcmp(a.mqtt_topic, b.mqtt_topic) != 0;
@@ -4780,7 +4882,9 @@ void appendSettingsExportJson(String &out) {
   out += config.mqtt_port;
   out += F(",\"topic\":\"");
   out += settingsJsonEscape(config.mqtt_topic);
-  out += F("\",\"keepalive\":");
+  out += F("\",\"protocol_keepalive\":");
+  out += config.mqtt_protocol_keepalive;
+  out += F(",\"keepalive\":");
   out += config.mqtt_keepalive;
   out += F("},\"energy\":{\"total_offset_kwh\":");
   out += String(config.energy_total_offset_kwh, 4);
@@ -4978,6 +5082,15 @@ void importSettingsMqtt(JsonObjectConst root, StoredConfig &target, SettingsImpo
       recordSettingsApplied(stats);
     } else {
       recordSettingsSkipped(stats, F("mqtt.topic"));
+    }
+  }
+  if (mqtt.containsKey("protocol_keepalive")) {
+    uint16_t keepalive = 0;
+    if (settingsReadUint16(mqtt["protocol_keepalive"], kMqttProtocolKeepaliveMinSec, kMqttProtocolKeepaliveMaxSec, keepalive)) {
+      target.mqtt_protocol_keepalive = keepalive;
+      recordSettingsApplied(stats);
+    } else {
+      recordSettingsSkipped(stats, F("mqtt.protocol_keepalive"));
     }
   }
   if (mqtt.containsKey("keepalive")) {
@@ -5448,6 +5561,16 @@ void appendApiSettingsJson(String &out) {
   out += powerSavingDelayMs(config.power_saving_mode);
   out += F("},\"wifi\":{\"dynamic_power\":");
   out += config.wifi_dynamic_power ? F("true") : F("false");
+  out += F("},\"mqtt\":{\"host\":\"");
+  out += settingsJsonEscape(config.mqtt_host);
+  out += F("\",\"port\":");
+  out += config.mqtt_port;
+  out += F(",\"topic\":\"");
+  out += settingsJsonEscape(config.mqtt_topic);
+  out += F("\",\"protocol_keepalive\":");
+  out += config.mqtt_protocol_keepalive;
+  out += F(",\"state_keepalive\":");
+  out += config.mqtt_keepalive;
   out += F("},\"inputs\":[");
   bool first = true;
   for (uint8_t i = 0; i < runtime_template.button_count && i < kMaxButtons; i++) {
@@ -5592,6 +5715,40 @@ void applyApiWifiDynamicPowerSetting(JsonVariantConst value, StoredConfig &targe
   }
 }
 
+void applyApiMqttProtocolKeepaliveSetting(JsonVariantConst value, StoredConfig &target, SettingsImportStats &stats,
+                                          const String &field) {
+  uint16_t keepalive = 0;
+  if (settingsReadUint16(value, kMqttProtocolKeepaliveMinSec, kMqttProtocolKeepaliveMaxSec, keepalive)) {
+    target.mqtt_protocol_keepalive = keepalive;
+    recordSettingsApplied(stats);
+  } else {
+    recordSettingsSkipped(stats, field);
+  }
+}
+
+void applyApiMqttSettings(JsonObjectConst root, StoredConfig &target, SettingsImportStats &stats) {
+  if (root.containsKey("mqtt_protocol_keepalive")) {
+    applyApiMqttProtocolKeepaliveSetting(root["mqtt_protocol_keepalive"], target, stats, F("mqtt_protocol_keepalive"));
+  }
+  if (root.containsKey("protocol_keepalive")) {
+    applyApiMqttProtocolKeepaliveSetting(root["protocol_keepalive"], target, stats, F("protocol_keepalive"));
+  }
+  if (root.containsKey("mqtt_keepalive")) {
+    applyApiMqttProtocolKeepaliveSetting(root["mqtt_keepalive"], target, stats, F("mqtt_keepalive"));
+  }
+
+  JsonObjectConst mqtt = root["mqtt"].as<JsonObjectConst>();
+  if (!mqtt.isNull()) {
+    JsonVariantConst keepalive_value = mqtt["protocol_keepalive"];
+    if (keepalive_value.isNull()) keepalive_value = mqtt["mqtt_keepalive"];
+    if (!keepalive_value.isNull()) {
+      applyApiMqttProtocolKeepaliveSetting(keepalive_value, target, stats, F("mqtt.protocol_keepalive"));
+    }
+  } else if (root.containsKey("mqtt")) {
+    recordSettingsSkipped(stats, F("mqtt"));
+  }
+}
+
 void applyApiSystemSettings(JsonObjectConst root, StoredConfig &target, SettingsImportStats &stats) {
   if (root.containsKey("power_saving")) {
     applyApiPowerSavingSetting(root["power_saving"], target, stats, F("power_saving"));
@@ -5684,6 +5841,9 @@ bool apiSettingsIndexedArgPresent(uint8_t input_number, const char *primary_suff
 bool apiSettingsGetHasUpdateArgs() {
   if (server.hasArg(F("power_saving")) || server.hasArg(F("power_saving_mode"))) return true;
   if (server.hasArg(F("wifi_dynamic_power")) || server.hasArg(F("wifi_dynamic_tx_power"))) return true;
+  if (server.hasArg(F("mqtt_protocol_keepalive")) ||
+      server.hasArg(F("protocol_keepalive")) ||
+      server.hasArg(F("mqtt_keepalive"))) return true;
   if (server.hasArg(F("input")) || server.hasArg(F("id"))) return true;
   for (uint8_t input_number = 1; input_number <= kMaxButtons; input_number++) {
     if (apiSettingsIndexedArgPresent(input_number, "_mqtt_topic", "_topic") ||
@@ -5718,6 +5878,23 @@ bool applyApiSettingsGetArgs(StoredConfig &target, SettingsImportStats &stats) {
       recordSettingsApplied(stats);
     } else {
       recordSettingsSkipped(stats, F("query.wifi_dynamic_power"));
+    }
+  }
+
+  String protocol_keepalive;
+  bool has_protocol_keepalive = apiSettingsGetArg(F("mqtt_protocol_keepalive"), F("protocol_keepalive"), protocol_keepalive);
+  if (!has_protocol_keepalive && server.hasArg(F("mqtt_keepalive"))) {
+    protocol_keepalive = server.arg(F("mqtt_keepalive"));
+    has_protocol_keepalive = true;
+  }
+  if (has_protocol_keepalive) {
+    saw_setting_arg = true;
+    uint16_t keepalive = 0;
+    if (parseUint16Input(protocol_keepalive, kMqttProtocolKeepaliveMinSec, kMqttProtocolKeepaliveMaxSec, keepalive)) {
+      target.mqtt_protocol_keepalive = keepalive;
+      recordSettingsApplied(stats);
+    } else {
+      recordSettingsSkipped(stats, F("query.mqtt_protocol_keepalive"));
     }
   }
 
@@ -6172,6 +6349,22 @@ bool mqttSubscribeCommandTopic() {
   return mqttReadSuback(kMqttCommandPacketId, millis() + kMqttConnackTimeoutMs);
 }
 
+uint16_t mqttProtocolKeepaliveSec() {
+  if (config.mqtt_protocol_keepalive < kMqttProtocolKeepaliveMinSec ||
+      config.mqtt_protocol_keepalive > kMqttProtocolKeepaliveMaxSec) {
+    return kMqttProtocolKeepaliveDefaultSec;
+  }
+  return config.mqtt_protocol_keepalive;
+}
+
+uint32_t mqttProtocolKeepaliveMs() {
+  return static_cast<uint32_t>(mqttProtocolKeepaliveSec()) * 1000UL;
+}
+
+uint32_t mqttBrokerSilenceTimeoutMs() {
+  return static_cast<uint32_t>(mqttProtocolKeepaliveSec()) * 2000UL;
+}
+
 bool mqttConnect() {
   if (!mqttConfigured() || !wifiUsable()) return false;
 
@@ -6187,13 +6380,14 @@ bool mqttConnect() {
 
   const String client_id = mqttClientId();
   const uint32_t remaining_length = 10U + 2U + client_id.length();
+  const uint16_t protocol_keepalive = mqttProtocolKeepaliveSec();
   bool ok = mqttWriteByte(0x10) &&
             mqttWriteRemainingLength(remaining_length) &&
             mqttWriteString("MQTT") &&
             mqttWriteByte(0x04) &&
             mqttWriteByte(0x02) &&
-            mqttWriteByte(static_cast<uint8_t>(kMqttProtocolKeepaliveSec >> 8)) &&
-            mqttWriteByte(static_cast<uint8_t>(kMqttProtocolKeepaliveSec & 0xffU)) &&
+            mqttWriteByte(static_cast<uint8_t>(protocol_keepalive >> 8)) &&
+            mqttWriteByte(static_cast<uint8_t>(protocol_keepalive & 0xffU)) &&
             mqttWriteString(client_id.c_str());
   if (!ok) {
     mqttStop();
@@ -6734,13 +6928,14 @@ void maintainMqtt() {
   if (!mqttProcessInbound()) return;
   now = millis();
 
-  if ((last_mqtt_rx && now - last_mqtt_rx >= kMqttBrokerSilenceTimeoutMs) ||
-      (mqtt_ping_pending && last_mqtt_ping && now - last_mqtt_ping >= kMqttBrokerSilenceTimeoutMs)) {
+  const uint32_t broker_silence_timeout_ms = mqttBrokerSilenceTimeoutMs();
+  if ((last_mqtt_rx && now - last_mqtt_rx >= broker_silence_timeout_ms) ||
+      (mqtt_ping_pending && last_mqtt_ping && now - last_mqtt_ping >= broker_silence_timeout_ms)) {
     mqttStop();
     return;
   }
 
-  if (now - last_mqtt_io >= (static_cast<uint32_t>(kMqttProtocolKeepaliveSec) * 1000UL)) {
+  if (now - last_mqtt_io >= mqttProtocolKeepaliveMs()) {
     if (mqttWriteByte(kMqttPacketPingreq) && mqttWriteByte(0x00)) {
       last_mqtt_io = now;
       last_mqtt_ping = now;
@@ -8627,6 +8822,9 @@ void appendStatusBlock(String &page) {
   page += F("</div><span>MQTT topic</span><div><code>");
   page += htmlEscape(config.mqtt_topic);
   page += F("</code></div><span>MQTT keepalive</span><div><code>");
+  page += String(config.mqtt_protocol_keepalive);
+  page += F("s");
+  page += F("</code></div><span>State keepalive</span><div><code>");
   if (config.mqtt_keepalive == 0) {
     page += F("disabled");
   } else {
@@ -9295,6 +9493,12 @@ void appendMqttForm(String &page) {
   page += String(kMqttTopicMaxLen);
   page += F("' required value='");
   page += htmlEscape(config.mqtt_topic);
+  page += F("'></label></div><div class='row'><label>MQTT keepalive seconds<br><input name='protocol_keepalive' type='number' min='");
+  page += String(kMqttProtocolKeepaliveMinSec);
+  page += F("' max='");
+  page += String(kMqttProtocolKeepaliveMaxSec);
+  page += F("' value='");
+  page += String(config.mqtt_protocol_keepalive);
   page += F("'></label></div><div class='row'><label>State keepalive seconds<br><input name='keepalive' type='number' min='0' max='");
   page += String(kMqttKeepaliveMax);
   page += F("' value='");
@@ -9597,14 +9801,17 @@ void handleMqttSave() {
   String host = server.arg("host");
   String port_arg = server.arg("port");
   String topic = server.arg("topic");
+  String protocol_keepalive_arg = server.arg("protocol_keepalive");
   String keepalive_arg = server.arg("keepalive");
   host.trim();
   port_arg.trim();
   topic.trim();
+  protocol_keepalive_arg.trim();
   keepalive_arg.trim();
 
   uint16_t port = kMqttDefaultPort;
-  uint16_t keepalive = 0;
+  uint16_t protocol_keepalive = kMqttProtocolKeepaliveDefaultSec;
+  uint16_t state_keepalive = 0;
   if (!isValidMqttHost(host)) {
     server.send(400, F("text/plain"), F("Invalid MQTT host"));
     return;
@@ -9617,12 +9824,16 @@ void handleMqttSave() {
     server.send(400, F("text/plain"), F("Invalid MQTT topic"));
     return;
   }
-  if (!parseUint16Input(keepalive_arg, 0, kMqttKeepaliveMax, keepalive)) {
-    server.send(400, F("text/plain"), F("Invalid MQTT keepalive"));
+  if (!parseUint16Input(protocol_keepalive_arg, kMqttProtocolKeepaliveMinSec, kMqttProtocolKeepaliveMaxSec, protocol_keepalive)) {
+    server.send(400, F("text/plain"), F("Invalid MQTT protocol keepalive"));
+    return;
+  }
+  if (!parseUint16Input(keepalive_arg, 0, kMqttKeepaliveMax, state_keepalive)) {
+    server.send(400, F("text/plain"), F("Invalid MQTT state keepalive"));
     return;
   }
 
-  if (!saveMqttConfig(host.c_str(), port, topic.c_str(), keepalive)) {
+  if (!saveMqttConfig(host.c_str(), port, topic.c_str(), protocol_keepalive, state_keepalive)) {
     server.send(500, F("text/plain"), F("Could not save MQTT settings"));
     return;
   }
@@ -10656,6 +10867,7 @@ void finishApiSettingsUpdate(const StoredConfig &before, const StoredConfig &can
   }
 
   const bool input_changed = inputConfigDiffers(before, candidate);
+  const bool mqtt_changed = mqttConfigDiffers(before, candidate);
   const bool wifi_dynamic_power_changed = before.wifi_dynamic_power != candidate.wifi_dynamic_power;
   config = candidate;
   if (!commitConfig()) {
@@ -10663,6 +10875,7 @@ void finishApiSettingsUpdate(const StoredConfig &before, const StoredConfig &can
     sendApiSettingsError(500, F("Could not save API settings"));
     return;
   }
+  if (mqtt_changed) resetMqttRuntimeState();
   if (input_changed) updateDeviceLeds(true);
   if (wifi_dynamic_power_changed) resetWifiDynamicPowerRuntime(true);
 
@@ -10736,6 +10949,7 @@ void handleApiSettingsUpdate() {
 
   SettingsImportStats stats = {0, 0, String()};
   applyApiSystemSettings(root, *candidate, stats);
+  applyApiMqttSettings(root, *candidate, stats);
   applyApiInputSettings(root, *candidate, stats);
 
   finishApiSettingsUpdate(*before, *candidate, stats);
@@ -11010,7 +11224,11 @@ void handleHealth() {
   out += config.mqtt_port;
   out += F(",\"topic\":\"");
   out += jsonEscape(config.mqtt_topic);
-  out += F("\",\"keepalive\":");
+  out += F("\",\"protocol_keepalive\":");
+  out += config.mqtt_protocol_keepalive;
+  out += F(",\"keepalive\":");
+  out += config.mqtt_keepalive;
+  out += F(",\"state_keepalive\":");
   out += config.mqtt_keepalive;
   out += F(",\"pending\":");
   out += mqtt_pending_relay_mask;
