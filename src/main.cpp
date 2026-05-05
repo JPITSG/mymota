@@ -61,7 +61,6 @@ constexpr uint32_t kApRetryMs = 10000;
 constexpr uint32_t kWifiDynamicPowerSettleMs = 30000;
 constexpr uint32_t kWifiDynamicPowerSampleMs = 2000;
 constexpr uint8_t kWifiDynamicPowerSampleCount = 5;
-constexpr uint8_t kWifiDynamicPowerDisconnectLimit = 2;
 constexpr uint32_t kBootRecoveryStableMs = 30000;
 constexpr uint32_t kBootRecoveryBootMarker = 0x4d594254;  // MYBT
 constexpr uint32_t kBootRecoveryStableMarker = kBootRecoveryMagic;
@@ -1312,7 +1311,6 @@ bool sta_connected_once = false;
 uint32_t last_ap_attempt = 0;
 bool wifi_dynamic_power_was_connected = false;
 bool wifi_dynamic_power_applied = false;
-bool wifi_dynamic_power_suspended = false;
 bool wifi_dynamic_power_known = false;
 uint32_t wifi_dynamic_power_connected_since = 0;
 uint32_t wifi_dynamic_power_last_sample = 0;
@@ -6001,7 +5999,6 @@ void setWifiTxPowerDbm(float dbm) {
 void resetWifiDynamicPowerRuntime(bool restore_max) {
   wifi_dynamic_power_was_connected = WiFi.status() == WL_CONNECTED;
   wifi_dynamic_power_applied = false;
-  wifi_dynamic_power_suspended = false;
   wifi_dynamic_power_connected_since = wifi_dynamic_power_was_connected ? millis() : 0;
   wifi_dynamic_power_last_sample = 0;
   wifi_dynamic_power_samples = 0;
@@ -6036,7 +6033,6 @@ void maintainWifiDynamicPower() {
     if (!wifiTxPowerIsMax()) setWifiTxPowerDbm(kWifiTxPowerMaxDbm);
     wifi_dynamic_power_was_connected = connected;
     wifi_dynamic_power_applied = false;
-    wifi_dynamic_power_suspended = false;
     return;
   }
 
@@ -6044,9 +6040,6 @@ void maintainWifiDynamicPower() {
     if (wifi_dynamic_power_was_connected && wifi_dynamic_power_applied && !wifiTxPowerIsMax()) {
       wifi_dynamic_power_disconnects++;
       setWifiTxPowerDbm(kWifiTxPowerMaxDbm);
-      if (wifi_dynamic_power_disconnects >= kWifiDynamicPowerDisconnectLimit) {
-        wifi_dynamic_power_suspended = true;
-      }
     }
     wifi_dynamic_power_was_connected = false;
     wifi_dynamic_power_applied = false;
@@ -6067,7 +6060,7 @@ void maintainWifiDynamicPower() {
     return;
   }
 
-  if (wifi_dynamic_power_suspended || wifi_dynamic_power_applied) return;
+  if (wifi_dynamic_power_applied) return;
   if (wifi_dynamic_power_connected_since == 0) {
     wifi_dynamic_power_connected_since = now;
     return;
@@ -6088,7 +6081,6 @@ void maintainWifiDynamicPower() {
 
 const __FlashStringHelper *wifiTxPowerStatusName() {
   if (!config.wifi_dynamic_power) return F("max");
-  if (wifi_dynamic_power_suspended) return F("max-suspended");
   if (!wifi_dynamic_power_applied) return WiFi.status() == WL_CONNECTED ? F("settling") : F("pending");
   return wifiTxPowerIsMax() ? F("max-dynamic") : F("dynamic");
 }
