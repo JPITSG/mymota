@@ -7509,9 +7509,9 @@ void shellyDimmerProcessPacket(const uint8_t *frame, uint8_t frame_len) {
     shelly_dimmer.current_raw = current_raw;
     shelly_dimmer.fade_rate = payload[16];
 
-    const float wattage = wattage_raw > 0 ? 880373.0f / static_cast<float>(wattage_raw) : 0.0f;
+    const float wattage = brightness > 0 && wattage_raw > 0 ? 880373.0f / static_cast<float>(wattage_raw) : 0.0f;
     const float voltage = voltage_raw > 0 ? 347800.0f / static_cast<float>(voltage_raw) : 0.0f;
-    const float current = current_raw > 0 ? 1448.0f / static_cast<float>(current_raw) : 0.0f;
+    const float current = brightness > 0 && current_raw > 0 ? 1448.0f / static_cast<float>(current_raw) : 0.0f;
     shellyDimmerUpdateEnergy(wattage, voltage, current);
   } else if (cmd == kShellyDimmerVersionCmd && len >= 2) {
     shelly_dimmer.version_minor = payload[0];
