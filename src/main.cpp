@@ -8606,11 +8606,11 @@ void appendHeader(String &page, const __FlashStringHelper *title, bool show_spin
 "[data-theme=dark]{--bg:#0e1116;--bg-2:#141821;--panel:#171c26;--panel-2:#1c2230;--line:#262d3d;--line-2:#323a4d;--text:#e6eaf2;--text-2:#a4adc2;--muted:#6b748a;--accent:#7dd3aa;--accent-2:#5eead4;--accent-soft:rgba(125,211,170,.12);--warn:#f0b95a;--bad:#f06b6b;--bad-soft:rgba(240,107,107,.12);--bad-border:rgba(240,107,107,.35);--ok:#7dd3aa;--ok-soft:rgba(125,211,170,.12);--shadow:0 1px 0 rgba(255,255,255,.03) inset,0 1px 2px rgba(0,0,0,.2);--header-bg:rgba(14,17,22,.72);--btn-text:#0e1116;--tint-soft:rgba(255,255,255,.015);--tint-low:rgba(255,255,255,.03);--tint-mid:rgba(255,255,255,.05);--tint-foot:rgba(0,0,0,.15);--shadow-pop:0 12px 40px rgba(0,0,0,.5)}"
 "*{box-sizing:border-box}html,body{margin:0;padding:0}body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;min-height:100vh;background-image:radial-gradient(1200px 600px at 50% -200px,var(--accent-soft),transparent 60%),linear-gradient(180deg,var(--bg) 0%,var(--bg-2) 100%)}"
 ".top{border-bottom:1px solid var(--line);background:var(--header-bg);backdrop-filter:blur(10px);position:sticky;top:0;z-index:50}.topin{max-width:1200px;margin:0 auto;padding:18px 28px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:24px}.brand{display:flex;align-items:center;gap:12px;font-weight:700;font-size:18px;color:var(--text);text-decoration:none}.brand b{color:var(--accent)}.logo{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,var(--accent),var(--accent-2));display:flex;align-items:center;justify-content:center;color:var(--btn-text);box-shadow:0 0 0 1px var(--accent-soft),0 4px 12px rgba(0,0,0,.08)}[data-theme=dark] .logo{box-shadow:0 0 0 1px var(--accent-soft),0 4px 12px rgba(0,0,0,.3)}.host{text-align:center;font-family:var(--mono);font-size:13px;color:var(--text-2)}.host .dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--ok);margin-right:8px;vertical-align:1px;box-shadow:0 0 8px var(--accent)}.meta{display:flex;align-items:center;justify-content:flex-end;gap:14px;font-family:var(--mono);font-size:12px;color:var(--muted)}.ver{padding:4px 10px;border:1px solid transparent;border-radius:999px;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:var(--btn-text);box-shadow:0 0 0 1px var(--accent-soft),0 4px 12px rgba(0,0,0,.08)}[data-theme=dark] .ver{box-shadow:0 0 0 1px var(--accent-soft),0 4px 12px rgba(0,0,0,.3)}.theme-btn{width:30px;height:30px;margin:0;padding:0;display:inline-flex;align-items:center;justify-content:center;background:var(--tint-low);color:var(--text-2);border:1px solid var(--line);border-radius:50%;cursor:pointer;text-transform:none}.theme-btn:hover{color:var(--accent);border-color:var(--accent);background:var(--accent-soft);filter:none}.theme-btn .ic-moon{display:none}.theme-btn .ic-sun{display:block}[data-theme=dark] .theme-btn .ic-sun{display:none}[data-theme=dark] .theme-btn .ic-moon{display:block}.spin{width:10px;height:10px;border:2px solid var(--accent-soft);border-top-color:var(--accent);border-radius:50%;opacity:.5}.spin.active{opacity:1;animation:rot .9s linear infinite}@keyframes rot{to{transform:rotate(360deg)}}"
-"main{max-width:1200px;margin:0 auto;padding:32px 28px 0}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.wide,.section-head,.stats{grid-column:1/-1}.section-head{display:flex;align-items:baseline;justify-content:space-between;margin:16px 0}.section-head:first-child{margin-top:0}.section-head h1{font-size:11px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);margin:0}.section-head .rule{flex:1;height:1px;background:var(--line);margin:0 16px}.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}.stat{background:linear-gradient(180deg,var(--panel) 0%,var(--panel-2) 100%);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;min-height:96px;box-shadow:var(--shadow);position:relative;overflow:hidden;display:flex;flex-direction:column;justify-content:space-between}.stat .accent-bar{position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--accent);opacity:.7}.stat .stat-label{font-size:10px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}.stat .stat-value{font-family:var(--mono);font-size:22px;font-weight:500;color:var(--text);margin-top:6px}.stat .stat-sub{font-family:var(--mono);font-size:11px;color:var(--text-2);margin-top:4px;word-break:break-word}.panel{background:linear-gradient(180deg,var(--panel) 0%,var(--panel-2) 100%);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px;overflow:hidden}.panel>h2,.panel>.panel-title{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:-18px -18px 18px;padding:14px 18px;border-bottom:1px solid var(--line);background:var(--tint-soft)}.panel>h2,.panel>.panel-title h2{font-size:13px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text)}.panel>.panel-title h2{margin:0}.h-meta{font-family:var(--mono);font-size:11px;font-weight:400;color:var(--muted);text-transform:none;letter-spacing:0}.panel h3{font-size:13px;margin:0 0 10px;color:var(--text)}.panel p{margin:10px 0}.kv{display:grid;grid-template-columns:140px 1fr;gap:0 16px}.kv>span,.kv>div{padding:9px 0;border-bottom:1px dashed var(--line);min-width:0}.kv>span:nth-last-child(-n+2),.kv>div:nth-last-child(-n+2){border-bottom:0}.kv>span{font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}.kv>div{font-family:var(--mono);font-size:13px;color:var(--text);word-break:break-word}.hint,.muted{color:var(--muted);font-size:12px}.ok{color:var(--ok)}.bad{color:var(--bad)}"
+"main{max-width:1200px;margin:0 auto;padding:32px 28px 0}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.wide,.section-head,.stats{grid-column:1/-1}.section-head{display:flex;align-items:baseline;justify-content:space-between;margin:16px 0}.section-head:first-child{margin-top:0}.section-head h1{font-size:11px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);margin:0}.section-head .rule{flex:1;height:1px;background:var(--line);margin:0 16px}.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}.stat{background:linear-gradient(180deg,var(--panel) 0%,var(--panel-2) 100%);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;min-height:96px;box-shadow:var(--shadow);position:relative;overflow:hidden;display:flex;flex-direction:column;justify-content:space-between}.stat .accent-bar{position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--accent);opacity:.7}.stat .stat-label{font-size:10px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}.stat .stat-value{font-family:var(--mono);font-size:22px;font-weight:500;color:var(--text);margin-top:6px}.stat .stat-sub{font-family:var(--mono);font-size:11px;color:var(--text-2);margin-top:4px;word-break:break-word}.panel{background:linear-gradient(180deg,var(--panel) 0%,var(--panel-2) 100%);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px;overflow:hidden}.panel>h2,.panel>.panel-title,.panel>.panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:-18px -18px 18px;padding:14px 18px;border-bottom:1px solid var(--line);background:var(--tint-soft)}.panel>h2,.panel>.panel-title h2,.panel>.panel-head h2{font-size:13px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text)}.panel>.panel-title h2,.panel>.panel-head h2{margin:0}.h-meta{font-family:var(--mono);font-size:11px;font-weight:400;color:var(--muted);text-transform:none;letter-spacing:0}.panel h3{font-size:13px;margin:0 0 10px;color:var(--text)}.panel p{margin:10px 0}.kv{display:grid;grid-template-columns:140px 1fr;gap:0 16px}.kv>span,.kv>div{padding:9px 0;border-bottom:1px dashed var(--line);min-width:0}.kv>span:nth-last-child(-n+2),.kv>div:nth-last-child(-n+2){border-bottom:0}.kv>span{font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}.kv>div{font-family:var(--mono);font-size:13px;color:var(--text);word-break:break-word}.hint,.muted{color:var(--muted);font-size:12px}.ok{color:var(--ok)}.bad{color:var(--bad)}"
 "code{font-family:var(--mono);font-size:12.5px;background:var(--tint-low);border:1px solid var(--line);border-radius:var(--radius-sm);padding:2px 7px;color:var(--text);word-break:break-word}.pill{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;font-weight:500;padding:3px 9px;border-radius:999px;background:var(--tint-mid);color:var(--text-2);border:1px solid var(--line)}.pill:before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor}.pill.ok{background:var(--ok-soft);color:var(--ok);border-color:var(--accent-soft)}.pill.warn{background:rgba(240,185,90,.1);color:var(--warn);border-color:rgba(240,185,90,.3)}.pill.bad{background:var(--bad-soft);color:var(--bad);border-color:var(--bad-border)}"
 "form{margin:0}.field{margin:0 0 14px}.field:last-child{margin-bottom:0}.field-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:0 0 14px}.field-row .field{margin:0}label{display:block;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--text-2);margin-bottom:6px}input:not([type=checkbox]):not([type=radio]):not([type=submit]):not([type=button]):not([type=reset]),select,textarea{width:100%;padding:10px 12px;background:var(--bg-2);border:1px solid var(--line);border-radius:var(--radius-sm);color:var(--text);font-family:var(--mono);font-size:13px}select{display:block;min-width:0}select option{background:var(--bg-2);color:var(--text)}input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);background:var(--bg-2);box-shadow:0 0 0 3px var(--accent-soft)}input:-webkit-autofill,input:-webkit-autofill:hover,input:-webkit-autofill:focus,input:-webkit-autofill:active,textarea:-webkit-autofill,select:-webkit-autofill{-webkit-text-fill-color:var(--text)!important;-webkit-box-shadow:0 0 0 1000px var(--bg-2) inset!important;box-shadow:0 0 0 1000px var(--bg-2) inset!important;caret-color:var(--text)!important;border:1px solid var(--line)!important;transition:background-color 9999s ease-in-out 0s}input:-webkit-autofill:focus,textarea:-webkit-autofill:focus,select:-webkit-autofill:focus{-webkit-box-shadow:0 0 0 1000px var(--bg-2) inset,0 0 0 3px var(--accent-soft)!important;box-shadow:0 0 0 1000px var(--bg-2) inset,0 0 0 3px var(--accent-soft)!important;border-color:var(--accent)!important}textarea{min-height:88px;resize:vertical;line-height:1.5}input[type=checkbox],input[type=radio]{width:16px;height:16px;margin:0 8px 0 0;vertical-align:-3px;accent-color:var(--accent)}input[type=file]{font-size:12px}"
 "button,.btn{font-family:var(--sans);display:inline-flex;align-items:center;justify-content:center;gap:6px;margin:4px 4px 0 0;padding:8px 14px;background:var(--accent);color:var(--btn-text);border:1px solid var(--accent);border-radius:var(--radius-sm);font-size:12px;font-weight:600;letter-spacing:.04em;cursor:pointer;text-decoration:none;text-transform:uppercase}button:hover,.btn:hover{filter:brightness(1.08)}button:disabled,.btn:disabled{opacity:.55;cursor:not-allowed}.secondary{background:transparent;color:var(--text);border-color:var(--line-2)}.secondary:hover{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);filter:none}.danger{background:transparent;color:var(--bad);border-color:var(--bad-border)}.danger:hover{background:var(--bad-soft);filter:none}.inline{display:inline}.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}.actions form{margin:0}.actions .btn,.actions button,.inline button{margin:0}.panel-foot{margin:18px -18px -18px;padding:12px 18px;border-top:1px solid var(--line);background:var(--tint-foot);display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}.panel-foot button,.panel-foot .btn{margin:0}"
-".button-block{border:1px solid var(--line);border-radius:var(--radius-sm);padding:14px 16px;background:var(--tint-foot);margin-top:12px}.panel>h2+.button-block,.button-block:first-child{margin-top:0}.button-block>strong,.button-block>h3{display:block;margin:0 0 12px;font-weight:600;font-size:13px;color:var(--text)}.action-extra,.mode-extra{display:none;padding-top:12px;margin-top:12px;border-top:1px dashed var(--line)}.action-extra.show,.mode-extra.show{display:block}.hidden{display:none}.note{background:var(--tint-low);border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px;margin:10px 0}.note p{margin:0 0 7px}.tokens{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px}.tokens div{display:flex;flex-direction:column;gap:3px}.help{position:relative;margin-left:auto}.help-q{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:var(--tint-mid);color:var(--text-2);font-weight:700;font-size:11px;border:1px solid var(--line);cursor:help}.help-box{display:none;position:absolute;right:0;top:28px;z-index:30;width:420px;max-width:calc(100vw - 60px);background:var(--panel-2);border:1px solid var(--line-2);border-radius:var(--radius);padding:14px 16px;font-size:12.5px;line-height:1.55;box-shadow:var(--shadow-pop);color:var(--text)}.help:hover .help-box,.help:focus-within .help-box{display:block}.list{margin:0;padding-left:18px}.foot{text-align:center;margin:16px 0;padding:16px 0;font-family:var(--mono);font-size:11px;color:var(--muted)}"
+".button-block{border:1px solid var(--line);border-radius:var(--radius-sm);padding:14px 16px;background:var(--tint-foot);margin-top:12px}.panel>h2+.button-block,.button-block:first-child{margin-top:0}.button-block>strong,.button-block>h3{display:block;margin:0 0 12px;font-weight:600;font-size:13px;color:var(--text)}.button-block-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin:0 0 12px}.button-block-head strong{font-weight:600;font-size:13px;color:var(--text)}.action-extra,.mode-extra{display:none;padding-top:12px;margin-top:12px;border-top:1px dashed var(--line)}.action-extra.show,.mode-extra.show{display:block}.hidden{display:none}.note{background:var(--tint-low);border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px;margin:10px 0}.note p{margin:0 0 7px}.tokens{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px}.tokens div{display:flex;flex-direction:column;gap:3px}.help{position:relative;margin-left:auto}.help-q{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:var(--tint-mid);color:var(--text-2);font-weight:700;font-size:11px;border:1px solid var(--line);cursor:help}.help-box{display:none;position:absolute;right:0;top:28px;z-index:30;width:420px;max-width:calc(100vw - 60px);background:var(--panel-2);border:1px solid var(--line-2);border-radius:var(--radius);padding:14px 16px;font-size:12.5px;line-height:1.55;box-shadow:var(--shadow-pop);color:var(--text)}.help:hover .help-box,.help:focus-within .help-box{display:block}.list{margin:0;padding-left:18px}.foot{text-align:center;margin:16px 0;padding:16px 0;font-family:var(--mono);font-size:11px;color:var(--muted)}"
 "@media(max-width:980px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:520px){.stats{grid-template-columns:1fr}}@media(max-width:820px){.topin{grid-template-columns:1fr;gap:10px}.host{text-align:left}.meta{justify-content:flex-start}main{padding:22px 14px 0}.grid,.field-row{grid-template-columns:1fr}.kv{grid-template-columns:1fr}.kv>span{padding-bottom:0;border-bottom:0}.kv>div{padding-top:3px}}"
 "</style></head><body>");
   const String host = config.hostname[0] ? htmlEscape(config.hostname) : htmlEscape(defaultHostname());
@@ -8915,7 +8915,13 @@ void appendStatusBlock(String &page) {
 }
 
 void appendTemplateStatus(String &page) {
-  page += F("<section class='panel'><h2>Template</h2>");
+  page += F("<section class='panel'><div class='panel-head'><h2>Template</h2>");
+  if (runtime_template.enabled) {
+    page += F("<span class='h-meta'>");
+    page += htmlEscape(runtime_template.name);
+    page += F("</span>");
+  }
+  page += F("</div><div class='panel-body'>");
   if (!runtime_template.enabled) {
     page += F("<p class='muted'>No template configured.</p>");
   } else {
@@ -8927,11 +8933,11 @@ void appendTemplateStatus(String &page) {
     page += String(runtime_template.flag);
     page += F("</code></div><span>GPIO roles</span><div><code>");
     page += String(runtime_template.relay_count);
-    page += F("</code> relays <code>");
+    page += F("</code> relays<br><code>");
     page += String(runtime_template.button_count);
-    page += F("</code> inputs <code>");
+    page += F("</code> inputs<br><code>");
     page += String(runtime_template.led_count);
-    page += F("</code> LEDs <code>");
+    page += F("</code> LEDs<br><code>");
     page += String(runtime_template.pwm_count);
     page += F("</code> PWM</div>");
     if (light.present) {
@@ -8973,33 +8979,33 @@ void appendTemplateStatus(String &page) {
       page += energyDriverName();
       page += F("</code>");
       if (energy.driver == kEnergyDriverAde7953) {
-        page += F(" I2C <code>0x38</code>, IRQ/model <code>");
+        page += F("<br>I2C <code>0x38</code><br>IRQ/model <code>");
         page += pinName(runtime_template.ade7953_irq_pin);
-        page += F("</code>, channels <code>");
+        page += F("</code><br>channels <code>");
         page += String(energy.channel_count);
         page += F("</code>");
       } else if (energy.driver == kEnergyDriverShellyDimmer) {
-        page += F(" MCU v<code>");
+        page += F("<br>MCU v<code>");
         page += String(shelly_dimmer.version_major);
         page += F(".");
         page += String(shelly_dimmer.version_minor);
-        page += F("</code>, BOOT0 <code>");
+        page += F("</code><br>BOOT0 <code>");
         page += pinName(runtime_template.shelly_dimmer_boot0_pin);
-        page += F("</code>, reset <code>");
+        page += F("</code><br>reset <code>");
         page += pinName(runtime_template.shelly_dimmer_reset_pin);
         page += F("</code>");
       } else if (energy.driver == kEnergyDriverCse7766) {
-        page += F(" RX <code>");
+        page += F("<br>RX <code>");
         page += pinName(runtime_template.cse7766_rx_pin);
-        page += F("</code>, TX <code>");
+        page += F("</code><br>TX <code>");
         page += pinName(runtime_template.cse7766_tx_pin);
         page += F("</code>");
       } else {
-        page += F(" CF <code>");
+        page += F("<br>CF <code>");
         page += pinName(energy.cf_pin);
-        page += F("</code>, CF1 <code>");
+        page += F("</code><br>CF1 <code>");
         page += pinName(energy.cf1_pin);
-        page += F("</code>, SEL <code>");
+        page += F("</code><br>SEL <code>");
         page += pinName(energy.sel_pin);
         page += F("</code>");
       }
@@ -9043,7 +9049,7 @@ void appendTemplateStatus(String &page) {
       page += F("</p>");
     }
   }
-  page += F("</section>");
+  page += F("</div></section>");
 }
 
 void appendDeviceControls(String &page) {
@@ -9276,11 +9282,11 @@ void appendRelayEnforcementSettings(String &page) {
   page += F("<p class='hint'>Keep selected relays on at startup, or turn them back on after they are switched off.</p>");
   for (uint8_t i = 0; i < runtime_template.relay_count && i < kMaxRelays; i++) {
     if (!relayAvailable(i)) continue;
-    page += F("<div class='button-block'><strong>Relay ");
+    page += F("<div class='button-block'><div class='button-block-head'><strong>Relay ");
     page += String(i + 1);
-    page += F("</strong> <span class='hint'>");
+    page += F("</strong><span class='hint'>");
     page += pinName(runtime_template.relays[i].pin);
-    page += F("</span><div class='field'><label><input class='relay-boot-choice' id='relay_on_boot");
+    page += F("</span></div><div class='field'><label><input class='relay-boot-choice' id='relay_on_boot");
     page += String(i);
     page += F("' data-relay='");
     page += String(i);
@@ -9638,9 +9644,11 @@ void handleRoot() {
   appendHeader(page, F("myMota"), true);
   page += F("<div class='grid'>");
   flushStreamChunk(page);
-  appendSectionHead(page, F("System"));
+  appendSectionHead(page, F("Overview"));
   flushStreamChunk(page);
   appendOverviewStats(page);
+  flushStreamChunk(page);
+  appendSectionHead(page, F("System"));
   flushStreamChunk(page);
   appendStatusBlock(page);
   flushStreamChunk(page);
@@ -9658,18 +9666,9 @@ void handleRoot() {
   flushStreamChunk(page);
   appendSectionHead(page, F("Network"));
   flushStreamChunk(page);
-  const wl_status_t wifi_status = WiFi.status();
-  const IPAddress station_ip = WiFi.localIP();
-  const bool station_has_ip = ipAddressSet(station_ip);
-  const bool wifi_usable = (wifi_status == WL_CONNECTED) || station_has_ip;
-  page += F("<section class='panel'><h2>Wi-Fi <span class='h-meta' id='live-rssi-hmeta'>");
-  if (wifi_usable) {
-    page += String(WiFi.RSSI());
-    page += F(" dBm");
-  } else {
-    page += F("n/a");
-  }
-  page += F("</span></h2><form id='form-wifi' method='post' action='/wifi'>");
+  page += F("<section class='panel'><div class='panel-head'><h2>Wi-Fi</h2><span class='h-meta pill ok'>");
+  page += phyModeName(config.phy_mode);
+  page += F("</span></div><form id='form-wifi' method='post' action='/wifi'><div class='panel-body'>");
   page += F("<div class='field'><label>SSID</label><input name='ssid' maxlength='32' required value='");
   page += htmlEscape(config.ssid);
   page += F("'></div><div class='field'><label>Password</label><input id='wifi-password' type='password' name='password' maxlength='64' autocomplete='current-password' value='");
@@ -9683,7 +9682,7 @@ void handleRoot() {
   page += F("<div class='field'><label><input type='checkbox' name='wifi_dynamic_power' value='1'");
   if (config.wifi_dynamic_power) page += F(" checked");
   page += F(">Dynamic Wi-Fi power</label></div>");
-  page += F("</form><div class='panel-foot'><a class='btn secondary' href='/scan'>Scan networks</a><button type='submit' form='form-wifi'>Save Wi-Fi</button></div></section>");
+  page += F("</div></form><div class='panel-foot'><a class='btn secondary' href='/scan'>Scan networks</a><button type='submit' form='form-wifi'>Save Wi-Fi</button></div></section>");
   flushStreamChunk(page);
 
   appendMqttForm(page);
