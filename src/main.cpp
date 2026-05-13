@@ -8606,12 +8606,12 @@ void appendHeader(String &page, const __FlashStringHelper *title, bool show_spin
 "[data-theme=dark]{--bg:#0e1116;--bg-2:#141821;--panel:#171c26;--panel-2:#1c2230;--line:#262d3d;--line-2:#323a4d;--text:#e6eaf2;--text-2:#a4adc2;--muted:#6b748a;--accent:#7dd3aa;--accent-2:#5eead4;--accent-soft:rgba(125,211,170,.12);--warn:#f0b95a;--bad:#f06b6b;--bad-soft:rgba(240,107,107,.12);--bad-border:rgba(240,107,107,.35);--ok:#7dd3aa;--ok-soft:rgba(125,211,170,.12);--shadow:0 1px 0 rgba(255,255,255,.03) inset,0 1px 2px rgba(0,0,0,.2);--header-bg:rgba(14,17,22,.72);--btn-text:#0e1116;--tint-soft:rgba(255,255,255,.015);--tint-low:rgba(255,255,255,.03);--tint-mid:rgba(255,255,255,.05);--tint-foot:rgba(0,0,0,.15);--shadow-pop:0 12px 40px rgba(0,0,0,.5)}"
 "*{box-sizing:border-box}html,body{margin:0;padding:0}body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;min-height:100vh;background-image:radial-gradient(1200px 600px at 50% -200px,var(--accent-soft),transparent 60%),linear-gradient(180deg,var(--bg) 0%,var(--bg-2) 100%)}"
 ".top{border-bottom:1px solid var(--line);background:var(--header-bg);backdrop-filter:blur(10px);position:sticky;top:0;z-index:50}.topin{max-width:1200px;margin:0 auto;padding:18px 28px;display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:24px}.brand{display:flex;align-items:center;gap:12px;font-weight:700;font-size:18px;color:var(--text);text-decoration:none}.brand b{color:var(--accent)}.logo{width:32px;height:32px;border-radius:8px;background:linear-gradient(135deg,var(--accent),var(--accent-2));display:flex;align-items:center;justify-content:center;color:var(--btn-text);box-shadow:0 0 0 1px var(--accent-soft),0 4px 12px rgba(0,0,0,.08)}[data-theme=dark] .logo{box-shadow:0 0 0 1px var(--accent-soft),0 4px 12px rgba(0,0,0,.3)}.host{text-align:center;font-family:var(--mono);font-size:13px;color:var(--text-2)}.host .dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--ok);margin-right:8px;vertical-align:1px;box-shadow:0 0 8px var(--accent)}.meta{display:flex;align-items:center;justify-content:flex-end;gap:14px;font-family:var(--mono);font-size:12px;color:var(--muted)}.ver{padding:4px 10px;border:1px solid transparent;border-radius:999px;background:linear-gradient(135deg,var(--accent),var(--accent-2));color:var(--btn-text);box-shadow:0 0 0 1px var(--accent-soft),0 4px 12px rgba(0,0,0,.08)}[data-theme=dark] .ver{box-shadow:0 0 0 1px var(--accent-soft),0 4px 12px rgba(0,0,0,.3)}.theme-btn{width:30px;height:30px;margin:0;padding:0;display:inline-flex;align-items:center;justify-content:center;background:var(--tint-low);color:var(--text-2);border:1px solid var(--line);border-radius:50%;cursor:pointer;text-transform:none}.theme-btn:hover{color:var(--accent);border-color:var(--accent);background:var(--accent-soft);filter:none}.theme-btn .ic-moon{display:none}.theme-btn .ic-sun{display:block}[data-theme=dark] .theme-btn .ic-sun{display:none}[data-theme=dark] .theme-btn .ic-moon{display:block}.spin{width:10px;height:10px;border:2px solid var(--accent-soft);border-top-color:var(--accent);border-radius:50%;opacity:.5}.spin.active{opacity:1;animation:rot .9s linear infinite}@keyframes rot{to{transform:rotate(360deg)}}"
-"main{max-width:1200px;margin:0 auto;padding:32px 28px 0}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.wide,.section-head{grid-column:1/-1}.section-head{display:flex;align-items:baseline;justify-content:space-between;margin:28px 0 4px}.section-head:first-child{margin-top:0}.section-head h1{font-size:11px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);margin:0}.section-head .rule{flex:1;height:1px;background:var(--line);margin-left:16px}.panel{background:linear-gradient(180deg,var(--panel) 0%,var(--panel-2) 100%);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px;overflow:hidden}.panel>h2,.panel>.panel-title{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:-18px -18px 18px;padding:14px 18px;border-bottom:1px solid var(--line);background:var(--tint-soft)}.panel>h2,.panel>.panel-title h2{font-size:13px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text)}.panel>.panel-title h2{margin:0}.panel h3{font-size:13px;margin:0 0 10px;color:var(--text)}.panel p{margin:10px 0}.kv{display:grid;grid-template-columns:140px 1fr;gap:0 16px}.kv>span,.kv>div{padding:9px 0;border-bottom:1px dashed var(--line);min-width:0}.kv>span:nth-last-child(-n+2),.kv>div:nth-last-child(-n+2){border-bottom:0}.kv>span{font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}.kv>div{font-family:var(--mono);font-size:13px;color:var(--text);word-break:break-word}.hint,.muted{color:var(--muted);font-size:12px}.ok{color:var(--ok)}.bad{color:var(--bad)}"
+"main{max-width:1200px;margin:0 auto;padding:32px 28px 0}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.wide,.section-head,.stats{grid-column:1/-1}.section-head{display:flex;align-items:baseline;justify-content:space-between;margin:28px 0 4px}.section-head:first-child{margin-top:0}.section-head h1{font-size:11px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);margin:0}.section-head .rule{flex:1;height:1px;background:var(--line);margin-left:16px}.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}.stat{background:linear-gradient(180deg,var(--panel) 0%,var(--panel-2) 100%);border:1px solid var(--line);border-radius:var(--radius);padding:16px 18px;min-height:96px;box-shadow:var(--shadow);position:relative;overflow:hidden;display:flex;flex-direction:column;justify-content:space-between}.stat .accent-bar{position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--accent);opacity:.7}.stat .stat-label{font-size:10px;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)}.stat .stat-value{font-family:var(--mono);font-size:22px;font-weight:500;color:var(--text);margin-top:6px}.stat .stat-sub{font-family:var(--mono);font-size:11px;color:var(--text-2);margin-top:4px;word-break:break-word}.panel{background:linear-gradient(180deg,var(--panel) 0%,var(--panel-2) 100%);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:18px;overflow:hidden}.panel>h2,.panel>.panel-title{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:-18px -18px 18px;padding:14px 18px;border-bottom:1px solid var(--line);background:var(--tint-soft)}.panel>h2,.panel>.panel-title h2{font-size:13px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--text)}.panel>.panel-title h2{margin:0}.h-meta{font-family:var(--mono);font-size:11px;font-weight:400;color:var(--muted);text-transform:none;letter-spacing:0}.panel h3{font-size:13px;margin:0 0 10px;color:var(--text)}.panel p{margin:10px 0}.kv{display:grid;grid-template-columns:140px 1fr;gap:0 16px}.kv>span,.kv>div{padding:9px 0;border-bottom:1px dashed var(--line);min-width:0}.kv>span:nth-last-child(-n+2),.kv>div:nth-last-child(-n+2){border-bottom:0}.kv>span{font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}.kv>div{font-family:var(--mono);font-size:13px;color:var(--text);word-break:break-word}.hint,.muted{color:var(--muted);font-size:12px}.ok{color:var(--ok)}.bad{color:var(--bad)}"
 "code{font-family:var(--mono);font-size:12.5px;background:var(--tint-low);border:1px solid var(--line);border-radius:var(--radius-sm);padding:2px 7px;color:var(--text);word-break:break-word}.pill{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;font-weight:500;padding:3px 9px;border-radius:999px;background:var(--tint-mid);color:var(--text-2);border:1px solid var(--line)}.pill:before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor}.pill.ok{background:var(--ok-soft);color:var(--ok);border-color:var(--accent-soft)}.pill.warn{background:rgba(240,185,90,.1);color:var(--warn);border-color:rgba(240,185,90,.3)}.pill.bad{background:var(--bad-soft);color:var(--bad);border-color:var(--bad-border)}"
-"form{margin:0}.row{margin:0 0 14px}.row:last-child{margin-bottom:0}.field-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:0 0 14px}.field-row .row{margin:0}label{display:block;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--text-2);margin-bottom:6px}input:not([type=checkbox]):not([type=radio]):not([type=submit]):not([type=button]):not([type=reset]),select,textarea{width:100%;padding:10px 12px;background:var(--bg-2);border:1px solid var(--line);border-radius:var(--radius-sm);color:var(--text);font-family:var(--mono);font-size:13px}select{display:block;min-width:0}select option{background:var(--bg-2);color:var(--text)}input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);background:var(--bg-2);box-shadow:0 0 0 3px var(--accent-soft)}input:-webkit-autofill,input:-webkit-autofill:hover,input:-webkit-autofill:focus,input:-webkit-autofill:active,textarea:-webkit-autofill,select:-webkit-autofill{-webkit-text-fill-color:var(--text)!important;-webkit-box-shadow:0 0 0 1000px var(--bg-2) inset!important;box-shadow:0 0 0 1000px var(--bg-2) inset!important;caret-color:var(--text)!important;border:1px solid var(--line)!important;transition:background-color 9999s ease-in-out 0s}input:-webkit-autofill:focus,textarea:-webkit-autofill:focus,select:-webkit-autofill:focus{-webkit-box-shadow:0 0 0 1000px var(--bg-2) inset,0 0 0 3px var(--accent-soft)!important;box-shadow:0 0 0 1000px var(--bg-2) inset,0 0 0 3px var(--accent-soft)!important;border-color:var(--accent)!important}textarea{min-height:88px;resize:vertical;line-height:1.5}input[type=checkbox],input[type=radio]{width:16px;height:16px;margin:0 8px 0 0;vertical-align:-3px;accent-color:var(--accent)}input[type=file]{font-size:12px}"
+"form{margin:0}.field{margin:0 0 14px}.field:last-child{margin-bottom:0}.field-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:0 0 14px}.field-row .field{margin:0}label{display:block;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--text-2);margin-bottom:6px}input:not([type=checkbox]):not([type=radio]):not([type=submit]):not([type=button]):not([type=reset]),select,textarea{width:100%;padding:10px 12px;background:var(--bg-2);border:1px solid var(--line);border-radius:var(--radius-sm);color:var(--text);font-family:var(--mono);font-size:13px}select{display:block;min-width:0}select option{background:var(--bg-2);color:var(--text)}input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);background:var(--bg-2);box-shadow:0 0 0 3px var(--accent-soft)}input:-webkit-autofill,input:-webkit-autofill:hover,input:-webkit-autofill:focus,input:-webkit-autofill:active,textarea:-webkit-autofill,select:-webkit-autofill{-webkit-text-fill-color:var(--text)!important;-webkit-box-shadow:0 0 0 1000px var(--bg-2) inset!important;box-shadow:0 0 0 1000px var(--bg-2) inset!important;caret-color:var(--text)!important;border:1px solid var(--line)!important;transition:background-color 9999s ease-in-out 0s}input:-webkit-autofill:focus,textarea:-webkit-autofill:focus,select:-webkit-autofill:focus{-webkit-box-shadow:0 0 0 1000px var(--bg-2) inset,0 0 0 3px var(--accent-soft)!important;box-shadow:0 0 0 1000px var(--bg-2) inset,0 0 0 3px var(--accent-soft)!important;border-color:var(--accent)!important}textarea{min-height:88px;resize:vertical;line-height:1.5}input[type=checkbox],input[type=radio]{width:16px;height:16px;margin:0 8px 0 0;vertical-align:-3px;accent-color:var(--accent)}input[type=file]{font-size:12px}"
 "button,.btn{font-family:var(--sans);display:inline-flex;align-items:center;justify-content:center;gap:6px;margin:4px 4px 0 0;padding:8px 14px;background:var(--accent);color:var(--btn-text);border:1px solid var(--accent);border-radius:var(--radius-sm);font-size:12px;font-weight:600;letter-spacing:.04em;cursor:pointer;text-decoration:none;text-transform:uppercase}button:hover,.btn:hover{filter:brightness(1.08)}button:disabled,.btn:disabled{opacity:.55;cursor:not-allowed}.secondary{background:transparent;color:var(--text);border-color:var(--line-2)}.secondary:hover{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);filter:none}.danger{background:transparent;color:var(--bad);border-color:var(--bad-border)}.danger:hover{background:var(--bad-soft);filter:none}.inline{display:inline}.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}.actions form{margin:0}.actions .btn,.actions button,.inline button{margin:0}"
 ".button-block{border:1px solid var(--line);border-radius:var(--radius-sm);padding:14px 16px;background:var(--tint-foot);margin-top:12px}.panel>h2+.button-block,.button-block:first-child{margin-top:0}.button-block>strong,.button-block>h3{display:block;margin:0 0 12px;font-weight:600;font-size:13px;color:var(--text)}.action-extra,.mode-extra{display:none;padding-top:12px;margin-top:12px;border-top:1px dashed var(--line)}.action-extra.show,.mode-extra.show{display:block}.hidden{display:none}.note{background:var(--tint-low);border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px;margin:10px 0}.note p{margin:0 0 7px}.tokens{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px}.tokens div{display:flex;flex-direction:column;gap:3px}.help{position:relative;margin-left:auto}.help-q{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:var(--tint-mid);color:var(--text-2);font-weight:700;font-size:11px;border:1px solid var(--line);cursor:help}.help-box{display:none;position:absolute;right:0;top:28px;z-index:30;width:420px;max-width:calc(100vw - 60px);background:var(--panel-2);border:1px solid var(--line-2);border-radius:var(--radius);padding:14px 16px;font-size:12.5px;line-height:1.55;box-shadow:var(--shadow-pop);color:var(--text)}.help:hover .help-box,.help:focus-within .help-box{display:block}.list{margin:0;padding-left:18px}.foot{text-align:center;margin:16px 0;padding:16px 0;font-family:var(--mono);font-size:11px;color:var(--muted)}"
-"@media(max-width:820px){.topin{grid-template-columns:1fr;gap:10px}.host{text-align:left}.meta{justify-content:flex-start}main{padding:22px 14px 0}.grid,.field-row{grid-template-columns:1fr}.kv{grid-template-columns:1fr}.kv>span{padding-bottom:0;border-bottom:0}.kv>div{padding-top:3px}}"
+"@media(max-width:980px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:520px){.stats{grid-template-columns:1fr}}@media(max-width:820px){.topin{grid-template-columns:1fr;gap:10px}.host{text-align:left}.meta{justify-content:flex-start}main{padding:22px 14px 0}.grid,.field-row{grid-template-columns:1fr}.kv{grid-template-columns:1fr}.kv>span{padding-bottom:0;border-bottom:0}.kv>div{padding-top:3px}}"
 "</style></head><body>");
   const String host = config.hostname[0] ? htmlEscape(config.hostname) : htmlEscape(defaultHostname());
   page += F("<header class='top'><div class='topin'><a class='brand' href='/'><span class='logo'>");
@@ -8643,21 +8643,21 @@ void appendFooter(String &page, bool live_poll = true, bool reboot_wait = false)
   page += F("function p(i,v,c){var e=document.getElementById(i);if(e){e.textContent=v;e.className=c;}}");
   page += F("function fmt(v,d,u){return v==null?'n/a':Number(v).toFixed(d)+(u||'');}");
   page += F("function live(){if(lp)return;lp=1;fh().then(function(d){");
-  page += F("t('live-heap',d.heap+' bytes');if(d.flash){t('live-flash-used',d.flash.used+' bytes');t('live-flash-total',d.flash.total+' bytes');t('live-flash-free',d.flash.free+' bytes');}t('live-uptime',d.uptime+'s');t('live-active-phy',d.active_phy);");
+  page += F("t('live-heap',d.heap+' bytes');if(d.flash){t('live-flash-used',d.flash.used+' bytes');t('live-flash-total',d.flash.total+' bytes');t('live-flash-free',d.flash.free+' bytes');}t('live-uptime',d.uptime+'s');t('live-uptime-2',d.uptime+'s');t('live-active-phy',d.active_phy);");
   page += F("if(d.perf){t('live-loop-load',d.perf.loop_load+'%');t('live-loop-hz',d.perf.loop_hz+'/s');t('live-loop-max',Number(d.perf.loop_max_us/1000).toFixed(1)+' ms');}");
   page += F("if(d.power_saving){sv('power_saving',d.power_saving.mode||'off');}");
   page += F("t('live-recovery',d.recovery.fast_boot_count+'/'+d.recovery.limit);");
-  page += F("var wu=d.wifi_usable!=null?d.wifi_usable:d.wifi,ws=!!d.wifi_sdk_connected,wl=ws?'connected':(wu?'usable':'disconnected'),wc=ws?'pill ok':(wu?'pill warn':'pill bad');p('live-wifi',wl,wc);t('live-ssid',d.wifi_ssid||'n/a');t('live-ip',d.ip||'n/a');t('live-rssi',d.rssi==null?'n/a':d.rssi+' dBm');if(d.wifi_tx_power){var tx=(d.wifi_tx_power.dbm==null?'n/a':Number(d.wifi_tx_power.dbm).toFixed(1)+' dBm')+' '+(d.wifi_tx_power.status||'');if(d.wifi_tx_power.sample_rssi!=null)tx+=' @ '+d.wifi_tx_power.sample_rssi+' dBm';t('live-wifi-tx-power',tx);}t('live-wifi-sdk',(d.wifi_status_name||'unknown')+' ('+(d.wifi_status==null?'?':d.wifi_status)+')');t('live-gateway',d.gateway_ip||'n/a');t('live-dns',d.dns_ip||'n/a');");
-  page += F("p('live-mqtt',d.mqtt.enabled?(d.mqtt.connected?'connected':'disconnected'):'not configured',d.mqtt.enabled?(d.mqtt.connected?'pill ok':'pill bad'):'pill');");
-  page += F("if(d.mqtt){t('live-mqtt-pending',d.mqtt.pending);t('live-mqtt-result',d.mqtt.last_connect_result);t('live-mqtt-connect-ms',d.mqtt.last_connect_ms+' ms');t('live-mqtt-attempt',d.mqtt.last_attempt_ms_ago==null?'n/a':d.mqtt.last_attempt_ms_ago+' ms ago');}");
+  page += F("var wu=d.wifi_usable!=null?d.wifi_usable:d.wifi,ws=!!d.wifi_sdk_connected,wl=ws?'connected':(wu?'usable':'disconnected'),wc=ws?'pill ok':(wu?'pill warn':'pill bad'),ss=d.wifi_ssid||'n/a',rs=d.rssi==null?'n/a':d.rssi+' dBm';p('live-wifi',wl,wc);t('live-ssid',ss);t('live-ssid-2',ss);t('live-ip',d.ip||'n/a');t('live-rssi',rs);t('live-rssi-2',rs);t('live-rssi-hmeta',rs);if(d.wifi_tx_power){var tx=(d.wifi_tx_power.dbm==null?'n/a':Number(d.wifi_tx_power.dbm).toFixed(1)+' dBm')+' '+(d.wifi_tx_power.status||'');if(d.wifi_tx_power.sample_rssi!=null)tx+=' @ '+d.wifi_tx_power.sample_rssi+' dBm';t('live-wifi-tx-power',tx);}t('live-wifi-sdk',(d.wifi_status_name||'unknown')+' ('+(d.wifi_status==null?'?':d.wifi_status)+')');t('live-gateway',d.gateway_ip||'n/a');t('live-dns',d.dns_ip||'n/a');");
+  page += F("p('live-mqtt',d.mqtt.enabled?(d.mqtt.connected?'connected':'disconnected'):'not configured',d.mqtt.enabled?(d.mqtt.connected?'pill ok':'pill bad'):'pill');p('live-mqtt-broker-3',d.mqtt.enabled?(d.mqtt.connected?'connected':'disconnected'):'not configured',d.mqtt.enabled?(d.mqtt.connected?'h-meta pill ok':'h-meta pill bad'):'h-meta pill');");
+  page += F("if(d.mqtt){var mb=d.mqtt.enabled?(d.mqtt.host+':'+d.mqtt.port):'not configured';t('live-mqtt-broker-2',mb);t('live-mqtt-pending',d.mqtt.pending);t('live-mqtt-pending-2',d.mqtt.pending);t('live-mqtt-result',d.mqtt.last_connect_result);t('live-mqtt-connect-ms',d.mqtt.last_connect_ms+' ms');t('live-mqtt-attempt',d.mqtt.last_attempt_ms_ago==null?'n/a':d.mqtt.last_attempt_ms_ago+' ms ago');}");
   page += F("if(d.light){p('live-light-power',d.light.power?'on':'off',d.light.power?'pill ok':'pill bad');t('live-light-dimmer',d.light.dimmer+'%');t('live-light-ct',d.light.ct+' mired');t('live-light-mode',d.light.mode||'white');t('live-light-color',d.light.color||'');t('live-light-on-dimmer',d.light.on_dimmer+'%');sv('dimmer',d.light.dimmer);sv('ct',d.light.ct);sv('color',d.light.color||'');if(d.light.shelly_dimmer){var sd=d.light.shelly_dimmer;t('live-shelly-edge',sd.edge||'auto');t('live-shelly-range-min',sd.range_min);t('live-shelly-range-max',sd.range_max);sv('shelly_edge',sd.edge||'auto');sv('shelly_range_min',sd.range_min);sv('shelly_range_max',sd.range_max);}}");
   page += F("if(d.power){for(var i=0;i<d.power.length;i++){if(d.power[i]!==null)p('live-relay-'+i,d.power[i]?'on':'off',d.power[i]?'pill ok':'pill bad');}}");
   page += F("if(d.buttons){for(var b=0;b<d.buttons.length;b++){if(d.buttons[b])p('live-button-'+b,d.buttons[b].state||(d.buttons[b].pressed?'pressed':'released'),d.buttons[b].pressed?'pill ok':'pill bad');}}");
   page += F("if(d.leds){for(var l=0;l<d.leds.length;l++){if(d.leds[l])p('live-led-'+l,d.leds[l].on?'on':'off',d.leds[l].on?'pill ok':'pill bad');}}");
-  page += F("if(d.energy){t('live-energy-power',fmt(d.energy.power,1,' W'));t('live-energy-voltage',fmt(d.energy.voltage,1,' V'));t('live-energy-current',fmt(d.energy.current,3,' A'));t('live-energy-total',fmt(d.energy.total_kwh,4,' kWh'));t('live-energy-offset',fmt(d.energy.offset_kwh,4,' kWh'));t('live-energy-mqtt-age',d.energy.last_mqtt_report_ms_ago==null?'n/a':d.energy.last_mqtt_report_ms_ago+' ms ago');t('live-energy-mqtt-reason',d.energy.last_mqtt_report_reason||'n/a');if(d.energy.channels){for(var e=0;e<d.energy.channels.length;e++){t('live-energy-ch'+e+'-power',fmt(d.energy.channels[e].power,1,' W'));t('live-energy-ch'+e+'-current',fmt(d.energy.channels[e].current,3,' A'));}}}");
+  page += F("if(d.energy){t('live-energy-power',fmt(d.energy.power,1,' W'));t('live-energy-power-2',fmt(d.energy.power,1,' W'));t('live-energy-voltage',fmt(d.energy.voltage,1,' V'));t('live-energy-voltage-2',fmt(d.energy.voltage,1,' V'));t('live-energy-current',fmt(d.energy.current,3,' A'));t('live-energy-current-2',fmt(d.energy.current,3,' A'));t('live-energy-total',fmt(d.energy.total_kwh,4,' kWh'));t('live-energy-offset',fmt(d.energy.offset_kwh,4,' kWh'));t('live-energy-mqtt-age',d.energy.last_mqtt_report_ms_ago==null?'n/a':d.energy.last_mqtt_report_ms_ago+' ms ago');t('live-energy-mqtt-reason',d.energy.last_mqtt_report_reason||'n/a');if(d.energy.channels){for(var e=0;e<d.energy.channels.length;e++){t('live-energy-ch'+e+'-power',fmt(d.energy.channels[e].power,1,' W'));t('live-energy-ch'+e+'-current',fmt(d.energy.channels[e].current,3,' A'));}}}");
   page += F("t('live-temp',d.temperature_c==null?'n/a':Number(d.temperature_c).toFixed(1)+' C');t('live-adc-raw',d.adc_raw==null?'n/a':d.adc_raw);");
   page += F("lp=0;}).catch(function(){lp=0;});}");
-  page += F("function ba(s){var k=s.getAttribute('data-key'),v=s.value,b=document.getElementById('extra-'+k);if(!b)return;var t=b.querySelector('.target-input'),p=b.querySelector('.payload-input'),rr=b.querySelector('.relay-row'),tr=b.querySelector('.target-row'),pr=b.querySelector('.payload-row'),tl=b.querySelector('.target-label'),h=b.querySelector('.action-hint');b.className=(v=='1'||v=='2'||v=='3')?'action-extra show':'action-extra';if(rr)rr.className=v=='1'?'row relay-row':'row relay-row hidden';if(tr)tr.className=(v=='2'||v=='3')?'row target-row':'row target-row hidden';if(pr)pr.className=(v=='2')?'row payload-row':'row payload-row hidden';if(v=='1'){if(h)h.textContent='Toggles the configured output.';}else if(v=='2'){if(t&&(!t.value||t.value.indexOf('http://')==0))t.value=t.getAttribute('data-default-topic');if(p&&!p.value)p.value=p.getAttribute('data-default-payload');if(tl)tl.textContent='MQTT topic';if(h)h.textContent='Publishes this topic and payload through the configured MQTT broker.';}else if(v=='3'){if(tl)tl.textContent='Webhook URL';if(h)h.textContent='Executes an HTTP GET request; only http:// URLs are supported.';}}");
+  page += F("function ba(s){var k=s.getAttribute('data-key'),v=s.value,b=document.getElementById('extra-'+k);if(!b)return;var t=b.querySelector('.target-input'),p=b.querySelector('.payload-input'),rr=b.querySelector('.relay-row'),tr=b.querySelector('.target-row'),pr=b.querySelector('.payload-row'),tl=b.querySelector('.target-label'),h=b.querySelector('.action-hint');b.className=(v=='1'||v=='2'||v=='3')?'action-extra show':'action-extra';if(rr)rr.className=v=='1'?'field relay-row':'field relay-row hidden';if(tr)tr.className=(v=='2'||v=='3')?'field target-row':'field target-row hidden';if(pr)pr.className=(v=='2')?'field payload-row':'field payload-row hidden';if(v=='1'){if(h)h.textContent='Toggles the configured output.';}else if(v=='2'){if(t&&(!t.value||t.value.indexOf('http://')==0))t.value=t.getAttribute('data-default-topic');if(p&&!p.value)p.value=p.getAttribute('data-default-payload');if(tl)tl.textContent='MQTT topic';if(h)h.textContent='Publishes this topic and payload through the configured MQTT broker.';}else if(v=='3'){if(tl)tl.textContent='Webhook URL';if(h)h.textContent='Executes an HTTP GET request; only http:// URLs are supported.';}}");
   page += F("function im(s){var k=s.getAttribute('data-input'),v=s.value,b=document.getElementById('input-button-'+k),w=document.getElementById('input-switch-'+k);if(b)b.className=v=='0'?'mode-extra show':'mode-extra';if(w)w.className=v=='1'?'mode-extra show':'mode-extra';}");
   page += F("function rb(s){var k=s.getAttribute('data-relay'),o=document.getElementById('relay_on_boot'+k),r=document.getElementById('relay_restore_boot'+k);if(!o||!r||!s.checked)return;if(s==r)o.checked=false;else if(s==o)r.checked=false;}");
   page += F("function ts(){var s=document.getElementById('known-template'),t=document.getElementById('template-json');if(!s||!t)return;var v=t.value.trim(),m=0;for(var i=1;i<s.options.length;i++){if(s.options[i].getAttribute('data-json')==v){m=i;break;}}s.selectedIndex=m;s.setAttribute('data-prev',s.options[m]?s.options[m].value:'custom');}");
@@ -8724,8 +8724,66 @@ void appendSectionHead(String &page, const __FlashStringHelper *title) {
   page += F("</h1><div class='rule'></div></div>");
 }
 
+void appendOverviewStats(String &page) {
+  const wl_status_t wifi_status = WiFi.status();
+  const IPAddress station_ip = WiFi.localIP();
+  const bool station_has_ip = ipAddressSet(station_ip);
+  const bool wifi_usable = (wifi_status == WL_CONNECTED) || station_has_ip;
+  const bool mqtt_configured = config.mqtt_host[0] != '\0';
+
+  page += F("<div class='stats wide'><div class='stat'><span class='accent-bar'></span><div class='stat-label'>Wi-Fi</div><div class='stat-value'><span id='live-rssi-2'>");
+  if (wifi_usable) {
+    page += String(WiFi.RSSI());
+    page += F(" dBm");
+  } else {
+    page += F("n/a");
+  }
+  page += F("</span></div><div class='stat-sub'><span id='live-ssid-2'>");
+  if (wifi_usable) {
+    page += htmlEscape((wifi_status == WL_CONNECTED) ? WiFi.SSID() : String(config.ssid));
+  } else {
+    page += F("n/a");
+  }
+  page += F("</span></div></div><div class='stat'><span class='accent-bar'></span><div class='stat-label'>MQTT Broker</div><div class='stat-value'><span id='live-mqtt-pending-2'>");
+  page += String(mqtt_pending_relay_mask);
+  page += F("</span> queued</div><div class='stat-sub'><span id='live-mqtt-broker-2'>");
+  if (mqtt_configured) {
+    page += htmlEscape(config.mqtt_host);
+    page += F(":");
+    page += String(config.mqtt_port);
+  } else {
+    page += F("not configured");
+  }
+  page += F("</span></div></div><div class='stat'><span class='accent-bar'></span><div class='stat-label'>Power</div><div class='stat-value'><span id='live-energy-power-2'>");
+  if (energy.present) {
+    page += String(energy.power, 1);
+    page += F(" W");
+  } else {
+    page += F("n/a");
+  }
+  page += F("</span></div><div class='stat-sub'><span id='live-energy-voltage-2'>");
+  if (energy.present) {
+    page += String(energy.voltage, 1);
+    page += F(" V");
+  } else {
+    page += F("n/a");
+  }
+  page += F("</span> &middot; <span id='live-energy-current-2'>");
+  if (energy.present) {
+    page += String(energy.current, 3);
+    page += F(" A");
+  } else {
+    page += F("n/a");
+  }
+  page += F("</span></div></div><div class='stat'><span class='accent-bar'></span><div class='stat-label'>Uptime</div><div class='stat-value'><span id='live-uptime-2'>");
+  page += String(millis() / 1000);
+  page += F("s</span></div><div class='stat-sub'>since boot</div></div></div>");
+}
+
 void appendStatusBlock(String &page) {
-  page += F("<section class='panel wide'><h2>System Status</h2><div class='kv'>");
+  page += F("<section class='panel wide'><h2>System Status <span class='h-meta'>");
+  page += F(MYMOTA_TARGET);
+  page += F("</span></h2><div class='kv'>");
   page += F("<span>Version</span><div><code>");
   page += F(MYMOTA_VERSION);
   page += F("</code> <code>");
@@ -8994,7 +9052,7 @@ void appendDeviceControls(String &page) {
   if (light.present) {
     const bool has_ct = lightSupportsColorTemperature();
     const bool has_color = lightSupportsColor();
-    page += F("<div class='row'><strong>Light</strong> ");
+    page += F("<div class='field'><strong>Light</strong> ");
     page += F("<span id='live-light-power' class='");
     page += light.power ? F("pill ok'>on") : F("pill bad'>off");
     page += F("</span><div class='kv'><span>Dimmer</span><div><code id='live-light-dimmer'>");
@@ -9031,7 +9089,7 @@ void appendDeviceControls(String &page) {
     page += String(config.light_on_dimmer);
     page += F("%</code></div></div>");
     page += F("<form class='inline' data-inline='1' method='post' action='/light'><span class='actions'><button name='power' value='toggle'>Toggle</button><button name='power' value='on'>On</button><button class='secondary' name='power' value='off'>Off</button></span></form>");
-    page += F("<div class='row'><label>Dimmer</label><input class='light-auto' data-live='live-light-dimmer' data-suffix='%' name='dimmer' type='range' min='");
+    page += F("<div class='field'><label>Dimmer</label><input class='light-auto' data-live='live-light-dimmer' data-suffix='%' name='dimmer' type='range' min='");
     page += String(kLightDimmerOff);
     page += F("' max='");
     page += String(kLightDimmerMax);
@@ -9039,7 +9097,7 @@ void appendDeviceControls(String &page) {
     page += String(light.dimmer);
     page += F("'></div>");
     if (has_ct) {
-      page += F("<div class='row'><label>Color temperature</label><input class='light-auto' data-live='live-light-ct' data-suffix=' mired' name='ct' type='range' min='");
+      page += F("<div class='field'><label>Color temperature</label><input class='light-auto' data-live='live-light-ct' data-suffix=' mired' name='ct' type='range' min='");
       page += String(kLightCtMin);
       page += F("' max='");
       page += String(kLightCtMax);
@@ -9048,11 +9106,11 @@ void appendDeviceControls(String &page) {
       page += F("'></div>");
     }
     if (has_color) {
-      page += F("<div class='row'><label>Color RGB</label><input class='light-auto' data-live='live-light-color' name='color' maxlength='7' value='");
+      page += F("<div class='field'><label>Color RGB</label><input class='light-auto' data-live='live-light-color' name='color' maxlength='7' value='");
       appendLightRgbHex(page);
       page += F("'></div>");
     }
-    page += F("<div class='row'><label>ON dimmer</label><input class='light-auto' data-live='live-light-on-dimmer' data-suffix='%' name='on_dimmer' type='number' min='");
+    page += F("<div class='field'><label>ON dimmer</label><input class='light-auto' data-live='live-light-on-dimmer' data-suffix='%' name='on_dimmer' type='number' min='");
     page += String(kLightDimmerMin);
     page += F("' max='");
     page += String(kLightDimmerMax);
@@ -9060,17 +9118,17 @@ void appendDeviceControls(String &page) {
     page += String(config.light_on_dimmer);
     page += F("'></div>");
     if (runtime_template.shelly_dimmer) {
-      page += F("<div class='button-block'><strong>Shelly dimmer</strong><div class='row'><label>Edge mode</label><select class='light-auto' data-live='live-shelly-edge' name='shelly_edge'><option value='auto'");
+      page += F("<div class='button-block'><strong>Shelly dimmer</strong><div class='field'><label>Edge mode</label><select class='light-auto' data-live='live-shelly-edge' name='shelly_edge'><option value='auto'");
       if (config.shelly_dimmer_edge == kShellyDimmerEdgeAuto) page += F(" selected");
       page += F(">Auto</option><option value='trailing'");
       if (config.shelly_dimmer_edge == kShellyDimmerEdgeTrailing) page += F(" selected");
       page += F(">Trailing edge</option><option value='leading'");
       if (config.shelly_dimmer_edge == kShellyDimmerEdgeLeading) page += F(" selected");
-      page += F(">Leading edge</option></select></div><div class='row'><label>Range minimum</label><input class='light-auto' data-live='live-shelly-range-min' name='shelly_range_min' type='number' min='0' max='");
+      page += F(">Leading edge</option></select></div><div class='field'><label>Range minimum</label><input class='light-auto' data-live='live-shelly-range-min' name='shelly_range_min' type='number' min='0' max='");
       page += String(kShellyDimmerRangeMaxLimit - 1);
       page += F("' step='1' value='");
       page += String(config.shelly_dimmer_range_min);
-      page += F("'></div><div class='row'><label>Range maximum</label><input class='light-auto' data-live='live-shelly-range-max' name='shelly_range_max' type='number' min='1' max='");
+      page += F("'></div><div class='field'><label>Range maximum</label><input class='light-auto' data-live='live-shelly-range-max' name='shelly_range_max' type='number' min='1' max='");
       page += String(kShellyDimmerRangeMaxLimit);
       page += F("' step='1' value='");
       page += String(config.shelly_dimmer_range_max);
@@ -9080,7 +9138,7 @@ void appendDeviceControls(String &page) {
   }
   for (uint8_t i = 0; i < runtime_template.relay_count; i++) {
     if (!hasPin(runtime_template.relays[i])) continue;
-    page += F("<div class='row'><strong>Relay ");
+    page += F("<div class='field'><strong>Relay ");
     page += String(i + 1);
     page += F("</strong> <span class='hint'>on</span> <code>");
     page += pinName(runtime_template.relays[i].pin);
@@ -9136,21 +9194,21 @@ void appendDeviceControls(String &page) {
       }
       page += F("</div>");
     }
-    page += F("<form data-inline='1' method='post' action='/energy'><div class='field-row'><div class='row'><label>Total kWh offset</label><input name='total_offset_kwh' type='number' min='");
+    page += F("<form data-inline='1' method='post' action='/energy'><div class='field-row'><div class='field'><label>Total kWh offset</label><input name='total_offset_kwh' type='number' min='");
     page += String(kEnergyTotalOffsetMinKwh, 0);
     page += F("' max='");
     page += String(kEnergyTotalOffsetMaxKwh, 0);
     page += F("' step='0.0001' value='");
     page += String(config.energy_total_offset_kwh, 4);
-    page += F("'></div><div class='row'><label>Report interval (s)</label><input name='energy_report_interval' type='number' min='0' max='");
+    page += F("'></div><div class='field'><label>Report interval (s)</label><input name='energy_report_interval' type='number' min='0' max='");
     page += String(kMqttEnergyIntervalMax);
     page += F("' step='1' value='");
     page += String(config.energy_mqtt_interval);
-    page += F("'></div></div><div class='field-row'><div class='row'><label>Report on &Delta; %</label><input name='energy_report_change_percent' type='number' min='0' max='");
+    page += F("'></div></div><div class='field-row'><div class='field'><label>Report on &Delta; %</label><input name='energy_report_change_percent' type='number' min='0' max='");
     page += String(kMqttEnergyChangeMaxPercent, 1);
     page += F("' step='0.1' value='");
     page += String(energyMqttChangePercent(), 1);
-    page += F("'></div><div class='row'><label>Report on &Delta; W</label><input name='energy_report_change_watts' type='number' min='0' max='");
+    page += F("'></div><div class='field'><label>Report on &Delta; W</label><input name='energy_report_change_watts' type='number' min='0' max='");
     page += String(kMqttEnergyChangeMaxWatts);
     page += F("' step='1' value='");
     page += String(config.energy_mqtt_change_watts);
@@ -9180,7 +9238,7 @@ void appendLedSettings(String &page) {
     if (!assignment || !hasLedOutput(i)) continue;
 
     const uint8_t selected = config.led_attach[i];
-    page += F("<div class='row'><label>");
+    page += F("<div class='field'><label>");
     page += htmlEscape(ledOutputName(i));
     page += F(" <span class='hint'>");
     page += pinName(assignment->pin);
@@ -9222,7 +9280,7 @@ void appendRelayEnforcementSettings(String &page) {
     page += String(i + 1);
     page += F("</strong> <span class='hint'>");
     page += pinName(runtime_template.relays[i].pin);
-    page += F("</span><div class='row'><label><input class='relay-boot-choice' id='relay_on_boot");
+    page += F("</span><div class='field'><label><input class='relay-boot-choice' id='relay_on_boot");
     page += String(i);
     page += F("' data-relay='");
     page += String(i);
@@ -9230,7 +9288,7 @@ void appendRelayEnforcementSettings(String &page) {
     page += String(i);
     page += F("' value='1'");
     if (config.relay_on_boot[i]) page += F(" checked");
-    page += F(">Turn on at boot</label></div><div class='row'><label><input class='relay-boot-choice' id='relay_restore_boot");
+    page += F(">Turn on at boot</label></div><div class='field'><label><input class='relay-boot-choice' id='relay_restore_boot");
     page += String(i);
     page += F("' data-relay='");
     page += String(i);
@@ -9238,7 +9296,7 @@ void appendRelayEnforcementSettings(String &page) {
     page += String(i);
     page += F("' value='1'");
     if (config.relay_restore_boot[i]) page += F(" checked");
-    page += F(">Restore last state at boot</label></div><div class='row'><label><input type='checkbox' name='relay_time_enabled");
+    page += F(">Restore last state at boot</label></div><div class='field'><label><input type='checkbox' name='relay_time_enabled");
     page += String(i);
     page += F("' value='1'");
     if (config.relay_time_enabled[i]) page += F(" checked");
@@ -9321,7 +9379,7 @@ void appendButtonActionExtra(String &page, uint8_t button, const char *name, boo
   page += String(button);
   page += F("' class='action-extra'>");
   if (has_relay_target) {
-    page += F("<div class='row relay-row'><label>Target relay</label><select name='");
+    page += F("<div class='field relay-row'><label>Target relay</label><select name='");
     page += name;
     page += F("_relay");
     page += String(button);
@@ -9332,9 +9390,9 @@ void appendButtonActionExtra(String &page, uint8_t button, const char *name, boo
     }
     page += F("</select></div>");
   } else {
-    page += F("<div class='row relay-row'><span class='hint'>Toggles the light output.</span></div>");
+    page += F("<div class='field relay-row'><span class='hint'>Toggles the light output.</span></div>");
   }
-  page += F("<div class='row target-row'><label><span class='target-label'>MQTT topic</span></label><input class='target-input' name='");
+  page += F("<div class='field target-row'><label><span class='target-label'>MQTT topic</span></label><input class='target-input' name='");
   page += name;
   page += F("_target");
   page += String(button);
@@ -9344,7 +9402,7 @@ void appendButtonActionExtra(String &page, uint8_t button, const char *name, boo
   page += htmlEscape(kDefaultButtonMqttTopic);
   page += F("' value='");
   page += htmlEscape(buttonActionTarget(button, hold));
-  page += F("'></div><div class='row payload-row'><label>MQTT payload</label><textarea class='payload-input' name='");
+  page += F("'></div><div class='field payload-row'><label>MQTT payload</label><textarea class='payload-input' name='");
   page += name;
   page += F("_payload");
   page += String(button);
@@ -9366,13 +9424,13 @@ void appendButtonSettings(String &page) {
   page += F("<div><code>{TOPIC}</code><span class='hint'>current MQTT topic</span></div>");
   page += F("<div><code>{RELAYX_STATE}</code><span class='hint'>relay state, for example {RELAY1_STATE}</span></div>");
   page += F("</div><p class='hint'>MQTT broadcast sends a topic and payload through the configured broker.</p></div></div></div><form data-inline='1' method='post' action='/buttons'>");
-  page += F("<div class='field-row'><div class='row'><label>Hold time ms</label><input name='hold_ms' type='number' min='");
+  page += F("<div class='field-row'><div class='field'><label>Hold time ms</label><input name='hold_ms' type='number' min='");
   page += String(kButtonHoldMinMs);
   page += F("' max='");
   page += String(kButtonHoldMaxMs);
   page += F("' step='1' value='");
   page += String(config.button_hold_ms);
-  page += F("'></div><div class='row'><label>Debounce ms</label><input name='debounce_ms' type='number' min='");
+  page += F("'></div><div class='field'><label>Debounce ms</label><input name='debounce_ms' type='number' min='");
   page += String(kButtonDebounceMinMs);
   page += F("' max='");
   page += String(kButtonDebounceMaxMs);
@@ -9405,7 +9463,7 @@ void appendButtonSettings(String &page) {
       page += htmlEscape(inputStateName(i, false));
       page += F("</span>");
     }
-    page += F("<div class='row'><label>Kind</label><select class='input-mode' data-input='");
+    page += F("<div class='field'><label>Kind</label><select class='input-mode' data-input='");
     page += String(i);
     page += F("' name='mode");
     page += String(i);
@@ -9423,7 +9481,7 @@ void appendButtonSettings(String &page) {
     page += F("'>");
     uint8_t unused_relay = 0;
     if (defaultButtonRelayTarget(i, unused_relay)) {
-      page += F("<div class='row'><label>Target relay</label><select name='relay");
+      page += F("<div class='field'><label>Target relay</label><select name='relay");
       page += String(i);
       page += F("'>");
       for (uint8_t relay = 0; relay < runtime_template.relay_count; relay++) {
@@ -9434,7 +9492,7 @@ void appendButtonSettings(String &page) {
     } else if (light.present) {
       page += F("<p class='hint'>Switch follows the light output.</p>");
     }
-    page += F("<div class='row'><label>Reverse</label><select name='reverse");
+    page += F("<div class='field'><label>Reverse</label><select name='reverse");
     page += String(i);
     page += F("'><option value='0'");
     if (on_level == kInputOnLevelHigh) page += F(" selected");
@@ -9446,10 +9504,10 @@ void appendButtonSettings(String &page) {
     page += String(i);
     page += F("' class='mode-extra");
     if (mode == kInputModeButton) page += F(" show");
-    page += F("'><div class='row'><label>Press</label>");
+    page += F("'><div class='field'><label>Press</label>");
     appendButtonActionSelect(page, i, "press", config.button_press_action[i]);
     appendButtonActionExtra(page, i, "press", false);
-    page += F("</div><div class='row'><label>Hold</label>");
+    page += F("</div><div class='field'><label>Hold</label>");
     appendButtonActionSelect(page, i, "hold", config.button_hold_action[i]);
     appendButtonActionExtra(page, i, "hold", true);
     page += F("</div></div></div>");
@@ -9459,7 +9517,7 @@ void appendButtonSettings(String &page) {
 
 void appendTemplateForm(String &page) {
   page += F("<section class='panel wide'><h2>Template Selection</h2><form method='post' action='/template'>");
-  page += F("<div class='row'><label>Known templates</label><select id='known-template' onchange='tp(this)'><option value='custom'>Custom</option>");
+  page += F("<div class='field'><label>Known templates</label><select id='known-template' onchange='tp(this)'><option value='custom'>Custom</option>");
   page += F("<option data-json='");
   page += htmlEscape(String(FPSTR(kTemplateMiDeskLampJson)));
   page += F("'>Mi Desk Lamp</option><option data-json='");
@@ -9479,7 +9537,7 @@ void appendTemplateForm(String &page) {
   page += F("'>Shelly Duo RGBW</option><option data-json='");
   page += htmlEscape(String(FPSTR(kTemplateShellyPlugSJson)));
   page += F("'>Shelly Plug S</option></select></div>");
-  page += F("<div class='row'><label>Tasmota ESP8266 template JSON</label><textarea id='template-json' name='template' rows='5' maxlength='");
+  page += F("<div class='field'><label>Tasmota ESP8266 template JSON</label><textarea id='template-json' name='template' rows='5' maxlength='");
   page += String(kTemplateJsonMaxLen);
   page += F("'>");
   page += htmlEscape(currentTemplateJson());
@@ -9488,24 +9546,32 @@ void appendTemplateForm(String &page) {
 }
 
 void appendMqttForm(String &page) {
-  page += F("<section class='panel'><h2>MQTT Settings</h2><form data-inline='1' method='post' action='/mqtt'>");
-  page += F("<div class='field-row'><div class='row'><label>Host</label><input name='host' maxlength='");
+  page += F("<section class='panel'><h2>MQTT Settings <span id='live-mqtt-broker-3' class='h-meta ");
+  if (config.mqtt_host[0] == '\0') {
+    page += F("pill'>not configured");
+  } else if (mqtt_client.connected()) {
+    page += F("pill ok'>connected");
+  } else {
+    page += F("pill bad'>disconnected");
+  }
+  page += F("</span></h2><form data-inline='1' method='post' action='/mqtt'>");
+  page += F("<div class='field-row'><div class='field'><label>Host</label><input name='host' maxlength='");
   page += String(kMqttHostMaxLen);
   page += F("' value='");
   page += htmlEscape(config.mqtt_host);
-  page += F("'></div><div class='row'><label>Port</label><input name='port' type='number' min='1' max='65535' value='");
+  page += F("'></div><div class='field'><label>Port</label><input name='port' type='number' min='1' max='65535' value='");
   page += String(config.mqtt_port);
-  page += F("'></div></div><div class='row'><label>Topic</label><input name='topic' maxlength='");
+  page += F("'></div></div><div class='field'><label>Topic</label><input name='topic' maxlength='");
   page += String(kMqttTopicMaxLen);
   page += F("' required value='");
   page += htmlEscape(config.mqtt_topic);
-  page += F("'></div><div class='field-row'><div class='row'><label>MQTT keepalive seconds</label><input name='protocol_keepalive' type='number' min='");
+  page += F("'></div><div class='field-row'><div class='field'><label>MQTT keepalive seconds</label><input name='protocol_keepalive' type='number' min='");
   page += String(kMqttProtocolKeepaliveMinSec);
   page += F("' max='");
   page += String(kMqttProtocolKeepaliveMaxSec);
   page += F("' value='");
   page += String(config.mqtt_protocol_keepalive);
-  page += F("'></div><div class='row'><label>State keepalive seconds</label><input name='keepalive' type='number' min='0' max='");
+  page += F("'></div><div class='field'><label>State keepalive seconds</label><input name='keepalive' type='number' min='0' max='");
   page += String(kMqttKeepaliveMax);
   page += F("' value='");
   page += String(config.mqtt_keepalive);
@@ -9516,8 +9582,8 @@ void appendSettingsForm(String &page) {
   page += F("<section class='panel wide'><h2>Settings</h2>");
   page += F("<p><a class='btn secondary' href='/settings/export'>Export settings</a></p>");
   page += F("<form method='post' action='/settings/import'>");
-  page += F("<div class='row'><label>Import settings JSON</label><input type='file' accept='application/json,.json' onchange='sf(this)'></div>");
-  page += F("<div class='row'><label>Settings JSON</label><textarea id='settings-json' name='settings_json' rows='8' maxlength='");
+  page += F("<div class='field'><label>Import settings JSON</label><input type='file' accept='application/json,.json' onchange='sf(this)'></div>");
+  page += F("<div class='field'><label>Settings JSON</label><textarea id='settings-json' name='settings_json' rows='8' maxlength='");
   page += String(kSettingsImportJsonMaxLen);
   page += F("'></textarea></div>");
   page += F("<p class='hint'>Wi-Fi SSID, password, hostname, and PHY mode are not exported or imported.</p>");
@@ -9537,7 +9603,7 @@ void appendPhyModeOption(String &page, uint8_t mode) {
 }
 
 void appendPhyModeSelect(String &page) {
-  page += F("<div class='row'><label>PHY mode</label><select name='phy_mode'>");
+  page += F("<div class='field'><label>PHY mode</label><select name='phy_mode'>");
   appendPhyModeOption(page, kPhyModeAuto);
   appendPhyModeOption(page, WIFI_PHY_MODE_11B);
   appendPhyModeOption(page, WIFI_PHY_MODE_11G);
@@ -9558,7 +9624,7 @@ void appendPowerSavingOption(String &page, uint8_t mode, const __FlashStringHelp
 }
 
 void appendPowerSavingSelect(String &page) {
-  page += F("<div class='row'><label>Mode</label><select id='power-saving-mode' name='power_saving'>");
+  page += F("<div class='field'><label>Mode</label><select id='power-saving-mode' name='power_saving'>");
   appendPowerSavingOption(page, kPowerSavingOff, F("Off"));
   appendPowerSavingOption(page, kPowerSavingLight, F("Light"));
   appendPowerSavingOption(page, kPowerSavingDeep, F("Deep"));
@@ -9573,6 +9639,8 @@ void handleRoot() {
   page += F("<div class='grid'>");
   flushStreamChunk(page);
   appendSectionHead(page, F("System"));
+  flushStreamChunk(page);
+  appendOverviewStats(page);
   flushStreamChunk(page);
   appendStatusBlock(page);
   flushStreamChunk(page);
@@ -9590,18 +9658,29 @@ void handleRoot() {
   flushStreamChunk(page);
   appendSectionHead(page, F("Network"));
   flushStreamChunk(page);
-  page += F("<section class='panel'><h2>Wi-Fi</h2><form method='post' action='/wifi'>");
-  page += F("<div class='row'><label>SSID</label><input name='ssid' maxlength='32' required value='");
+  const wl_status_t wifi_status = WiFi.status();
+  const IPAddress station_ip = WiFi.localIP();
+  const bool station_has_ip = ipAddressSet(station_ip);
+  const bool wifi_usable = (wifi_status == WL_CONNECTED) || station_has_ip;
+  page += F("<section class='panel'><h2>Wi-Fi <span class='h-meta' id='live-rssi-hmeta'>");
+  if (wifi_usable) {
+    page += String(WiFi.RSSI());
+    page += F(" dBm");
+  } else {
+    page += F("n/a");
+  }
+  page += F("</span></h2><form method='post' action='/wifi'>");
+  page += F("<div class='field'><label>SSID</label><input name='ssid' maxlength='32' required value='");
   page += htmlEscape(config.ssid);
-  page += F("'></div><div class='row'><label>Password</label><input id='wifi-password' type='password' name='password' maxlength='64' autocomplete='current-password' value='");
+  page += F("'></div><div class='field'><label>Password</label><input id='wifi-password' type='password' name='password' maxlength='64' autocomplete='current-password' value='");
   page += htmlEscape(config.password);
   page += F("' onfocus=\"this.type='text'\" onclick=\"this.type='text'\"></div>");
-  page += F("<div class='field-row'><div class='row'><label>Hostname</label><input name='hostname' maxlength='32' value='");
+  page += F("<div class='field-row'><div class='field'><label>Hostname</label><input name='hostname' maxlength='32' value='");
   page += htmlEscape(config.hostname);
   page += F("'></div>");
   appendPhyModeSelect(page);
   page += F("</div>");
-  page += F("<div class='row'><label><input type='checkbox' name='wifi_dynamic_power' value='1'");
+  page += F("<div class='field'><label><input type='checkbox' name='wifi_dynamic_power' value='1'");
   if (config.wifi_dynamic_power) page += F(" checked");
   page += F(">Dynamic Wi-Fi power</label></div>");
   page += F("<button type='submit'>Save Wi-Fi</button></form>");
@@ -9613,11 +9692,11 @@ void handleRoot() {
 
   appendSectionHead(page, F("Maintenance"));
   flushStreamChunk(page);
-  page += F("<section class='panel'><h2>System</h2><div class='button-block'><h3>Firmware</h3><form class='firmware-upload' method='post' action='/update?verify=1' enctype='multipart/form-data' data-target='");
+  page += F("<section class='panel'><h2>System <span class='h-meta'>firmware / power / reboot</span></h2><div class='button-block'><h3>Firmware</h3><form class='firmware-upload' method='post' action='/update?verify=1' enctype='multipart/form-data' data-target='");
   page += F(MYMOTA_TARGET);
   page += F("'>");
-  page += F("<div class='row'><label>Firmware binary</label><input type='file' name='firmware' accept='.bin,.bin.gz' required></div>");
-  page += F("<div class='row'><label><input class='firmware-verify' type='checkbox' checked>Verify firmware target on device</label></div>");
+  page += F("<div class='field'><label>Firmware binary</label><input type='file' name='firmware' accept='.bin,.bin.gz' required></div>");
+  page += F("<div class='field'><label><input class='firmware-verify' type='checkbox' checked>Verify firmware target on device</label></div>");
   page += F("<button type='submit'>Upload firmware</button></form></div>");
   page += F("<div class='button-block'><h3>Power Saving</h3><form data-inline='1' method='post' action='/system'>");
   appendPowerSavingSelect(page);
@@ -9662,13 +9741,13 @@ void handleScan() {
   if (count <= 0) {
     page += F("<p>No networks found.</p>");
   } else {
-    page += F("<form method='post' action='/wifi'><div class='row'><label>Password</label><input type='password' name='password' maxlength='64'></div>");
-    page += F("<div class='field-row'><div class='row'><label>Hostname</label><input name='hostname' maxlength='32' value='");
+    page += F("<form method='post' action='/wifi'><div class='field'><label>Password</label><input type='password' name='password' maxlength='64'></div>");
+    page += F("<div class='field-row'><div class='field'><label>Hostname</label><input name='hostname' maxlength='32' value='");
     page += htmlEscape(config.hostname);
     page += F("'></div>");
     appendPhyModeSelect(page);
     page += F("</div>");
-    page += F("<div class='row'><label><input type='checkbox' name='wifi_dynamic_power' value='1'");
+    page += F("<div class='field'><label><input type='checkbox' name='wifi_dynamic_power' value='1'");
     if (config.wifi_dynamic_power) page += F(" checked");
     page += F(">Dynamic Wi-Fi power</label></div>");
     page += F("<ul class='list'>");
