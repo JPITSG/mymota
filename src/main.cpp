@@ -8648,8 +8648,8 @@ void appendFooter(String &page, bool live_poll = true, bool reboot_wait = false)
   page += F("if(d.power_saving){sv('power_saving',d.power_saving.mode||'off');}");
   page += F("t('live-recovery',d.recovery.fast_boot_count+'/'+d.recovery.limit);");
   page += F("var wu=d.wifi_usable!=null?d.wifi_usable:d.wifi,ws=!!d.wifi_sdk_connected,wl=ws?'connected':(wu?'usable':'disconnected'),wc=ws?'pill ok':(wu?'pill warn':'pill bad'),ss=d.wifi_ssid||'n/a',rs=d.rssi==null?'n/a':d.rssi+' dBm';p('live-wifi',wl,wc);t('live-ssid',ss);t('live-ssid-2',ss);t('live-ip',d.ip||'n/a');t('live-rssi',rs);t('live-rssi-2',rs);t('live-rssi-hmeta',rs);if(d.wifi_tx_power){var tx=(d.wifi_tx_power.dbm==null?'n/a':Number(d.wifi_tx_power.dbm).toFixed(1)+' dBm')+' '+(d.wifi_tx_power.status||'');if(d.wifi_tx_power.sample_rssi!=null)tx+=' @ '+d.wifi_tx_power.sample_rssi+' dBm';t('live-wifi-tx-power',tx);}t('live-wifi-sdk',(d.wifi_status_name||'unknown')+' ('+(d.wifi_status==null?'?':d.wifi_status)+')');t('live-gateway',d.gateway_ip||'n/a');t('live-dns',d.dns_ip||'n/a');");
-  page += F("p('live-mqtt',d.mqtt.enabled?(d.mqtt.connected?'connected':'disconnected'):'not configured',d.mqtt.enabled?(d.mqtt.connected?'pill ok':'pill bad'):'pill');p('live-mqtt-broker-3',d.mqtt.enabled?(d.mqtt.connected?'connected':'disconnected'):'not configured',d.mqtt.enabled?(d.mqtt.connected?'h-meta pill ok':'h-meta pill bad'):'h-meta pill');");
-  page += F("if(d.mqtt){var mb=d.mqtt.enabled?(d.mqtt.host+':'+d.mqtt.port):'not configured';t('live-mqtt-broker-2',mb);t('live-mqtt-pending',d.mqtt.pending);t('live-mqtt-pending-2',d.mqtt.pending);t('live-mqtt-result',d.mqtt.last_connect_result);t('live-mqtt-connect-ms',d.mqtt.last_connect_ms+' ms');t('live-mqtt-attempt',d.mqtt.last_attempt_ms_ago==null?'n/a':d.mqtt.last_attempt_ms_ago+' ms ago');}");
+  page += F("p('live-mqtt',d.mqtt.enabled?(d.mqtt.connected?'connected':'disconnected'):'not configured',d.mqtt.enabled?(d.mqtt.connected?'pill ok':'pill bad'):'pill');");
+  page += F("if(d.mqtt){var mb=d.mqtt.enabled?(d.mqtt.host+':'+d.mqtt.port):'not configured';t('live-mqtt-broker-2',mb);p('live-mqtt-broker-3',mb,d.mqtt.enabled?(d.mqtt.connected?'h-meta pill ok':'h-meta pill warn'):'h-meta pill bad');t('live-mqtt-pending',d.mqtt.pending);t('live-mqtt-pending-2',d.mqtt.pending);t('live-mqtt-result',d.mqtt.last_connect_result);t('live-mqtt-connect-ms',d.mqtt.last_connect_ms+' ms');t('live-mqtt-attempt',d.mqtt.last_attempt_ms_ago==null?'n/a':d.mqtt.last_attempt_ms_ago+' ms ago');}");
   page += F("if(d.light){p('live-light-power',d.light.power?'on':'off',d.light.power?'pill ok':'pill bad');t('live-light-dimmer',d.light.dimmer+'%');t('live-light-ct',d.light.ct+' mired');t('live-light-mode',d.light.mode||'white');t('live-light-color',d.light.color||'');t('live-light-on-dimmer',d.light.on_dimmer+'%');sv('dimmer',d.light.dimmer);sv('ct',d.light.ct);sv('color',d.light.color||'');if(d.light.shelly_dimmer){var sd=d.light.shelly_dimmer;t('live-shelly-edge',sd.edge||'auto');t('live-shelly-range-min',sd.range_min);t('live-shelly-range-max',sd.range_max);sv('shelly_edge',sd.edge||'auto');sv('shelly_range_min',sd.range_min);sv('shelly_range_max',sd.range_max);}}");
   page += F("if(d.power){for(var i=0;i<d.power.length;i++){if(d.power[i]!==null)p('live-relay-'+i,d.power[i]?'on':'off',d.power[i]?'pill ok':'pill bad');}}");
   page += F("if(d.buttons){for(var b=0;b<d.buttons.length;b++){if(d.buttons[b])p('live-button-'+b,d.buttons[b].state||(d.buttons[b].pressed?'pressed':'released'),d.buttons[b].pressed?'pill ok':'pill bad');}}");
@@ -9553,15 +9553,23 @@ void appendTemplateForm(String &page) {
 }
 
 void appendMqttForm(String &page) {
-  page += F("<section class='panel'><h2>MQTT Settings <span id='live-mqtt-broker-3' class='h-meta ");
+  page += F("<section class='panel'><div class='panel-head'><h2>MQTT Settings</h2><span class='h-meta pill ");
   if (config.mqtt_host[0] == '\0') {
-    page += F("pill'>not configured");
+    page += F("bad");
   } else if (mqtt_client.connected()) {
-    page += F("pill ok'>connected");
+    page += F("ok");
   } else {
-    page += F("pill bad'>disconnected");
+    page += F("warn");
   }
-  page += F("</span></h2><form data-inline='1' method='post' action='/mqtt'>");
+  page += F("' id='live-mqtt-broker-3'>");
+  if (config.mqtt_host[0] == '\0') {
+    page += F("not configured");
+  } else {
+    page += htmlEscape(config.mqtt_host);
+    page += F(":");
+    page += String(config.mqtt_port);
+  }
+  page += F("</span></div><form id='form-mqtt' data-inline='1' method='post' action='/mqtt'><div class='panel-body'>");
   page += F("<div class='field-row'><div class='field'><label>Host</label><input name='host' maxlength='");
   page += String(kMqttHostMaxLen);
   page += F("' value='");
@@ -9582,7 +9590,7 @@ void appendMqttForm(String &page) {
   page += String(kMqttKeepaliveMax);
   page += F("' value='");
   page += String(config.mqtt_keepalive);
-  page += F("'></div></div><button type='submit'>Save MQTT</button></form></section>");
+  page += F("'></div></div></div></form><div class='panel-foot'><button type='submit' form='form-mqtt'>Save MQTT</button></div></section>");
 }
 
 void appendSettingsForm(String &page) {
