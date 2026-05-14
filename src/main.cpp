@@ -9939,13 +9939,13 @@ void appendPowerSavingSelect(String &page) {
 }
 
 void appendRecoveryGuardFields(String &page) {
-  page += F("<div class='field-row'><div class='field'><label>Fast boots before reset</label><input name='recovery_limit' type='number' min='");
+  page += F("<div class='field-row'><div class='field'><label>Boot limit</label><input name='recovery_limit' type='number' min='");
   page += String(kBootRecoveryLimitMin);
   page += F("' max='");
   page += String(kBootRecoveryLimitMax);
   page += F("' step='1' value='");
   page += String(config.boot_recovery_limit);
-  page += F("'></div><div class='field'><label>Stable after seconds</label><input name='recovery_stable_seconds' type='number' min='");
+  page += F("'></div><div class='field'><label>Stable seconds</label><input name='recovery_stable_seconds' type='number' min='");
   page += String(kBootRecoveryStableSecondsMin);
   page += F("' max='");
   page += String(kBootRecoveryStableSecondsMax);
