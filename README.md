@@ -372,9 +372,11 @@ default device hostname. If station mode has never connected and remains
 offline during startup, the firmware can start the recovery AP after the
 fallback timeout.
 
-The boot recovery guard tracks repeated fast failed boots. After the configured
-limit, it can clear saved settings so the device returns to the setup AP instead
-of remaining trapped in an unusable configuration.
+The boot recovery guard tracks repeated fast failed boots. The default guard is
+5 fast boots with a 15 second stable window, and both values can be adjusted in
+the System card. After the configured limit, it can clear saved settings so the
+device returns to the setup AP instead of remaining trapped in an unusable
+configuration.
 
 ## OTA and Reset Paths
 

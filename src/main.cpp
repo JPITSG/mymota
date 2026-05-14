@@ -49,7 +49,8 @@ constexpr uint16_t kConfigVersionV16 = 16;
 constexpr uint16_t kConfigVersionV17 = 17;
 constexpr uint16_t kConfigVersionV18 = 18;
 constexpr uint16_t kConfigVersionV19 = 19;
-constexpr uint16_t kConfigVersion = 20;
+constexpr uint16_t kConfigVersionV20 = 20;
+constexpr uint16_t kConfigVersion = 21;
 constexpr size_t kEepromSize = 4096;
 constexpr size_t kFlashSectorSize = 4096;
 constexpr uint8_t kEnergyJournalSectorCount = 2;
@@ -61,7 +62,6 @@ constexpr uint32_t kApRetryMs = 10000;
 constexpr uint32_t kWifiDynamicPowerSettleMs = 30000;
 constexpr uint32_t kWifiDynamicPowerSampleMs = 2000;
 constexpr uint8_t kWifiDynamicPowerSampleCount = 5;
-constexpr uint32_t kBootRecoveryStableMs = 30000;
 constexpr uint32_t kBootRecoveryBootMarker = 0x4d594254;  // MYBT
 constexpr uint32_t kBootRecoveryStableMarker = kBootRecoveryMagic;
 constexpr uint32_t kBootRecoveryEmptyMarker = 0xffffffffUL;
@@ -80,7 +80,12 @@ constexpr uint8_t kWifiDynamicPowerDefault = 1;
 constexpr float kWifiTxPowerMaxDbm = 20.5f;
 constexpr float kWifiTxPowerStrongDbm = 10.0f;
 constexpr float kWifiTxPowerMediumDbm = 13.0f;
-constexpr uint8_t kBootRecoveryLimit = 5;
+constexpr uint8_t kBootRecoveryLimitDefault = 5;
+constexpr uint8_t kBootRecoveryLimitMin = 2;
+constexpr uint8_t kBootRecoveryLimitMax = 50;
+constexpr uint16_t kBootRecoveryStableSecondsDefault = 15;
+constexpr uint16_t kBootRecoveryStableSecondsMin = 1;
+constexpr uint16_t kBootRecoveryStableSecondsMax = 3600;
 constexpr size_t kTemplateSlotCount = 14;
 constexpr size_t kTemplateJsonMaxLen = 640;
 constexpr size_t kTemplateJsonDocCapacity = 1024;
@@ -1026,7 +1031,7 @@ struct StoredConfigV19 {
   uint32_t crc;
 };
 
-struct StoredConfig {
+struct StoredConfigV20 {
   uint32_t magic;
   uint16_t version;
   uint16_t size;
@@ -1083,12 +1088,72 @@ struct StoredConfig {
   uint32_t crc;
 };
 
+struct StoredConfig {
+  uint32_t magic;
+  uint16_t version;
+  uint16_t size;
+  char ssid[33];
+  char password[65];
+  char hostname[33];
+  uint8_t phy_mode;
+  uint8_t template_enabled;
+  uint16_t template_base;
+  uint32_t template_flag;
+  char template_name[33];
+  uint16_t template_gpio[kTemplateSlotCount];
+  uint16_t mqtt_port;
+  uint16_t mqtt_keepalive;
+  char mqtt_host[kMqttHostMaxLen + 1];
+  char mqtt_topic[kMqttTopicMaxLen + 1];
+  float energy_total_offset_kwh;
+  uint8_t led_attach[kMaxLedOutputs];
+  uint16_t button_hold_ms;
+  uint8_t button_press_action[kMaxButtons];
+  uint8_t button_hold_action[kMaxButtons];
+  uint16_t energy_mqtt_interval;
+  uint16_t energy_mqtt_change_percent_x10;
+  char button_press_target[kMaxButtons][kButtonActionTargetMaxLen + 1];
+  char button_press_payload[kMaxButtons][kButtonActionPayloadMaxLen + 1];
+  char button_hold_target[kMaxButtons][kButtonActionTargetMaxLen + 1];
+  char button_hold_payload[kMaxButtons][kButtonActionPayloadMaxLen + 1];
+  uint16_t button_debounce_ms;
+  uint8_t input_mode[kMaxButtons];
+  uint8_t input_relay[kMaxButtons];
+  uint8_t input_on_level[kMaxButtons];
+  uint8_t reserved[1];
+  uint8_t button_press_relay[kMaxButtons];
+  uint8_t button_hold_relay[kMaxButtons];
+  uint8_t light_power;
+  uint8_t light_dimmer;
+  uint16_t light_ct;
+  uint8_t light_on_dimmer;
+  uint8_t shelly_dimmer_edge;
+  uint8_t shelly_dimmer_range_min;
+  uint8_t shelly_dimmer_range_max;
+  uint8_t relay_on_boot[kMaxRelays];
+  uint8_t relay_time_enabled[kMaxRelays];
+  uint16_t relay_time_seconds[kMaxRelays];
+  uint16_t energy_mqtt_change_watts;
+  uint16_t power_saving_mode;
+  uint8_t relay_restore_boot[kMaxRelays];
+  uint8_t light_mode;
+  uint8_t light_rgb[3];
+  uint8_t wifi_dynamic_power;
+  uint8_t wifi_reserved[3];
+  uint16_t mqtt_protocol_keepalive;
+  uint16_t mqtt_reserved;
+  uint8_t boot_recovery_limit;
+  uint8_t boot_recovery_reserved;
+  uint16_t boot_recovery_stable_seconds;
+  uint32_t crc;
+};
+
 constexpr size_t kBootRecoveryLogWords = (kEepromSize - kBootRecoveryOffset) / sizeof(uint32_t);
 
 static_assert(sizeof(StoredConfig) <= kEepromSize, "StoredConfig exceeds EEPROM size");
 static_assert(sizeof(StoredConfig) <= kBootRecoveryOffset, "StoredConfig overlaps boot recovery state");
 static_assert(kBootRecoveryOffset % sizeof(uint32_t) == 0, "Boot recovery log must be word aligned");
-static_assert(kBootRecoveryLogWords >= kBootRecoveryLimit * 2, "Boot recovery log is too small");
+static_assert(kBootRecoveryLogWords >= kBootRecoveryLimitMax * 2, "Boot recovery log is too small");
 static_assert(sizeof(kTemplateSlotToPin) == kTemplateSlotCount, "Template pin map size mismatch");
 
 struct PinAssignment {
@@ -1350,6 +1415,8 @@ uint8_t last_mqtt_connect_result = kMqttConnectIdle;
 bool mqtt_ping_pending = false;
 uint32_t boot_id = 0;
 uint8_t boot_recovery_count = 0;
+uint8_t boot_recovery_limit = kBootRecoveryLimitDefault;
+uint16_t boot_recovery_stable_seconds = kBootRecoveryStableSecondsDefault;
 bool boot_recovery_armed = false;
 bool boot_recovery_factory_reset = false;
 bool relay_state[kMaxRelays]{};
@@ -1593,6 +1660,51 @@ void setDefaultPowerSavingConfig() {
   setDefaultPowerSavingConfig(config);
 }
 
+uint8_t sanitizeBootRecoveryLimit(uint16_t limit) {
+  if (limit < kBootRecoveryLimitMin || limit > kBootRecoveryLimitMax) {
+    return kBootRecoveryLimitDefault;
+  }
+  return static_cast<uint8_t>(limit);
+}
+
+uint16_t sanitizeBootRecoveryStableSeconds(uint16_t seconds) {
+  if (seconds < kBootRecoveryStableSecondsMin || seconds > kBootRecoveryStableSecondsMax) {
+    return kBootRecoveryStableSecondsDefault;
+  }
+  return seconds;
+}
+
+void setDefaultBootRecoveryConfig(StoredConfig &target) {
+  target.boot_recovery_limit = kBootRecoveryLimitDefault;
+  target.boot_recovery_reserved = 0;
+  target.boot_recovery_stable_seconds = kBootRecoveryStableSecondsDefault;
+}
+
+void setDefaultBootRecoveryConfig() {
+  setDefaultBootRecoveryConfig(config);
+}
+
+void syncBootRecoveryRuntime(uint16_t limit, uint16_t stable_seconds) {
+  boot_recovery_limit = sanitizeBootRecoveryLimit(limit);
+  boot_recovery_stable_seconds = sanitizeBootRecoveryStableSeconds(stable_seconds);
+}
+
+void syncBootRecoveryRuntimeFromConfig() {
+  syncBootRecoveryRuntime(config.boot_recovery_limit, config.boot_recovery_stable_seconds);
+}
+
+uint8_t bootRecoveryLimit() {
+  return sanitizeBootRecoveryLimit(boot_recovery_limit);
+}
+
+uint16_t bootRecoveryStableSeconds() {
+  return sanitizeBootRecoveryStableSeconds(boot_recovery_stable_seconds);
+}
+
+uint32_t bootRecoveryStableMs() {
+  return static_cast<uint32_t>(bootRecoveryStableSeconds()) * 1000UL;
+}
+
 void setDefaultWifiPowerConfig(StoredConfig &target) {
   target.wifi_dynamic_power = kWifiDynamicPowerDefault;
   memset(target.wifi_reserved, 0, sizeof(target.wifi_reserved));
@@ -1807,8 +1919,10 @@ void setDefaultConfig() {
   setDefaultRelayEnforcementConfig();
   setDefaultPowerSavingConfig();
   setDefaultWifiPowerConfig();
+  setDefaultBootRecoveryConfig();
   config.crc = configCrc(config);
   config_ok = false;
+  syncBootRecoveryRuntimeFromConfig();
 }
 
 bool commitConfig(bool force_commit = false);
@@ -2203,8 +2317,9 @@ void clearBootRecoveryLogShadow() {
 }
 
 bool compactBootRecoveryLog(uint8_t fast_boot_count) {
-  if (fast_boot_count >= kBootRecoveryLimit) {
-    fast_boot_count = kBootRecoveryLimit - 1;
+  const uint8_t limit = bootRecoveryLimit();
+  if (fast_boot_count >= limit) {
+    fast_boot_count = limit - 1;
   }
   clearBootRecoveryLogShadow();
   for (uint8_t i = 0; i < fast_boot_count; i++) {
@@ -2267,7 +2382,7 @@ bool recordBootRecoveryStart() {
     boot_count++;
   }
 
-  if (boot_count >= kBootRecoveryLimit) {
+  if (boot_count >= bootRecoveryLimit()) {
     boot_recovery_count = boot_count;
     boot_recovery_armed = false;
     boot_recovery_factory_reset = true;
@@ -2291,7 +2406,7 @@ bool factoryResetConfig() {
 }
 
 void maintainBootRecovery() {
-  if (!boot_recovery_armed || millis() < kBootRecoveryStableMs) return;
+  if (!boot_recovery_armed || millis() < bootRecoveryStableMs()) return;
   if (clearBootRecoveryState()) {
     Serial.println(F("Fast power-cycle recovery counter cleared"));
   }
@@ -2343,6 +2458,9 @@ void normalizeConfigStrings() {
     config.mqtt_protocol_keepalive = kMqttProtocolKeepaliveDefaultSec;
   }
   config.mqtt_reserved = 0;
+  config.boot_recovery_limit = sanitizeBootRecoveryLimit(config.boot_recovery_limit);
+  config.boot_recovery_reserved = 0;
+  config.boot_recovery_stable_seconds = sanitizeBootRecoveryStableSeconds(config.boot_recovery_stable_seconds);
   if (isnan(config.energy_total_offset_kwh) ||
       config.energy_total_offset_kwh < kEnergyTotalOffsetMinKwh ||
       config.energy_total_offset_kwh > kEnergyTotalOffsetMaxKwh) {
@@ -2459,8 +2577,11 @@ void applyConfigMigrationDefaults(uint16_t previous_version) {
   if (previous_version < kConfigVersionV19) {
     setDefaultWifiPowerConfig();
   }
-  if (previous_version < kConfigVersion) {
+  if (previous_version < kConfigVersionV20) {
     setDefaultMqttProtocolKeepaliveConfig();
+  }
+  if (previous_version < kConfigVersion) {
+    setDefaultBootRecoveryConfig();
   }
 }
 
@@ -2477,11 +2598,13 @@ bool commitConfig(bool force_commit) {
   config.crc = configCrc(config);
   if (!force_commit && storedConfigMatchesCurrentConfig()) {
     config_ok = config.ssid[0] != '\0';
+    syncBootRecoveryRuntimeFromConfig();
     return true;
   }
   EEPROM.put(0, config);
   const bool committed = EEPROM.commit();
   config_ok = committed && config.ssid[0] != '\0';
+  if (committed) syncBootRecoveryRuntimeFromConfig();
   return committed;
 }
 
@@ -2506,8 +2629,29 @@ bool saveButtonConfig(uint16_t hold_ms, uint16_t debounce_ms,
                       const uint8_t *press_relays,
                       const uint8_t *hold_relays);
 
+void preloadBootRecoveryRuntimeFromStoredConfig() {
+  syncBootRecoveryRuntime(kBootRecoveryLimitDefault, kBootRecoveryStableSecondsDefault);
+
+  ConfigHeader header{};
+  EEPROM.get(0, header);
+  if (header.magic != kConfigMagic ||
+      header.version != kConfigVersion ||
+      header.size != sizeof(StoredConfig)) {
+    return;
+  }
+
+  StoredConfig *stored = new StoredConfig;
+  if (!stored) return;
+  EEPROM.get(0, *stored);
+  if (stored->crc == configCrc(*stored)) {
+    syncBootRecoveryRuntime(stored->boot_recovery_limit, stored->boot_recovery_stable_seconds);
+  }
+  delete stored;
+}
+
 bool loadConfig() {
   EEPROM.begin(kEepromSize);
+  preloadBootRecoveryRuntimeFromStoredConfig();
   if (recordBootRecoveryStart()) {
     Serial.println(F("Factory reset triggered by fast power cycling"));
     factoryResetConfig();
@@ -2529,6 +2673,27 @@ bool loadConfig() {
     }
     normalizeConfigStrings();
     config_ok = config.ssid[0] != '\0';
+    syncBootRecoveryRuntimeFromConfig();
+    return config_ok;
+  }
+
+  if (header.version == kConfigVersionV20 && header.size == sizeof(StoredConfigV20)) {
+    StoredConfigV20 *old_config = new StoredConfigV20;
+    if (!old_config) {
+      setDefaultConfig();
+      return false;
+    }
+    EEPROM.get(0, *old_config);
+    if (old_config->crc != configCrc(*old_config)) {
+      delete old_config;
+      setDefaultConfig();
+      return false;
+    }
+    memset(&config, 0, sizeof(config));
+    memcpy(&config, old_config, offsetof(StoredConfigV20, crc));
+    setDefaultBootRecoveryConfig();
+    delete old_config;
+    commitConfig();
     return config_ok;
   }
 
@@ -3141,8 +3306,11 @@ bool saveEnergyConfig(float total_offset_kwh, uint16_t mqtt_interval, uint16_t m
   return commitConfig();
 }
 
-bool savePowerSavingConfig(uint8_t mode) {
+bool saveSystemConfig(uint8_t mode, uint16_t recovery_limit, uint16_t recovery_stable_seconds) {
   config.power_saving_mode = sanitizePowerSavingMode(mode);
+  config.boot_recovery_limit = sanitizeBootRecoveryLimit(recovery_limit);
+  config.boot_recovery_stable_seconds = sanitizeBootRecoveryStableSeconds(recovery_stable_seconds);
+  config.boot_recovery_reserved = 0;
   return commitConfig();
 }
 
@@ -4864,7 +5032,11 @@ void appendSettingsExportJson(String &out) {
   out += chipIdHex();
   out += F("\"},\"system\":{\"power_saving\":\"");
   out += powerSavingModeName(config.power_saving_mode);
-  out += F("\"},\"wifi\":{\"dynamic_power\":");
+  out += F("\",\"recovery_guard\":{\"limit\":");
+  out += config.boot_recovery_limit;
+  out += F(",\"stable_seconds\":");
+  out += config.boot_recovery_stable_seconds;
+  out += F("}},\"wifi\":{\"dynamic_power\":");
   out += config.wifi_dynamic_power ? F("true") : F("false");
   out += F("},\"template\":{\"enabled\":");
   out += config.template_enabled ? F("true") : F("false");
@@ -4984,6 +5156,37 @@ void importSettingsSystem(JsonObjectConst root, StoredConfig &target, SettingsIm
     } else {
       recordSettingsSkipped(stats, F("system.power_saving"));
     }
+  }
+
+  JsonObjectConst recovery = system["recovery_guard"].as<JsonObjectConst>();
+  if (!recovery.isNull()) {
+    uint16_t limit = 0;
+    JsonVariantConst limit_value = recovery.containsKey("limit") ? recovery["limit"] : recovery["boot_count"];
+    if (!limit_value.isNull()) {
+      if (settingsReadUint16(limit_value, kBootRecoveryLimitMin, kBootRecoveryLimitMax, limit)) {
+        target.boot_recovery_limit = sanitizeBootRecoveryLimit(limit);
+        target.boot_recovery_reserved = 0;
+        recordSettingsApplied(stats);
+      } else {
+        recordSettingsSkipped(stats, F("system.recovery_guard.limit"));
+      }
+    }
+
+    uint16_t seconds = 0;
+    JsonVariantConst seconds_value = recovery.containsKey("stable_seconds") ?
+        recovery["stable_seconds"] : recovery["stable_after_seconds"];
+    if (!seconds_value.isNull()) {
+      if (settingsReadUint16(seconds_value, kBootRecoveryStableSecondsMin,
+                             kBootRecoveryStableSecondsMax, seconds)) {
+        target.boot_recovery_stable_seconds = sanitizeBootRecoveryStableSeconds(seconds);
+        target.boot_recovery_reserved = 0;
+        recordSettingsApplied(stats);
+      } else {
+        recordSettingsSkipped(stats, F("system.recovery_guard.stable_seconds"));
+      }
+    }
+  } else if (system.containsKey("recovery_guard")) {
+    recordSettingsSkipped(stats, F("system.recovery_guard"));
   }
 }
 
@@ -5557,6 +5760,10 @@ void appendApiSettingsJson(String &out) {
   out += powerSavingModeName(config.power_saving_mode);
   out += F("\",\"delay_ms\":");
   out += powerSavingDelayMs(config.power_saving_mode);
+  out += F("},\"recovery_guard\":{\"limit\":");
+  out += config.boot_recovery_limit;
+  out += F(",\"stable_seconds\":");
+  out += config.boot_recovery_stable_seconds;
   out += F("},\"wifi\":{\"dynamic_power\":");
   out += config.wifi_dynamic_power ? F("true") : F("false");
   out += F("},\"mqtt\":{\"host\":\"");
@@ -5702,6 +5909,40 @@ void applyApiPowerSavingSetting(JsonVariantConst value, StoredConfig &target, Se
   }
 }
 
+void applyApiRecoveryGuardSetting(JsonVariantConst value, StoredConfig &target, SettingsImportStats &stats,
+                                  const String &field) {
+  JsonObjectConst object = value.as<JsonObjectConst>();
+  if (object.isNull()) {
+    recordSettingsSkipped(stats, field);
+    return;
+  }
+
+  JsonVariantConst limit_value = object.containsKey("limit") ? object["limit"] : object["boot_count"];
+  if (!limit_value.isNull()) {
+    uint16_t limit = 0;
+    if (settingsReadUint16(limit_value, kBootRecoveryLimitMin, kBootRecoveryLimitMax, limit)) {
+      target.boot_recovery_limit = sanitizeBootRecoveryLimit(limit);
+      target.boot_recovery_reserved = 0;
+      recordSettingsApplied(stats);
+    } else {
+      recordSettingsSkipped(stats, field + F(".limit"));
+    }
+  }
+
+  JsonVariantConst seconds_value = object.containsKey("stable_seconds") ?
+      object["stable_seconds"] : object["stable_after_seconds"];
+  if (!seconds_value.isNull()) {
+    uint16_t seconds = 0;
+    if (settingsReadUint16(seconds_value, kBootRecoveryStableSecondsMin, kBootRecoveryStableSecondsMax, seconds)) {
+      target.boot_recovery_stable_seconds = sanitizeBootRecoveryStableSeconds(seconds);
+      target.boot_recovery_reserved = 0;
+      recordSettingsApplied(stats);
+    } else {
+      recordSettingsSkipped(stats, field + F(".stable_seconds"));
+    }
+  }
+}
+
 void applyApiWifiDynamicPowerSetting(JsonVariantConst value, StoredConfig &target, SettingsImportStats &stats,
                                      const String &field) {
   bool enabled = false;
@@ -5754,12 +5995,18 @@ void applyApiSystemSettings(JsonObjectConst root, StoredConfig &target, Settings
   if (root.containsKey("power_saving_mode")) {
     applyApiPowerSavingSetting(root["power_saving_mode"], target, stats, F("power_saving_mode"));
   }
+  if (root.containsKey("recovery_guard")) {
+    applyApiRecoveryGuardSetting(root["recovery_guard"], target, stats, F("recovery_guard"));
+  }
 
   JsonObjectConst system = root["system"].as<JsonObjectConst>();
   if (!system.isNull()) {
     JsonVariantConst power_value = system.containsKey("power_saving") ? system["power_saving"] : system["power_saving_mode"];
     if (!power_value.isNull()) {
       applyApiPowerSavingSetting(power_value, target, stats, F("system.power_saving"));
+    }
+    if (system.containsKey("recovery_guard")) {
+      applyApiRecoveryGuardSetting(system["recovery_guard"], target, stats, F("system.recovery_guard"));
     }
   } else if (root.containsKey("system")) {
     recordSettingsSkipped(stats, F("system"));
@@ -5838,6 +6085,12 @@ bool apiSettingsIndexedArgPresent(uint8_t input_number, const char *primary_suff
 
 bool apiSettingsGetHasUpdateArgs() {
   if (server.hasArg(F("power_saving")) || server.hasArg(F("power_saving_mode"))) return true;
+  if (server.hasArg(F("recovery_guard_limit")) ||
+      server.hasArg(F("recovery_limit")) ||
+      server.hasArg(F("boot_recovery_limit")) ||
+      server.hasArg(F("recovery_guard_stable_seconds")) ||
+      server.hasArg(F("recovery_stable_seconds")) ||
+      server.hasArg(F("boot_recovery_stable_seconds"))) return true;
   if (server.hasArg(F("wifi_dynamic_power")) || server.hasArg(F("wifi_dynamic_tx_power"))) return true;
   if (server.hasArg(F("mqtt_protocol_keepalive")) ||
       server.hasArg(F("protocol_keepalive")) ||
@@ -5864,6 +6117,45 @@ bool applyApiSettingsGetArgs(StoredConfig &target, SettingsImportStats &stats) {
       recordSettingsApplied(stats);
     } else {
       recordSettingsSkipped(stats, F("query.power_saving"));
+    }
+  }
+
+  String recovery_limit;
+  bool has_recovery_limit = apiSettingsGetArg(F("recovery_guard_limit"), F("boot_recovery_limit"), recovery_limit);
+  if (!has_recovery_limit && server.hasArg(F("recovery_limit"))) {
+    recovery_limit = server.arg(F("recovery_limit"));
+    has_recovery_limit = true;
+  }
+  if (has_recovery_limit) {
+    saw_setting_arg = true;
+    uint16_t limit = 0;
+    if (parseUint16Input(recovery_limit, kBootRecoveryLimitMin, kBootRecoveryLimitMax, limit)) {
+      target.boot_recovery_limit = sanitizeBootRecoveryLimit(limit);
+      target.boot_recovery_reserved = 0;
+      recordSettingsApplied(stats);
+    } else {
+      recordSettingsSkipped(stats, F("query.recovery_guard_limit"));
+    }
+  }
+
+  String recovery_stable_seconds;
+  bool has_recovery_stable_seconds = apiSettingsGetArg(F("recovery_guard_stable_seconds"),
+                                                       F("boot_recovery_stable_seconds"),
+                                                       recovery_stable_seconds);
+  if (!has_recovery_stable_seconds && server.hasArg(F("recovery_stable_seconds"))) {
+    recovery_stable_seconds = server.arg(F("recovery_stable_seconds"));
+    has_recovery_stable_seconds = true;
+  }
+  if (has_recovery_stable_seconds) {
+    saw_setting_arg = true;
+    uint16_t seconds = 0;
+    if (parseUint16Input(recovery_stable_seconds, kBootRecoveryStableSecondsMin,
+                         kBootRecoveryStableSecondsMax, seconds)) {
+      target.boot_recovery_stable_seconds = sanitizeBootRecoveryStableSeconds(seconds);
+      target.boot_recovery_reserved = 0;
+      recordSettingsApplied(stats);
+    } else {
+      recordSettingsSkipped(stats, F("query.recovery_guard_stable_seconds"));
     }
   }
 
@@ -8610,7 +8902,7 @@ void appendHeader(String &page, const __FlashStringHelper *title, bool show_spin
 "code{font-family:var(--mono);font-size:12.5px;background:var(--tint-low);border:1px solid var(--line);border-radius:var(--radius-sm);padding:2px 7px;color:var(--text);word-break:break-word}.pill{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;font-weight:500;padding:3px 9px;border-radius:999px;background:var(--tint-mid);color:var(--text-2);border:1px solid var(--line)}.pill:before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor}.pill.ok{background:var(--ok-soft);color:var(--ok);border-color:var(--accent-soft)}.pill.warn{background:rgba(240,185,90,.1);color:var(--warn);border-color:rgba(240,185,90,.3)}.pill.bad{background:var(--bad-soft);color:var(--bad);border-color:var(--bad-border)}"
 "form{margin:0}.field{margin:0 0 14px}.field:last-child{margin-bottom:0}.field-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:0 0 14px}.field-row .field{margin:0}label{display:block;font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--text-2);margin-bottom:6px}input:not([type=checkbox]):not([type=radio]):not([type=submit]):not([type=button]):not([type=reset]),select,textarea{width:100%;padding:10px 12px;background:var(--bg-2);border:1px solid var(--line);border-radius:var(--radius-sm);color:var(--text);font-family:var(--mono);font-size:13px}select{display:block;min-width:0}select option{background:var(--bg-2);color:var(--text)}input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);background:var(--bg-2);box-shadow:0 0 0 3px var(--accent-soft)}input:-webkit-autofill,input:-webkit-autofill:hover,input:-webkit-autofill:focus,input:-webkit-autofill:active,textarea:-webkit-autofill,select:-webkit-autofill{-webkit-text-fill-color:var(--text)!important;-webkit-box-shadow:0 0 0 1000px var(--bg-2) inset!important;box-shadow:0 0 0 1000px var(--bg-2) inset!important;caret-color:var(--text)!important;border:1px solid var(--line)!important;transition:background-color 9999s ease-in-out 0s}input:-webkit-autofill:focus,textarea:-webkit-autofill:focus,select:-webkit-autofill:focus{-webkit-box-shadow:0 0 0 1000px var(--bg-2) inset,0 0 0 3px var(--accent-soft)!important;box-shadow:0 0 0 1000px var(--bg-2) inset,0 0 0 3px var(--accent-soft)!important;border-color:var(--accent)!important}textarea{min-height:88px;resize:vertical;line-height:1.5}input[type=checkbox],input[type=radio]{width:16px;height:16px;margin:0 8px 0 0;vertical-align:-3px;accent-color:var(--accent)}input[type=file]{font-size:12px}"
 "button,.btn{font-family:var(--sans);display:inline-flex;align-items:center;justify-content:center;gap:6px;margin:4px 4px 0 0;padding:8px 14px;background:var(--accent);color:var(--btn-text);border:1px solid var(--accent);border-radius:var(--radius-sm);font-size:12px;font-weight:600;letter-spacing:.04em;cursor:pointer;text-decoration:none;text-transform:uppercase}button:hover,.btn:hover{filter:brightness(1.08)}button:disabled,.btn:disabled{opacity:.55;cursor:not-allowed}.secondary{background:transparent;color:var(--text);border-color:var(--line-2)}.secondary:hover{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);filter:none}.danger{background:transparent;color:var(--bad);border-color:var(--bad-border)}.danger:hover{background:var(--bad-soft);filter:none}.inline{display:inline}.light-actions{display:block;margin-bottom:14px}.actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}.reboot-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.reboot-actions form{width:100%;margin:0}.reboot-actions .btn,.reboot-actions button{width:100%;height:34px;min-height:34px;margin:0;padding:0 14px;line-height:1}.actions form{margin:0}.actions .btn,.actions button,.inline button{margin:0}.panel-foot{margin:18px -18px -18px;padding:12px 18px;border-top:1px solid var(--line);background:var(--tint-foot);display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap}.panel-foot button,.panel-foot .btn{margin:0}"
-".button-block{border:1px solid var(--line);border-radius:var(--radius-sm);padding:14px 16px;background:var(--tint-foot);margin-top:12px}.panel>h2+.button-block,.button-block:first-child{margin-top:0}.button-block>strong,.button-block>h3{display:block;margin:0 0 12px;font-weight:600;font-size:13px;color:var(--text)}.button-block-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin:0 0 12px}.button-block-head strong{font-weight:600;font-size:13px;color:var(--text)}.subblock{border:1px solid var(--line);border-radius:var(--radius-sm);padding:14px 16px;background:var(--tint-foot)}.subblock+.subblock{margin-top:12px}.subblock-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}.subblock-head .title-line{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}.subblock-head .title{font-weight:600;font-size:13px;color:var(--text)}.subblock-head .meta{font-family:var(--mono);font-size:11px;color:var(--muted)}.action-extra,.mode-extra{display:none;padding-top:12px;margin-top:12px;border-top:1px dashed var(--line)}.action-extra.show,.mode-extra.show{display:block}.hidden{display:none}.note{background:var(--tint-low);border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px;margin:10px 0}.note p{margin:0 0 7px}.tokens{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px}.tokens div{display:flex;flex-direction:column;gap:3px}.help{position:relative;margin-left:auto}.help-q{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:var(--tint-mid);color:var(--text-2);font-weight:700;font-size:11px;border:1px solid var(--line);cursor:help}.help-box{display:none;position:absolute;right:0;top:28px;z-index:30;width:420px;max-width:calc(100vw - 60px);background:var(--panel-2);border:1px solid var(--line-2);border-radius:var(--radius);padding:14px 16px;font-size:12.5px;line-height:1.55;box-shadow:var(--shadow-pop);color:var(--text)}.help:hover .help-box,.help:focus-within .help-box{display:block}.list{margin:0;padding-left:18px}.foot{text-align:center;margin:16px 0;padding:16px 0;font-family:var(--mono);font-size:11px;color:var(--muted)}"
+".button-block{border:1px solid var(--line);border-radius:var(--radius-sm);padding:14px 16px;background:var(--tint-foot);margin-top:12px}.panel>h2+.button-block,.button-block:first-child{margin-top:0}.button-block>strong,.button-block>h3{display:block;margin:0 0 12px;font-weight:600;font-size:13px;color:var(--text)}.button-block-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;margin:0 0 12px}.button-block-head strong{font-weight:600;font-size:13px;color:var(--text)}.subblock{border:1px solid var(--line);border-radius:var(--radius-sm);padding:14px 16px;background:var(--tint-foot)}.subblock+.subblock,.panel-body>form:not(:first-child),.panel-body>form+.subblock{margin-top:12px}.subblock-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}.subblock-head .title-line{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}.subblock-head .title{font-weight:600;font-size:13px;color:var(--text)}.subblock-head .meta{font-family:var(--mono);font-size:11px;color:var(--muted)}.action-extra,.mode-extra{display:none;padding-top:12px;margin-top:12px;border-top:1px dashed var(--line)}.action-extra.show,.mode-extra.show{display:block}.hidden{display:none}.note{background:var(--tint-low);border:1px solid var(--line);border-radius:var(--radius-sm);padding:10px;margin:10px 0}.note p{margin:0 0 7px}.tokens{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px}.tokens div{display:flex;flex-direction:column;gap:3px}.help{position:relative;margin-left:auto}.help-q{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:var(--tint-mid);color:var(--text-2);font-weight:700;font-size:11px;border:1px solid var(--line);cursor:help}.help-box{display:none;position:absolute;right:0;top:28px;z-index:30;width:420px;max-width:calc(100vw - 60px);background:var(--panel-2);border:1px solid var(--line-2);border-radius:var(--radius);padding:14px 16px;font-size:12.5px;line-height:1.55;box-shadow:var(--shadow-pop);color:var(--text)}.help:hover .help-box,.help:focus-within .help-box{display:block}.list{margin:0;padding-left:18px}.foot{text-align:center;margin:16px 0;padding:16px 0;font-family:var(--mono);font-size:11px;color:var(--muted)}"
 "@media(max-width:980px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:520px){.stats{grid-template-columns:1fr}}@media(max-width:820px){.topin{grid-template-columns:1fr;gap:10px}.host{text-align:left}.meta{justify-content:flex-start}main{padding:22px 14px 0}.grid,.field-row{grid-template-columns:1fr}.kv{grid-template-columns:1fr}.kv>span{padding-bottom:0;border-bottom:0}.kv>div{padding-top:3px}}"
 "</style></head><body>");
   const String host = config.hostname[0] ? htmlEscape(config.hostname) : htmlEscape(defaultHostname());
@@ -8646,7 +8938,7 @@ void appendFooter(String &page, bool live_poll = true, bool reboot_wait = false)
   page += F("t('live-heap',d.heap+' bytes');if(d.flash){t('live-flash-used',d.flash.used+' bytes');t('live-flash-total',d.flash.total+' bytes');t('live-flash-free',d.flash.free+' bytes');}t('live-uptime',d.uptime+'s');t('live-uptime-2',d.uptime+'s');t('live-active-phy',d.active_phy);");
   page += F("if(d.perf){t('live-loop-load',d.perf.loop_load+'%');t('live-loop-hz',d.perf.loop_hz+'/s');t('live-loop-max',Number(d.perf.loop_max_us/1000).toFixed(1)+' ms');}");
   page += F("if(d.power_saving){sv('power_saving',d.power_saving.mode||'off');}");
-  page += F("t('live-recovery',d.recovery.fast_boot_count+'/'+d.recovery.limit);");
+  page += F("if(d.recovery){t('live-recovery',d.recovery.fast_boot_count+'/'+d.recovery.limit);sv('recovery_limit',d.recovery.limit);sv('recovery_stable_seconds',d.recovery.stable_seconds);}");
   page += F("var wu=d.wifi_usable!=null?d.wifi_usable:d.wifi,ws=!!d.wifi_sdk_connected,wl=ws?'connected':(wu?'usable':'disconnected'),wc=ws?'pill ok':(wu?'pill warn':'pill bad'),ss=d.wifi_ssid||'n/a',rs=d.rssi==null?'n/a':d.rssi+' dBm';p('live-wifi',wl,wc);t('live-ssid',ss);t('live-ssid-2',ss);t('live-ip',d.ip||'n/a');t('live-rssi',rs);t('live-rssi-2',rs);t('live-rssi-hmeta',rs);if(d.wifi_tx_power){var tx=(d.wifi_tx_power.dbm==null?'n/a':Number(d.wifi_tx_power.dbm).toFixed(1)+' dBm')+' '+(d.wifi_tx_power.status||'');if(d.wifi_tx_power.sample_rssi!=null)tx+=' @ '+d.wifi_tx_power.sample_rssi+' dBm';t('live-wifi-tx-power',tx);}t('live-wifi-sdk',(d.wifi_status_name||'unknown')+' ('+(d.wifi_status==null?'?':d.wifi_status)+')');t('live-gateway',d.gateway_ip||'n/a');t('live-dns',d.dns_ip||'n/a');");
   page += F("p('live-mqtt',d.mqtt.enabled?(d.mqtt.connected?'connected':'disconnected'):'not configured',d.mqtt.enabled?(d.mqtt.connected?'pill ok':'pill bad'):'pill');");
   page += F("if(d.mqtt){var mb=d.mqtt.enabled?(d.mqtt.host+':'+d.mqtt.port):'not configured';t('live-mqtt-broker-2',mb);p('live-mqtt-broker-3',mb,d.mqtt.enabled?(d.mqtt.connected?'h-meta pill ok':'h-meta pill warn'):'h-meta pill bad');t('live-mqtt-pending',d.mqtt.pending);t('live-mqtt-pending-2',d.mqtt.pending);t('live-mqtt-result',d.mqtt.last_connect_result);t('live-mqtt-connect-ms',d.mqtt.last_connect_ms+' ms');t('live-mqtt-attempt',d.mqtt.last_attempt_ms_ago==null?'n/a':d.mqtt.last_attempt_ms_ago+' ms ago');}");
@@ -8815,9 +9107,9 @@ void appendStatusBlock(String &page) {
   page += F("</code> active</div><span>Recovery guard</span><div><code id='live-recovery'>");
   page += String(boot_recovery_count);
   page += F("/");
-  page += String(kBootRecoveryLimit);
+  page += String(bootRecoveryLimit());
   page += F("</code> clears after <code>");
-  page += String(kBootRecoveryStableMs / 1000);
+  page += String(bootRecoveryStableSeconds());
   page += F("s</code>");
   if (boot_recovery_factory_reset) {
     page += F(" <span class='pill bad'>factory reset</span>");
@@ -9646,6 +9938,22 @@ void appendPowerSavingSelect(String &page) {
   page += F("</select></div>");
 }
 
+void appendRecoveryGuardFields(String &page) {
+  page += F("<div class='field-row'><div class='field'><label>Fast boots before reset</label><input name='recovery_limit' type='number' min='");
+  page += String(kBootRecoveryLimitMin);
+  page += F("' max='");
+  page += String(kBootRecoveryLimitMax);
+  page += F("' step='1' value='");
+  page += String(config.boot_recovery_limit);
+  page += F("'></div><div class='field'><label>Stable after seconds</label><input name='recovery_stable_seconds' type='number' min='");
+  page += String(kBootRecoveryStableSecondsMin);
+  page += F("' max='");
+  page += String(kBootRecoveryStableSecondsMax);
+  page += F("' step='1' value='");
+  page += String(config.boot_recovery_stable_seconds);
+  page += F("'></div></div>");
+}
+
 void handleRoot() {
   String page;
   page.reserve(kHtmlStreamChunkReserve);
@@ -9699,18 +10007,20 @@ void handleRoot() {
 
   appendSectionHead(page, F("Maintenance"));
   flushStreamChunk(page);
-  page += F("<section class='panel'><div class='panel-head'><h2>System</h2><span class='h-meta'>Firmware / power / reboot</span></div><div class='panel-body'><div class='subblock'><div class='subblock-head'><div class='title'>Firmware</div></div><form id='form-firmware' class='firmware-upload' method='post' action='/update?verify=1' enctype='multipart/form-data' data-target='");
+  page += F("<section class='panel'><div class='panel-head'><h2>System</h2><span class='h-meta'>Firmware / power / recovery / reboot</span></div><div class='panel-body'><div class='subblock'><div class='subblock-head'><div class='title'>Firmware</div></div><form id='form-firmware' class='firmware-upload' method='post' action='/update?verify=1' enctype='multipart/form-data' data-target='");
   page += F(MYMOTA_TARGET);
   page += F("'>");
   page += F("<div class='field'><label>Firmware binary</label><input type='file' name='firmware' accept='.bin,.bin.gz' required></div>");
   page += F("<div class='field'><label><input class='firmware-verify' type='checkbox' checked>Verify firmware target on device</label></div>");
   page += F("</form></div>");
-  page += F("<div class='subblock'><div class='subblock-head'><div class='title'>Power Saving</div></div><form id='form-system' data-inline='1' method='post' action='/system'>");
+  page += F("<form id='form-system' data-inline='1' method='post' action='/system'><div class='subblock'><div class='subblock-head'><div class='title'>Power Saving</div></div>");
   appendPowerSavingSelect(page);
-  page += F("</form></div>");
+  page += F("</div><div class='subblock'><div class='subblock-head'><div class='title'>Recovery Guard</div></div>");
+  appendRecoveryGuardFields(page);
+  page += F("</div></form>");
   page += F("<div class='subblock'><div class='subblock-head'><div class='title'>Reboot</div></div><div class='reboot-actions'><a class='btn secondary' href='/reboot-soft'>Reboot Soft</a><a class='btn secondary' href='/reboot-cold'>Reboot Cold</a>");
   page += F("<form method='post' action='/factory-reset' onsubmit=\"return confirm('Factory reset will delete Wi-Fi, template, MQTT, input, LED, relay enforcement, light, energy, and system settings. Continue?')\"><button class='danger' type='submit'>Factory Reset</button></form><a class='btn danger' href='/force-reset' onclick=\"return confirm('Force reset skips normal shutdown and may drop unsaved runtime state. Continue?')\">Force Reset</a></div></div></div>");
-  page += F("<div class='panel-foot'><button type='submit' form='form-system'>Save power saving</button><button type='submit' form='form-firmware'>Upload firmware</button></div></section>");
+  page += F("<div class='panel-foot'><button type='submit' form='form-system'>Save system</button><button type='submit' form='form-firmware'>Upload firmware</button></div></section>");
   flushStreamChunk(page);
 
   appendSettingsForm(page);
@@ -9886,7 +10196,28 @@ void handleSystemSave() {
     server.send(400, F("text/plain"), F("Invalid power saving mode"));
     return;
   }
-  if (!savePowerSavingConfig(mode)) {
+
+  uint16_t recovery_limit = config.boot_recovery_limit;
+  if (server.hasArg("recovery_limit") || server.hasArg("boot_recovery_limit")) {
+    const String limit_arg = server.hasArg("recovery_limit") ? server.arg("recovery_limit") : server.arg("boot_recovery_limit");
+    if (!parseUint16Input(limit_arg, kBootRecoveryLimitMin, kBootRecoveryLimitMax, recovery_limit)) {
+      server.send(400, F("text/plain"), F("Invalid recovery guard boot count"));
+      return;
+    }
+  }
+
+  uint16_t recovery_stable_seconds = config.boot_recovery_stable_seconds;
+  if (server.hasArg("recovery_stable_seconds") || server.hasArg("boot_recovery_stable_seconds")) {
+    const String stable_arg = server.hasArg("recovery_stable_seconds") ?
+        server.arg("recovery_stable_seconds") : server.arg("boot_recovery_stable_seconds");
+    if (!parseUint16Input(stable_arg, kBootRecoveryStableSecondsMin, kBootRecoveryStableSecondsMax,
+                          recovery_stable_seconds)) {
+      server.send(400, F("text/plain"), F("Invalid recovery guard stable seconds"));
+      return;
+    }
+  }
+
+  if (!saveSystemConfig(mode, recovery_limit, recovery_stable_seconds)) {
     server.send(500, F("text/plain"), F("Could not save system settings"));
     return;
   }
@@ -11310,9 +11641,9 @@ void handleHealth() {
   out += F("\",\"recovery\":{\"fast_boot_count\":");
   out += boot_recovery_count;
   out += F(",\"limit\":");
-  out += kBootRecoveryLimit;
+  out += bootRecoveryLimit();
   out += F(",\"stable_seconds\":");
-  out += kBootRecoveryStableMs / 1000;
+  out += bootRecoveryStableSeconds();
   out += F(",\"factory_reset\":");
   out += (boot_recovery_factory_reset ? F("true") : F("false"));
   out += F("}");
