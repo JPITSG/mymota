@@ -162,8 +162,8 @@ overview, system, device, network, and maintenance areas.
   active template.
 - Inputs configure button mode, switch mode, press actions, hold actions, MQTT
   broadcasts, webhook actions, debounce, and hold timing.
-- Relay Enforcement controls relay restore-at-boot, turn-on-at-boot, and
-  turn-back-on-after-off behavior.
+- Device State Enforcement controls relay restore-at-boot, relay turn-on-at-boot,
+  relay turn-back-on-after-off behavior, and light restore-at-boot.
 - Wi-Fi stores SSID, password, hostname, PHY mode, and dynamic TX power.
 - MQTT stores broker host, port, topic, native MQTT protocol keepalive, and
   state keepalive.
@@ -224,14 +224,16 @@ left unattached depending on the decoded template and available pins.
 
 ## Device State Enforcement
 
-Relay Enforcement controls startup and restoration behavior for devices with
-relays.
+Device State Enforcement controls startup and restoration behavior for relays
+and lights when those outputs are present in the active template.
 
 - Restore last state at boot can return relays to their saved state after boot.
 - Turn on at boot can force a relay on during startup when restore-last-state is
   not selected.
 - Time based restore can turn a relay back on after it has been off for a
   configured number of seconds.
+- Light restore last state at boot can return a light to its saved power,
+  dimmer, color temperature, and color state after boot.
 
 Graceful reboots, such as firmware upgrades and soft reboot actions, save a
 relay snapshot so devices can return to their pre-reboot state when configured

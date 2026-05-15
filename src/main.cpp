@@ -50,7 +50,8 @@ constexpr uint16_t kConfigVersionV17 = 17;
 constexpr uint16_t kConfigVersionV18 = 18;
 constexpr uint16_t kConfigVersionV19 = 19;
 constexpr uint16_t kConfigVersionV20 = 20;
-constexpr uint16_t kConfigVersion = 21;
+constexpr uint16_t kConfigVersionV21 = 21;
+constexpr uint16_t kConfigVersion = 22;
 constexpr size_t kEepromSize = 4096;
 constexpr size_t kFlashSectorSize = 4096;
 constexpr uint8_t kEnergyJournalSectorCount = 2;
@@ -1139,7 +1140,8 @@ struct StoredConfig {
   uint8_t light_mode;
   uint8_t light_rgb[3];
   uint8_t wifi_dynamic_power;
-  uint8_t wifi_reserved[3];
+  uint8_t light_restore_boot;
+  uint8_t wifi_reserved[2];
   uint16_t mqtt_protocol_keepalive;
   uint16_t mqtt_reserved;
   uint8_t boot_recovery_limit;
@@ -1770,6 +1772,7 @@ void setDefaultLightConfig(StoredConfig &target) {
   target.light_dimmer = kLightDimmerOff;
   target.light_ct = kLightCtDefault;
   target.light_on_dimmer = kLightPowerOnDimmerDefault;
+  target.light_restore_boot = 1;
   target.shelly_dimmer_edge = kShellyDimmerEdgeDefault;
   target.shelly_dimmer_range_min = kShellyDimmerRangeMinDefault;
   target.shelly_dimmer_range_max = kShellyDimmerRangeMaxDefault;
@@ -2446,6 +2449,7 @@ void normalizeConfigStrings() {
   }
   config.phy_mode = sanitizePhyMode(config.phy_mode);
   config.wifi_dynamic_power = config.wifi_dynamic_power ? 1 : 0;
+  config.light_restore_boot = config.light_restore_boot ? 1 : 0;
   memset(config.wifi_reserved, 0, sizeof(config.wifi_reserved));
   if (config.mqtt_port == 0) {
     config.mqtt_port = kMqttDefaultPort;
@@ -2580,8 +2584,11 @@ void applyConfigMigrationDefaults(uint16_t previous_version) {
   if (previous_version < kConfigVersionV20) {
     setDefaultMqttProtocolKeepaliveConfig();
   }
-  if (previous_version < kConfigVersion) {
+  if (previous_version < kConfigVersionV21) {
     setDefaultBootRecoveryConfig();
+  }
+  if (previous_version < kConfigVersion) {
+    config.light_restore_boot = 1;
   }
 }
 
@@ -2616,7 +2623,8 @@ bool saveEnergyConfig(float total_offset_kwh, uint16_t mqtt_interval, uint16_t m
                       uint16_t mqtt_change_watts);
 bool saveLedConfig(const uint8_t *attachments);
 bool saveRelayEnforcementConfig(const uint8_t *restore_boot, const uint8_t *on_boot,
-                                const uint8_t *time_enabled, const uint16_t *time_seconds);
+                                const uint8_t *time_enabled, const uint16_t *time_seconds,
+                                uint8_t light_restore_boot);
 bool saveButtonConfig(uint16_t hold_ms, uint16_t debounce_ms,
                       const uint8_t *press_actions, const uint8_t *hold_actions,
                       const char press_targets[][kButtonActionTargetMaxLen + 1],
@@ -2674,6 +2682,16 @@ bool loadConfig() {
     normalizeConfigStrings();
     config_ok = config.ssid[0] != '\0';
     syncBootRecoveryRuntimeFromConfig();
+    return config_ok;
+  }
+
+  if (header.version == kConfigVersionV21 && header.size == sizeof(StoredConfig)) {
+    EEPROM.get(0, config);
+    if (config.crc != configCrc(config)) {
+      setDefaultConfig();
+      return false;
+    }
+    commitConfig();
     return config_ok;
   }
 
@@ -3320,11 +3338,13 @@ bool saveLedConfig(const uint8_t *attachments) {
 }
 
 bool saveRelayEnforcementConfig(const uint8_t *restore_boot, const uint8_t *on_boot,
-                                const uint8_t *time_enabled, const uint16_t *time_seconds) {
+                                const uint8_t *time_enabled, const uint16_t *time_seconds,
+                                uint8_t light_restore_boot) {
   memcpy(config.relay_restore_boot, restore_boot, sizeof(config.relay_restore_boot));
   memcpy(config.relay_on_boot, on_boot, sizeof(config.relay_on_boot));
   memcpy(config.relay_time_enabled, time_enabled, sizeof(config.relay_time_enabled));
   memcpy(config.relay_time_seconds, time_seconds, sizeof(config.relay_time_seconds));
+  config.light_restore_boot = light_restore_boot ? 1 : 0;
   if (!commitConfig()) return false;
   refreshRelayEnforcementRuntime(true);
   saveLastRelaySnapshotIfNeeded();
@@ -4965,6 +4985,7 @@ bool lightConfigDiffers(const StoredConfig &a, const StoredConfig &b) {
          a.light_on_dimmer != b.light_on_dimmer ||
          a.light_mode != b.light_mode ||
          memcmp(a.light_rgb, b.light_rgb, sizeof(a.light_rgb)) != 0 ||
+         a.light_restore_boot != b.light_restore_boot ||
          a.shelly_dimmer_edge != b.shelly_dimmer_edge ||
          a.shelly_dimmer_range_min != b.shelly_dimmer_range_min ||
          a.shelly_dimmer_range_max != b.shelly_dimmer_range_max;
@@ -4978,7 +4999,8 @@ bool relayEnforcementConfigDiffers(const StoredConfig &a, const StoredConfig &b)
   return memcmp(a.relay_restore_boot, b.relay_restore_boot, sizeof(a.relay_restore_boot)) != 0 ||
          memcmp(a.relay_on_boot, b.relay_on_boot, sizeof(a.relay_on_boot)) != 0 ||
          memcmp(a.relay_time_enabled, b.relay_time_enabled, sizeof(a.relay_time_enabled)) != 0 ||
-         memcmp(a.relay_time_seconds, b.relay_time_seconds, sizeof(a.relay_time_seconds)) != 0;
+         memcmp(a.relay_time_seconds, b.relay_time_seconds, sizeof(a.relay_time_seconds)) != 0 ||
+         a.light_restore_boot != b.light_restore_boot;
 }
 
 bool inputConfigDiffers(const StoredConfig &a, const StoredConfig &b) {
@@ -5072,6 +5094,8 @@ void appendSettingsExportJson(String &out) {
   out += config.light_ct;
   out += F(",\"on_dimmer\":");
   out += config.light_on_dimmer;
+  out += F(",\"restore_boot\":");
+  out += config.light_restore_boot ? F("true") : F("false");
   if (lightSupportsColor()) {
     out += F(",\"mode\":\"");
     out += config.light_mode == kLightModeRgb ? F("rgb") : F("white");
@@ -5399,6 +5423,15 @@ void importSettingsLight(JsonObjectConst root, StoredConfig &target, const Runti
       recordSettingsApplied(stats);
     } else {
       recordSettingsSkipped(stats, F("light.on_dimmer"));
+    }
+  }
+  if (light_settings.containsKey("restore_boot")) {
+    JsonVariantConst restore_value = light_settings["restore_boot"];
+    if (restore_value.is<bool>()) {
+      target.light_restore_boot = restore_value.as<bool>() ? 1 : 0;
+      recordSettingsApplied(stats);
+    } else {
+      recordSettingsSkipped(stats, F("light.restore_boot"));
     }
   }
   if (lightSupportsColorIn(rt) && light_settings.containsKey("mode")) {
@@ -8007,7 +8040,7 @@ bool lightRgbHasColor() {
 }
 
 void loadLightStateFromConfig() {
-  light.power = config.light_power != 0;
+  light.power = config.light_restore_boot && config.light_power != 0;
   light.dimmer = light.power ? sanitizeLightDimmerValue(config.light_dimmer) : kLightDimmerOff;
   light.ct = sanitizeLightCtValue(config.light_ct);
   light.mode = lightSupportsColor() ? sanitizeLightModeValue(config.light_mode) : kLightModeWhite;
@@ -9567,18 +9600,22 @@ void appendLedSettings(String &page) {
   page += F("<button type='submit'>Save LEDs</button></form></section>");
 }
 
-void appendRelayEnforcementSettings(String &page) {
-  if (!runtime_template.enabled || !hasConfigurableRelays()) return;
+bool deviceStateEnforcementAvailable() {
+  if (!runtime_template.enabled) return false;
+  return hasConfigurableRelays() || light.present;
+}
 
-  page += F("<section class='panel'><h2>Relay Enforcement</h2><form id='form-relay-enforcement' data-inline='1' method='post' action='/relay-enforcement'>");
-  page += F("<p class='hint'>Keep selected relays on at startup, or turn them back on after they are switched off.</p>");
+void appendRelayEnforcementSettings(String &page) {
+  if (!deviceStateEnforcementAvailable()) return;
+
+  page += F("<section class='panel'><div class='panel-head'><h2>Device State Enforcement</h2></div><form id='form-relay-enforcement' data-inline='1' method='post' action='/relay-enforcement'><div class='panel-body'>");
   for (uint8_t i = 0; i < runtime_template.relay_count && i < kMaxRelays; i++) {
     if (!relayAvailable(i)) continue;
-    page += F("<div class='button-block'><div class='button-block-head'><strong>Relay ");
+    page += F("<div class='subblock'><div class='subblock-head'><div class='title-line'><div class='title'>Relay ");
     page += String(i + 1);
-    page += F("</strong><span class='hint'>");
+    page += F("</div><div class='meta'>");
     page += pinName(runtime_template.relays[i].pin);
-    page += F("</span></div><div class='field'><label><input class='relay-boot-choice' id='relay_on_boot");
+    page += F("</div></div></div><div class='field'><label><input class='relay-boot-choice' id='relay_on_boot");
     page += String(i);
     page += F("' data-relay='");
     page += String(i);
@@ -9610,7 +9647,12 @@ void appendRelayEnforcementSettings(String &page) {
     }
     page += F("'></div></div>");
   }
-  page += F("</form><div class='panel-foot'><button type='submit' form='form-relay-enforcement'>Save relay enforcement</button></div></section>");
+  if (light.present) {
+    page += F("<div class='subblock'><div class='subblock-head'><div class='title'>Light</div></div><div class='field'><label><input type='checkbox' name='light_restore_boot' value='1'");
+    if (config.light_restore_boot) page += F(" checked");
+    page += F(">Restore last state at boot</label><span class='hint'>Power, dimmer, color temperature, and color</span></div></div>");
+  }
+  page += F("</div></form><div class='panel-foot'><button type='submit' form='form-relay-enforcement'>Save device state enforcement</button></div></section>");
 }
 
 void appendButtonActionOption(String &page, uint8_t value, const String &label, uint8_t selected) {
@@ -10378,8 +10420,8 @@ void handleLedSave() {
 }
 
 void handleRelayEnforcementSave() {
-  if (!hasConfigurableRelays()) {
-    server.send(400, F("text/plain"), F("No configurable relays are available"));
+  if (!deviceStateEnforcementAvailable()) {
+    server.send(400, F("text/plain"), F("No configurable device state settings are available"));
     return;
   }
 
@@ -10387,6 +10429,7 @@ void handleRelayEnforcementSave() {
   uint8_t on_boot[kMaxRelays];
   uint8_t time_enabled[kMaxRelays];
   uint16_t time_seconds[kMaxRelays];
+  uint8_t light_restore_boot = config.light_restore_boot;
   memcpy(restore_boot, config.relay_restore_boot, sizeof(restore_boot));
   memcpy(on_boot, config.relay_on_boot, sizeof(on_boot));
   memcpy(time_enabled, config.relay_time_enabled, sizeof(time_enabled));
@@ -10429,15 +10472,19 @@ void handleRelayEnforcementSave() {
     }
   }
 
-  if (!saveRelayEnforcementConfig(restore_boot, on_boot, time_enabled, time_seconds)) {
-    server.send(500, F("text/plain"), F("Could not save relay enforcement settings"));
+  if (light.present) {
+    light_restore_boot = server.hasArg(F("light_restore_boot")) ? 1 : 0;
+  }
+
+  if (!saveRelayEnforcementConfig(restore_boot, on_boot, time_enabled, time_seconds, light_restore_boot)) {
+    server.send(500, F("text/plain"), F("Could not save device state enforcement settings"));
     return;
   }
 
   String page;
   page.reserve(700);
-  appendHeader(page, F("myMota Relay Enforcement"));
-  page += F("<p class='ok'>Relay enforcement settings saved.</p>");
+  appendHeader(page, F("myMota Device State Enforcement"));
+  page += F("<p class='ok'>Device state enforcement settings saved.</p>");
   page += F("<p><a href='/'>Back</a></p>");
   appendFooter(page);
   sendHtml(page);
