@@ -352,18 +352,21 @@ updates for commonly automated settings:
 
 ```text
 /api/settings?power_saving=deep
+/api/settings?power_saving=light&power_saving_persist=1
+/api/settings?power_saving_locked=1
 /api/settings?wifi_dynamic_power=1
 /api/settings?mqtt_protocol_keepalive=30
 /api/settings?input1_topic=cmnd/demo/POWER&input1_payload=TOGGLE
 ```
 
 The endpoint also accepts JSON through POST, PUT, or PATCH for the same
-settings families.
+settings families. When power saving is locked, API and web UI requests cannot
+change the current power saving mode or Persist flag until the lock is cleared.
 
 The `/health` document includes firmware version, target, chip ID, flash usage,
-power saving mode, Wi-Fi state, MQTT state, template summary, relay state,
-button state, LED state, light state, energy state, ADC state, and recovery
-guard state.
+power saving mode, Persist and Locked flags, Wi-Fi state, MQTT state, template
+summary, relay state, button state, LED state, light state, energy state, ADC
+state, and recovery guard state.
 
 ## Wi-Fi and Recovery
 
@@ -380,6 +383,10 @@ Power saving modes are:
 - Off: no intentional loop delay.
 - Light: 1 ms delay after loop work.
 - Deep: 10 ms delay after loop work.
+
+Power saving changes are runtime-only unless Persist is enabled. The Locked flag
+prevents API and web UI changes to the mode or Persist flag; clearing Locked is
+still allowed when the mode and Persist value are left unchanged.
 
 If Wi-Fi is not configured, the firmware starts a setup access point using the
 default device hostname. If station mode has never connected and remains
