@@ -56,6 +56,7 @@ constexpr uint16_t kConfigVersionV23 = 23;
 constexpr uint16_t kConfigVersion = 24;
 constexpr size_t kEepromSize = 4096;
 constexpr size_t kFlashSectorSize = 4096;
+constexpr uint32_t kOtaUploadReserveBytes = 0x1000UL;
 constexpr uint8_t kEnergyJournalSectorCount = 2;
 constexpr size_t kBootRecoveryOffset = 3072;
 constexpr uint32_t kConnectTimeoutMs = 20000;
@@ -1559,6 +1560,7 @@ bool update_ok = false;
 bool update_mqtt_paused = false;
 uint8_t update_error = UPDATE_ERROR_OK;
 uint32_t update_max_size = 0;
+uint32_t update_received_size = 0;
 uint32_t restart_at = 0;
 bool restart_pending = false;
 RestartMode restart_mode = kRestartModeCold;
@@ -9536,7 +9538,7 @@ void appendFooter(String &page, bool live_poll = true, bool reboot_wait = false)
   page += F("function p(i,v,c){var e=document.getElementById(i);if(e){e.textContent=v;e.className=c;}}");
   page += F("function fmt(v,d,u){return v==null?'n/a':Number(v).toFixed(d)+(u||'');}");
   page += F("function live(){if(lp)return;lp=1;fh().then(function(d){");
-  page += F("t('live-heap',d.heap+' bytes');if(d.flash){t('live-flash-used',d.flash.used+' bytes');t('live-flash-total',d.flash.total+' bytes');t('live-flash-free',d.flash.free+' bytes');}t('live-uptime',d.uptime+'s');t('live-uptime-2',d.uptime+'s');t('live-active-phy',d.active_phy);");
+  page += F("t('live-heap',d.heap+' bytes');if(d.flash){t('live-flash-used',d.flash.used+' bytes');t('live-flash-total',d.flash.total+' bytes');t('live-flash-free',d.flash.free+' bytes');}if(d.ota){t('live-ota-max',d.ota.max_upload_size+' bytes');t('live-ota-free',d.ota.free_sketch_space+' bytes');t('live-ota-rounded',d.ota.sketch_rounded+' bytes');var ff=document.querySelectorAll('.firmware-upload');for(var oi=0;oi<ff.length;oi++){ff[oi].setAttribute('data-ota-max',d.ota.max_upload_size||0);var fi=ff[oi].querySelector('input[type=file]');if(fi&&fi.files&&fi.files.length)vf(ff[oi]);}}t('live-uptime',d.uptime+'s');t('live-uptime-2',d.uptime+'s');t('live-active-phy',d.active_phy);");
   page += F("if(d.perf){t('live-loop-load',d.perf.loop_load+'%');t('live-loop-hz',d.perf.loop_hz+'/s');t('live-loop-max',Number(d.perf.loop_max_us/1000).toFixed(1)+' ms');}");
   page += F("if(d.power_saving){sv('power_saving',d.power_saving.mode||'off');cv('power_saving_persist',d.power_saving.persist);cv('power_saving_locked',d.power_saving.locked);}");
   page += F("if(d.recovery){t('live-recovery',d.recovery.fast_boot_count+'/'+d.recovery.limit);sv('recovery_limit',d.recovery.limit);sv('recovery_stable_seconds',d.recovery.stable_seconds);}");
@@ -9556,7 +9558,7 @@ void appendFooter(String &page, bool live_poll = true, bool reboot_wait = false)
   page += F("function ts(){var s=document.getElementById('known-template'),t=document.getElementById('template-json');if(!s||!t)return;var v=t.value.trim(),m=0;for(var i=1;i<s.options.length;i++){if(s.options[i].getAttribute('data-json')==v){m=i;break;}}s.selectedIndex=m;s.setAttribute('data-prev',s.options[m]?s.options[m].value:'custom');}");
   page += F("function tp(s){var o=s.options[s.selectedIndex],t=document.getElementById('template-json');if(!o||!t)return;var p=s.getAttribute('data-prev')||'custom';if(o.value=='custom'){if(p!='custom')t.value='';ts();return;}var j=o.getAttribute('data-json');if(j){t.value=j;ts();}}");
   page += F("function sf(i){var t=document.getElementById('settings-json');if(!i.files||!i.files[0]||!t)return;var r=new FileReader();r.onload=function(){t.value=String(r.result||'');};r.readAsText(i.files[0]);}");
-  page += F("function vf(f){var t=(f.getAttribute('data-target')||'').toLowerCase(),i=f.querySelector('input[type=file]'),c=f.querySelector('.firmware-verify');if(!i||!t)return true;if(c&&!c.checked){i.setCustomValidity('');return true;}var n=i.files&&i.files[0]?i.files[0].name.toLowerCase():'';var o=!n||n.indexOf(t)>=0;i.setCustomValidity(o?'':'Firmware file name must include '+t);return o;}");
+  page += F("function vf(f){var t=(f.getAttribute('data-target')||'').toLowerCase(),m=Number(f.getAttribute('data-ota-max')||0),i=f.querySelector('input[type=file]'),c=f.querySelector('.firmware-verify');if(!i||!t)return true;var file=i.files&&i.files[0]?i.files[0]:null;if(file&&m&&file.size>m){i.setCustomValidity('Firmware file is '+file.size+' bytes; OTA max upload is '+m+' bytes. Use a smaller bridge build first.');return false;}if(c&&!c.checked){i.setCustomValidity('');return true;}var n=file?file.name.toLowerCase():'';var o=!n||n.indexOf(t)>=0;i.setCustomValidity(o?'':'Firmware file name must include '+t);return o;}");
   page += F("function fu(f){var c=f.querySelector('.firmware-verify');f.action='/update?verify='+(!c||c.checked?'1':'0');}");
   page += F("function fw(){var a=document.querySelectorAll('.firmware-upload');for(var i=0;i<a.length;i++){(function(f){var x=f.querySelector('input[type=file]'),c=f.querySelector('.firmware-verify');fu(f);if(x)x.onchange=function(){vf(f);this.reportValidity();};if(c)c.onchange=function(){fu(f);vf(f);if(x)x.reportValidity();};f.addEventListener('submit',function(e){fu(f);if(!vf(f)){e.preventDefault();if(x)x.reportValidity();}},true);})(a[i]);}}");
   page += F("function lu(i){var e=i.getAttribute('data-live'),s=i.getAttribute('data-suffix')||'';if(e)t(e,i.value+s);}function la(i){lu(i);var fd=new FormData();fd.append(i.name,i.value);fd.append('_inline','1');fetch('/light',{method:'POST',body:fd,cache:'no-store'}).then(function(r){if(!r.ok)return r.text().then(function(x){throw Error(x||r.statusText)});live();}).catch(function(x){alert(x.message||x);});}");
@@ -9609,6 +9611,24 @@ uint32_t flashFreeBytes() {
   const uint32_t used = flashUsedBytes();
   const uint32_t total = flashTotalBytes();
   return total > used ? total - used : 0;
+}
+
+uint32_t flashSectorRoundedBytes(uint32_t value) {
+  return (value + static_cast<uint32_t>(kFlashSectorSize - 1)) &
+         ~static_cast<uint32_t>(kFlashSectorSize - 1);
+}
+
+uint32_t otaFreeSketchSpaceBytes() {
+  return ESP.getFreeSketchSpace();
+}
+
+uint32_t otaMaxUploadBytes(uint32_t free_sketch_space) {
+  if (free_sketch_space <= kOtaUploadReserveBytes) return 0;
+  return (free_sketch_space - kOtaUploadReserveBytes) & 0xFFFFF000UL;
+}
+
+uint32_t otaMaxUploadBytes() {
+  return otaMaxUploadBytes(otaFreeSketchSpaceBytes());
 }
 
 void appendSectionHead(String &page, const __FlashStringHelper *title) {
@@ -9693,7 +9713,13 @@ void appendStatusBlock(String &page) {
   page += String(flashTotalBytes());
   page += F(" bytes</code> (total) / <code id='live-flash-free'>");
   page += String(flashFreeBytes());
-  page += F(" bytes</code> (free)</div><span>Uptime</span><div><code id='live-uptime'>");
+  page += F(" bytes</code> (free)</div><span>OTA max upload</span><div><code id='live-ota-max'>");
+  page += String(otaMaxUploadBytes());
+  page += F(" bytes</code></div><span>OTA free sketch</span><div><code id='live-ota-free'>");
+  page += String(otaFreeSketchSpaceBytes());
+  page += F(" bytes</code> free / <code id='live-ota-rounded'>");
+  page += String(flashSectorRoundedBytes(flashUsedBytes()));
+  page += F(" bytes</code> sketch rounded</div><span>Uptime</span><div><code id='live-uptime'>");
   page += String(millis() / 1000);
   page += F("s</code></div><span>Loop load</span><div><code id='live-loop-load'>");
   page += String(perf_last_loop_load);
@@ -10654,7 +10680,9 @@ void handleRoot() {
 
   appendSectionHead(page, F("Maintenance"));
   flushStreamChunk(page);
-  page += F("<section class='panel'><div class='panel-head'><h2>System</h2><span class='h-meta'>Firmware / power / recovery / reboot</span></div><div class='panel-body'><div class='subblock'><div class='subblock-head'><div class='title'>Firmware</div></div><form id='form-firmware' class='firmware-upload' method='post' action='/update?verify=1' enctype='multipart/form-data' data-target='");
+  page += F("<section class='panel'><div class='panel-head'><h2>System</h2><span class='h-meta'>Firmware / power / recovery / reboot</span></div><div class='panel-body'><div class='subblock'><div class='subblock-head'><div class='title'>Firmware</div></div><form id='form-firmware' class='firmware-upload' method='post' action='/update?verify=1' enctype='multipart/form-data' data-ota-max='");
+  page += String(otaMaxUploadBytes());
+  page += F("' data-target='");
   page += F(MYMOTA_TARGET);
   page += F("'>");
   page += F("<div class='field'><label>Firmware binary</label><input type='file' name='firmware' accept='.bin,.bin.gz' required></div>");
@@ -12280,6 +12308,18 @@ void handleHealth() {
   out += F(",\"free\":");
   out += flashFreeBytes();
   out += F("}");
+  const uint32_t ota_free_sketch = otaFreeSketchSpaceBytes();
+  out += F(",\"ota\":{\"sketch_size\":");
+  out += flashUsedBytes();
+  out += F(",\"sketch_rounded\":");
+  out += flashSectorRoundedBytes(flashUsedBytes());
+  out += F(",\"free_sketch_space\":");
+  out += ota_free_sketch;
+  out += F(",\"reserved\":");
+  out += kOtaUploadReserveBytes;
+  out += F(",\"max_upload_size\":");
+  out += otaMaxUploadBytes(ota_free_sketch);
+  out += F("}");
   out += F(",\"uptime\":");
   out += millis() / 1000;
   out += F(",\"perf\":{\"loop_hz\":");
@@ -12754,7 +12794,19 @@ void handleUpdateDone() {
   appendHeader(page, F("myMota Update Failed"));
   page += F("<p class='bad'>Firmware upload failed: ");
   page += updateErrorName(update_error);
-  page += F("</p><p><a href='/'>Back</a></p>");
+  page += F("</p>");
+  if (update_error == UPDATE_ERROR_SPACE) {
+    page += F("<p>OTA max upload: <code>");
+    page += String(update_max_size ? update_max_size : otaMaxUploadBytes());
+    page += F(" bytes</code>");
+    if (update_received_size) {
+      page += F(" / received: <code>");
+      page += String(update_received_size);
+      page += F(" bytes</code>");
+    }
+    page += F("</p>");
+  }
+  page += F("<p><a href='/'>Back</a></p>");
   appendFooter(page);
   sendHtml(page);
 }
@@ -12768,6 +12820,7 @@ void handleUpdateUpload() {
     update_mqtt_paused = false;
     update_error = UPDATE_ERROR_OK;
     update_max_size = 0;
+    update_received_size = 0;
     if (upload.filename.length() == 0) {
       update_error = UPDATE_ERROR_SIZE;
       return;
@@ -12790,6 +12843,8 @@ void handleUpdateUpload() {
   }
 
   if (upload.status == UPLOAD_FILE_WRITE) {
+    const uint32_t received_size = upload.totalSize + upload.currentSize;
+    if (received_size > update_received_size) update_received_size = received_size;
     if (!update_started && upload.totalSize == 0) {
       if (upload.currentSize < 4) {
         update_error = UPDATE_ERROR_SIZE;
@@ -12810,11 +12865,11 @@ void handleUpdateUpload() {
       }
 
       const uint32_t free_sketch_space = ESP.getFreeSketchSpace();
-      if (free_sketch_space <= 0x1000) {
+      if (free_sketch_space <= kOtaUploadReserveBytes) {
         update_error = UPDATE_ERROR_SPACE;
         return;
       }
-      const uint32_t max_sketch_space = (free_sketch_space - 0x1000) & 0xFFFFF000;
+      const uint32_t max_sketch_space = otaMaxUploadBytes(free_sketch_space);
       update_max_size = max_sketch_space;
       if (!Update.begin(max_sketch_space)) {
         update_error = Update.getError();
@@ -12875,6 +12930,7 @@ void handleUpdateUpload() {
     update_ok = false;
     update_mqtt_paused = false;
     update_max_size = 0;
+    update_received_size = 0;
     update_error = UPDATE_ERROR_STREAM;
   }
 }
