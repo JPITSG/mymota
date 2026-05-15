@@ -51,7 +51,8 @@ constexpr uint16_t kConfigVersionV18 = 18;
 constexpr uint16_t kConfigVersionV19 = 19;
 constexpr uint16_t kConfigVersionV20 = 20;
 constexpr uint16_t kConfigVersionV21 = 21;
-constexpr uint16_t kConfigVersion = 22;
+constexpr uint16_t kConfigVersionV22 = 22;
+constexpr uint16_t kConfigVersion = 23;
 constexpr size_t kEepromSize = 4096;
 constexpr size_t kFlashSectorSize = 4096;
 constexpr uint8_t kEnergyJournalSectorCount = 2;
@@ -136,6 +137,8 @@ constexpr uint16_t kPowerSavingLightDelayMs = 1;
 constexpr uint16_t kPowerSavingDeepDelayMs = 10;
 constexpr uint16_t kRelayEnforcementMinSeconds = 1;
 constexpr uint16_t kRelayEnforcementMaxSeconds = 65535U;
+constexpr uint16_t kRelayPulseMinSeconds = 1;
+constexpr uint16_t kRelayPulseMaxSeconds = 65535U;
 constexpr uint16_t kButtonDebounceDefaultMs = 50;
 constexpr uint16_t kButtonDebounceMinMs = 5;
 constexpr uint16_t kButtonDebounceMaxMs = 200;
@@ -1089,6 +1092,127 @@ struct StoredConfigV20 {
   uint32_t crc;
 };
 
+struct StoredConfigV21 {
+  uint32_t magic;
+  uint16_t version;
+  uint16_t size;
+  char ssid[33];
+  char password[65];
+  char hostname[33];
+  uint8_t phy_mode;
+  uint8_t template_enabled;
+  uint16_t template_base;
+  uint32_t template_flag;
+  char template_name[33];
+  uint16_t template_gpio[kTemplateSlotCount];
+  uint16_t mqtt_port;
+  uint16_t mqtt_keepalive;
+  char mqtt_host[kMqttHostMaxLen + 1];
+  char mqtt_topic[kMqttTopicMaxLen + 1];
+  float energy_total_offset_kwh;
+  uint8_t led_attach[kMaxLedOutputs];
+  uint16_t button_hold_ms;
+  uint8_t button_press_action[kMaxButtons];
+  uint8_t button_hold_action[kMaxButtons];
+  uint16_t energy_mqtt_interval;
+  uint16_t energy_mqtt_change_percent_x10;
+  char button_press_target[kMaxButtons][kButtonActionTargetMaxLen + 1];
+  char button_press_payload[kMaxButtons][kButtonActionPayloadMaxLen + 1];
+  char button_hold_target[kMaxButtons][kButtonActionTargetMaxLen + 1];
+  char button_hold_payload[kMaxButtons][kButtonActionPayloadMaxLen + 1];
+  uint16_t button_debounce_ms;
+  uint8_t input_mode[kMaxButtons];
+  uint8_t input_relay[kMaxButtons];
+  uint8_t input_on_level[kMaxButtons];
+  uint8_t reserved[1];
+  uint8_t button_press_relay[kMaxButtons];
+  uint8_t button_hold_relay[kMaxButtons];
+  uint8_t light_power;
+  uint8_t light_dimmer;
+  uint16_t light_ct;
+  uint8_t light_on_dimmer;
+  uint8_t shelly_dimmer_edge;
+  uint8_t shelly_dimmer_range_min;
+  uint8_t shelly_dimmer_range_max;
+  uint8_t relay_on_boot[kMaxRelays];
+  uint8_t relay_time_enabled[kMaxRelays];
+  uint16_t relay_time_seconds[kMaxRelays];
+  uint16_t energy_mqtt_change_watts;
+  uint16_t power_saving_mode;
+  uint8_t relay_restore_boot[kMaxRelays];
+  uint8_t light_mode;
+  uint8_t light_rgb[3];
+  uint8_t wifi_dynamic_power;
+  uint8_t wifi_reserved[3];
+  uint16_t mqtt_protocol_keepalive;
+  uint16_t mqtt_reserved;
+  uint8_t boot_recovery_limit;
+  uint8_t boot_recovery_reserved;
+  uint16_t boot_recovery_stable_seconds;
+  uint32_t crc;
+};
+
+struct StoredConfigV22 {
+  uint32_t magic;
+  uint16_t version;
+  uint16_t size;
+  char ssid[33];
+  char password[65];
+  char hostname[33];
+  uint8_t phy_mode;
+  uint8_t template_enabled;
+  uint16_t template_base;
+  uint32_t template_flag;
+  char template_name[33];
+  uint16_t template_gpio[kTemplateSlotCount];
+  uint16_t mqtt_port;
+  uint16_t mqtt_keepalive;
+  char mqtt_host[kMqttHostMaxLen + 1];
+  char mqtt_topic[kMqttTopicMaxLen + 1];
+  float energy_total_offset_kwh;
+  uint8_t led_attach[kMaxLedOutputs];
+  uint16_t button_hold_ms;
+  uint8_t button_press_action[kMaxButtons];
+  uint8_t button_hold_action[kMaxButtons];
+  uint16_t energy_mqtt_interval;
+  uint16_t energy_mqtt_change_percent_x10;
+  char button_press_target[kMaxButtons][kButtonActionTargetMaxLen + 1];
+  char button_press_payload[kMaxButtons][kButtonActionPayloadMaxLen + 1];
+  char button_hold_target[kMaxButtons][kButtonActionTargetMaxLen + 1];
+  char button_hold_payload[kMaxButtons][kButtonActionPayloadMaxLen + 1];
+  uint16_t button_debounce_ms;
+  uint8_t input_mode[kMaxButtons];
+  uint8_t input_relay[kMaxButtons];
+  uint8_t input_on_level[kMaxButtons];
+  uint8_t reserved[1];
+  uint8_t button_press_relay[kMaxButtons];
+  uint8_t button_hold_relay[kMaxButtons];
+  uint8_t light_power;
+  uint8_t light_dimmer;
+  uint16_t light_ct;
+  uint8_t light_on_dimmer;
+  uint8_t shelly_dimmer_edge;
+  uint8_t shelly_dimmer_range_min;
+  uint8_t shelly_dimmer_range_max;
+  uint8_t relay_on_boot[kMaxRelays];
+  uint8_t relay_time_enabled[kMaxRelays];
+  uint16_t relay_time_seconds[kMaxRelays];
+  uint16_t energy_mqtt_change_watts;
+  uint16_t power_saving_mode;
+  uint8_t relay_restore_boot[kMaxRelays];
+  uint8_t light_mode;
+  uint8_t light_rgb[3];
+  uint8_t wifi_dynamic_power;
+  uint8_t light_restore_boot;
+  uint8_t wifi_reserved[2];
+  uint16_t mqtt_protocol_keepalive;
+  uint16_t mqtt_reserved;
+  uint8_t boot_recovery_limit;
+  uint8_t boot_recovery_reserved;
+  uint16_t boot_recovery_stable_seconds;
+  uint32_t crc;
+};
+
 struct StoredConfig {
   uint32_t magic;
   uint16_t version;
@@ -1147,6 +1271,8 @@ struct StoredConfig {
   uint8_t boot_recovery_limit;
   uint8_t boot_recovery_reserved;
   uint16_t boot_recovery_stable_seconds;
+  uint8_t relay_pulse_enabled[kMaxRelays];
+  uint16_t relay_pulse_seconds[kMaxRelays];
   uint32_t crc;
 };
 
@@ -1428,6 +1554,8 @@ bool last_relay_restore_valid = false;
 uint16_t last_relay_restore_mask = 0;
 bool relay_enforcement_pending[kMaxRelays]{};
 uint32_t relay_enforcement_due[kMaxRelays]{};
+bool relay_pulse_pending[kMaxRelays]{};
+uint32_t relay_pulse_due[kMaxRelays]{};
 bool rotary_suppress_button[kMaxButtons]{};
 bool energy_report_boot_settled = false;
 bool energy_journal_loaded = false;
@@ -1460,6 +1588,7 @@ bool defaultButtonRelayTarget(uint8_t button, uint8_t &relay);
 bool parseUint16Input(const String &input, uint16_t min_value, uint16_t max_value, uint16_t &out);
 void cancelRelayEnforcement(uint8_t relay);
 void refreshRelayEnforcementRuntime(bool schedule_off_relays);
+void refreshRelayPulseRuntime(bool schedule_on_relays);
 bool executeDeviceCommand(const char *raw, size_t cmd_len, const char *arg, size_t arg_len, String &out, String &error);
 void scheduleMqttLightPublish(uint8_t mask);
 void toggleLightPower(bool persist = true);
@@ -1794,6 +1923,15 @@ void setDefaultRelayEnforcementConfig() {
   setDefaultRelayEnforcementConfig(config);
 }
 
+void setDefaultRelayPulseConfig(StoredConfig &target) {
+  memset(target.relay_pulse_enabled, 0, sizeof(target.relay_pulse_enabled));
+  memset(target.relay_pulse_seconds, 0, sizeof(target.relay_pulse_seconds));
+}
+
+void setDefaultRelayPulseConfig() {
+  setDefaultRelayPulseConfig(config);
+}
+
 uint8_t defaultLedAttachment(uint8_t led) {
   if (led < kMaxLeds && led < kMaxRelays) {
     return kLedAttachRelayBase + led;
@@ -1920,6 +2058,7 @@ void setDefaultConfig() {
   setDefaultButtonConfig();
   setDefaultLightConfig();
   setDefaultRelayEnforcementConfig();
+  setDefaultRelayPulseConfig();
   setDefaultPowerSavingConfig();
   setDefaultWifiPowerConfig();
   setDefaultBootRecoveryConfig();
@@ -2425,6 +2564,7 @@ void clearTemplateConfig(StoredConfig &target) {
   setDefaultButtonConfig(target);
   setDefaultLightConfig(target);
   setDefaultRelayEnforcementConfig(target);
+  setDefaultRelayPulseConfig(target);
 }
 
 void clearTemplateConfig() {
@@ -2558,6 +2698,13 @@ void normalizeConfigStrings() {
       config.relay_time_enabled[i] = 0;
       config.relay_time_seconds[i] = 0;
     }
+    config.relay_pulse_enabled[i] = config.relay_pulse_enabled[i] ? 1 : 0;
+    if (config.relay_pulse_enabled[i] &&
+        (config.relay_pulse_seconds[i] < kRelayPulseMinSeconds ||
+         config.relay_pulse_seconds[i] > kRelayPulseMaxSeconds)) {
+      config.relay_pulse_enabled[i] = 0;
+      config.relay_pulse_seconds[i] = 0;
+    }
   }
   if (!config.template_enabled) {
     clearTemplateConfig();
@@ -2587,8 +2734,11 @@ void applyConfigMigrationDefaults(uint16_t previous_version) {
   if (previous_version < kConfigVersionV21) {
     setDefaultBootRecoveryConfig();
   }
-  if (previous_version < kConfigVersion) {
+  if (previous_version < kConfigVersionV22) {
     config.light_restore_boot = 1;
+  }
+  if (previous_version < kConfigVersion) {
+    setDefaultRelayPulseConfig();
   }
 }
 
@@ -2625,6 +2775,7 @@ bool saveLedConfig(const uint8_t *attachments);
 bool saveRelayEnforcementConfig(const uint8_t *restore_boot, const uint8_t *on_boot,
                                 const uint8_t *time_enabled, const uint16_t *time_seconds,
                                 uint8_t light_restore_boot);
+bool saveRelayPulseConfig(const uint8_t *pulse_enabled, const uint16_t *pulse_seconds);
 bool saveButtonConfig(uint16_t hold_ms, uint16_t debounce_ms,
                       const uint8_t *press_actions, const uint8_t *hold_actions,
                       const char press_targets[][kButtonActionTargetMaxLen + 1],
@@ -2685,12 +2836,40 @@ bool loadConfig() {
     return config_ok;
   }
 
-  if (header.version == kConfigVersionV21 && header.size == sizeof(StoredConfig)) {
-    EEPROM.get(0, config);
-    if (config.crc != configCrc(config)) {
+  if (header.version == kConfigVersionV22 && header.size == sizeof(StoredConfigV22)) {
+    StoredConfigV22 *old_config = new StoredConfigV22;
+    if (!old_config) {
       setDefaultConfig();
       return false;
     }
+    EEPROM.get(0, *old_config);
+    if (old_config->crc != configCrc(*old_config)) {
+      delete old_config;
+      setDefaultConfig();
+      return false;
+    }
+    memset(&config, 0, sizeof(config));
+    memcpy(&config, old_config, offsetof(StoredConfigV22, crc));
+    delete old_config;
+    commitConfig();
+    return config_ok;
+  }
+
+  if (header.version == kConfigVersionV21 && header.size == sizeof(StoredConfigV21)) {
+    StoredConfigV21 *old_config = new StoredConfigV21;
+    if (!old_config) {
+      setDefaultConfig();
+      return false;
+    }
+    EEPROM.get(0, *old_config);
+    if (old_config->crc != configCrc(*old_config)) {
+      delete old_config;
+      setDefaultConfig();
+      return false;
+    }
+    memset(&config, 0, sizeof(config));
+    memcpy(&config, old_config, offsetof(StoredConfigV21, crc));
+    delete old_config;
     commitConfig();
     return config_ok;
   }
@@ -3348,6 +3527,14 @@ bool saveRelayEnforcementConfig(const uint8_t *restore_boot, const uint8_t *on_b
   if (!commitConfig()) return false;
   refreshRelayEnforcementRuntime(true);
   saveLastRelaySnapshotIfNeeded();
+  return true;
+}
+
+bool saveRelayPulseConfig(const uint8_t *pulse_enabled, const uint16_t *pulse_seconds) {
+  memcpy(config.relay_pulse_enabled, pulse_enabled, sizeof(config.relay_pulse_enabled));
+  memcpy(config.relay_pulse_seconds, pulse_seconds, sizeof(config.relay_pulse_seconds));
+  if (!commitConfig()) return false;
+  refreshRelayPulseRuntime(true);
   return true;
 }
 
@@ -5003,6 +5190,11 @@ bool relayEnforcementConfigDiffers(const StoredConfig &a, const StoredConfig &b)
          a.light_restore_boot != b.light_restore_boot;
 }
 
+bool relayPulseConfigDiffers(const StoredConfig &a, const StoredConfig &b) {
+  return memcmp(a.relay_pulse_enabled, b.relay_pulse_enabled, sizeof(a.relay_pulse_enabled)) != 0 ||
+         memcmp(a.relay_pulse_seconds, b.relay_pulse_seconds, sizeof(a.relay_pulse_seconds)) != 0;
+}
+
 bool inputConfigDiffers(const StoredConfig &a, const StoredConfig &b) {
   return a.button_hold_ms != b.button_hold_ms ||
          a.button_debounce_ms != b.button_debounce_ms ||
@@ -5130,6 +5322,15 @@ void appendSettingsExportJson(String &out) {
     out += config.relay_time_enabled[i] ? F("true") : F("false");
     out += F(",\"seconds\":");
     out += config.relay_time_seconds[i];
+    out += F("}");
+  }
+  out += F("],\"relay_pulsing\":[");
+  for (uint8_t i = 0; i < kMaxRelays; i++) {
+    if (i) out += ',';
+    out += F("{\"enabled\":");
+    out += config.relay_pulse_enabled[i] ? F("true") : F("false");
+    out += F(",\"seconds\":");
+    out += config.relay_pulse_seconds[i];
     out += F("}");
   }
   out += F("],\"inputs\":{\"hold_ms\":");
@@ -5600,6 +5801,48 @@ void importSettingsRelayEnforcement(JsonObjectConst root, StoredConfig &target, 
       } else if (!relay["seconds"].isNull()) {
         recordSettingsSkipped(stats, String(F("relay_enforcement[")) + String(i) + F("].seconds"));
       }
+    }
+  }
+}
+
+void importSettingsRelayPulsing(JsonObjectConst root, StoredConfig &target, const RuntimeTemplate &rt, SettingsImportStats &stats) {
+  JsonVariantConst relays_value = root["relay_pulsing"];
+  if (relays_value.isNull()) return;
+  JsonArrayConst relays = relays_value.as<JsonArrayConst>();
+  if (relays.isNull()) {
+    recordSettingsSkipped(stats, F("relay_pulsing"));
+    return;
+  }
+
+  const uint8_t count = min(static_cast<size_t>(kMaxRelays), relays.size());
+  for (uint8_t i = 0; i < count; i++) {
+    JsonObjectConst relay = relays[i].as<JsonObjectConst>();
+    if (relay.isNull()) {
+      if (!relays[i].isNull()) recordSettingsSkipped(stats, String(F("relay_pulsing[")) + String(i) + F("]"));
+      continue;
+    }
+    if (!relayAvailableIn(rt, i)) continue;
+
+    bool enabled = target.relay_pulse_enabled[i] != 0;
+    if (relay.containsKey("enabled")) {
+      if (!settingsReadBool(relay["enabled"], enabled)) {
+        recordSettingsSkipped(stats, String(F("relay_pulsing[")) + String(i) + F("].enabled"));
+        continue;
+      }
+    }
+    if (!enabled) {
+      target.relay_pulse_enabled[i] = 0;
+      recordSettingsApplied(stats);
+      continue;
+    }
+
+    uint16_t seconds = 0;
+    if (settingsReadUint16(relay["seconds"], kRelayPulseMinSeconds, kRelayPulseMaxSeconds, seconds)) {
+      target.relay_pulse_enabled[i] = 1;
+      target.relay_pulse_seconds[i] = seconds;
+      recordSettingsApplied(stats);
+    } else {
+      recordSettingsSkipped(stats, String(F("relay_pulsing[")) + String(i) + F("].seconds"));
     }
   }
 }
@@ -8386,6 +8629,12 @@ bool relayTimeEnforcementActive(uint8_t relay) {
          config.relay_time_seconds[relay] >= kRelayEnforcementMinSeconds;
 }
 
+bool relayPulseActive(uint8_t relay) {
+  return relayAvailable(relay) &&
+         config.relay_pulse_enabled[relay] &&
+         config.relay_pulse_seconds[relay] >= kRelayPulseMinSeconds;
+}
+
 void cancelRelayEnforcement(uint8_t relay) {
   if (relay >= kMaxRelays) return;
   relay_enforcement_pending[relay] = false;
@@ -8411,7 +8660,32 @@ void refreshRelayEnforcementRuntime(bool schedule_off_relays) {
   }
 }
 
-void setRelay(uint8_t relay, bool on) {
+void cancelRelayPulse(uint8_t relay) {
+  if (relay >= kMaxRelays) return;
+  relay_pulse_pending[relay] = false;
+  relay_pulse_due[relay] = 0;
+}
+
+void scheduleRelayPulse(uint8_t relay) {
+  if (relay >= kMaxRelays || !relayPulseActive(relay)) {
+    cancelRelayPulse(relay);
+    return;
+  }
+  relay_pulse_due[relay] = millis() + (static_cast<uint32_t>(config.relay_pulse_seconds[relay]) * 1000UL);
+  relay_pulse_pending[relay] = true;
+}
+
+void refreshRelayPulseRuntime(bool schedule_on_relays) {
+  for (uint8_t i = 0; i < kMaxRelays; i++) {
+    if (!relayPulseActive(i) || !relay_state[i]) {
+      cancelRelayPulse(i);
+    } else if (schedule_on_relays) {
+      scheduleRelayPulse(i);
+    }
+  }
+}
+
+void setRelay(uint8_t relay, bool on, bool suppress_off_enforcement = false) {
   if (relay >= kMaxRelays || !hasPin(runtime_template.relays[relay])) return;
   const bool changed = relay_state[relay] != on;
   const bool was_on = relay_state[relay];
@@ -8419,7 +8693,11 @@ void setRelay(uint8_t relay, bool on) {
   writeAssignedPin(runtime_template.relays[relay], on);
   if (on) {
     cancelRelayEnforcement(relay);
-  } else if (changed) {
+    scheduleRelayPulse(relay);
+  } else {
+    cancelRelayPulse(relay);
+  }
+  if (!on && changed && !suppress_off_enforcement) {
     scheduleRelayEnforcement(relay);
   }
   if (changed) {
@@ -8465,6 +8743,20 @@ void maintainRelayEnforcement() {
     }
     if (static_cast<int32_t>(now - relay_enforcement_due[i]) >= 0) {
       setRelay(i, true);
+    }
+  }
+}
+
+void maintainRelayPulsing() {
+  const uint32_t now = millis();
+  for (uint8_t i = 0; i < runtime_template.relay_count && i < kMaxRelays; i++) {
+    if (!relay_pulse_pending[i]) continue;
+    if (!relayPulseActive(i) || !relay_state[i]) {
+      cancelRelayPulse(i);
+      continue;
+    }
+    if (static_cast<int32_t>(now - relay_pulse_due[i]) >= 0) {
+      setRelay(i, false, true);
     }
   }
 }
@@ -8863,6 +9155,8 @@ void setupDevicePins() {
   setupLightRuntime();
   memset(relay_enforcement_pending, 0, sizeof(relay_enforcement_pending));
   memset(relay_enforcement_due, 0, sizeof(relay_enforcement_due));
+  memset(relay_pulse_pending, 0, sizeof(relay_pulse_pending));
+  memset(relay_pulse_due, 0, sizeof(relay_pulse_due));
 
   for (uint8_t i = 0; i < kMaxRelays; i++) {
     relay_state[i] = relayBootState(i);
@@ -8912,6 +9206,7 @@ void maintainDevice() {
   maintainRotary();
   maintainButtons();
   maintainRelayEnforcement();
+  maintainRelayPulsing();
   maintainLight();
   maintainEnergy();
   maintainAdc();
@@ -9655,6 +9950,33 @@ void appendRelayEnforcementSettings(String &page) {
   page += F("</div></form><div class='panel-foot'><button type='submit' form='form-relay-enforcement'>Save device state enforcement</button></div></section>");
 }
 
+void appendRelayPulseSettings(String &page) {
+  if (!runtime_template.enabled || !hasConfigurableRelays()) return;
+
+  page += F("<section class='panel'><div class='panel-head'><h2>Relay Pulsing</h2></div><form id='form-relay-pulsing' data-inline='1' method='post' action='/relay-pulsing'><div class='panel-body'>");
+  for (uint8_t i = 0; i < runtime_template.relay_count && i < kMaxRelays; i++) {
+    if (!relayAvailable(i)) continue;
+    page += F("<div class='subblock'><div class='subblock-head'><div class='title-line'><div class='title'>Relay ");
+    page += String(i + 1);
+    page += F("</div><div class='meta'>");
+    page += pinName(runtime_template.relays[i].pin);
+    page += F("</div></div></div><div class='field'><label><input type='checkbox' name='relay_pulse_enabled");
+    page += String(i);
+    page += F("' value='1'");
+    if (config.relay_pulse_enabled[i]) page += F(" checked");
+    page += F(">Pulse when ON</label><input name='relay_pulse_seconds");
+    page += String(i);
+    page += F("' type='number' min='0' max='");
+    page += String(kRelayPulseMaxSeconds);
+    page += F("' step='1' placeholder='seconds' value='");
+    if (config.relay_pulse_seconds[i] > 0) {
+      page += String(config.relay_pulse_seconds[i]);
+    }
+    page += F("'></div></div>");
+  }
+  page += F("</div></form><div class='panel-foot'><button type='submit' form='form-relay-pulsing'>Save relay pulsing</button></div></section>");
+}
+
 void appendButtonActionOption(String &page, uint8_t value, const String &label, uint8_t selected) {
   page += F("<option value='");
   page += String(value);
@@ -10021,8 +10343,14 @@ void handleRoot() {
   flushStreamChunk(page);
   appendLedSettings(page);
   flushStreamChunk(page);
-  appendRelayEnforcementSettings(page);
-  flushStreamChunk(page);
+  if (deviceStateEnforcementAvailable() || (runtime_template.enabled && hasConfigurableRelays())) {
+    appendSectionHead(page, F("Relay Behavior"));
+    flushStreamChunk(page);
+    appendRelayEnforcementSettings(page);
+    flushStreamChunk(page);
+    appendRelayPulseSettings(page);
+    flushStreamChunk(page);
+  }
   appendSectionHead(page, F("Network"));
   flushStreamChunk(page);
   page += F("<section class='panel'><div class='panel-head'><h2>Wi-Fi</h2><span class='h-meta pill ok'>");
@@ -10485,6 +10813,52 @@ void handleRelayEnforcementSave() {
   page.reserve(700);
   appendHeader(page, F("myMota Device State Enforcement"));
   page += F("<p class='ok'>Device state enforcement settings saved.</p>");
+  page += F("<p><a href='/'>Back</a></p>");
+  appendFooter(page);
+  sendHtml(page);
+}
+
+void handleRelayPulseSave() {
+  if (!hasConfigurableRelays()) {
+    server.send(400, F("text/plain"), F("No configurable relays are available"));
+    return;
+  }
+
+  uint8_t pulse_enabled[kMaxRelays];
+  uint16_t pulse_seconds[kMaxRelays];
+  memcpy(pulse_enabled, config.relay_pulse_enabled, sizeof(pulse_enabled));
+  memcpy(pulse_seconds, config.relay_pulse_seconds, sizeof(pulse_seconds));
+
+  for (uint8_t i = 0; i < runtime_template.relay_count && i < kMaxRelays; i++) {
+    if (!relayAvailable(i)) continue;
+
+    String enabled_arg = F("relay_pulse_enabled");
+    enabled_arg += String(i);
+    String seconds_arg = F("relay_pulse_seconds");
+    seconds_arg += String(i);
+
+    uint16_t seconds = 0;
+    String seconds_text = server.hasArg(seconds_arg) ? server.arg(seconds_arg) : String();
+    seconds_text.trim();
+    if (seconds_text.length() > 0 &&
+        !parseUint16Input(seconds_text, 0, kRelayPulseMaxSeconds, seconds)) {
+      server.send(400, F("text/plain"), F("Invalid relay pulse seconds"));
+      return;
+    }
+
+    pulse_seconds[i] = seconds;
+    pulse_enabled[i] = (server.hasArg(enabled_arg) && seconds >= kRelayPulseMinSeconds) ? 1 : 0;
+  }
+
+  if (!saveRelayPulseConfig(pulse_enabled, pulse_seconds)) {
+    server.send(500, F("text/plain"), F("Could not save relay pulsing settings"));
+    return;
+  }
+
+  String page;
+  page.reserve(700);
+  appendHeader(page, F("myMota Relay Pulsing"));
+  page += F("<p class='ok'>Relay pulsing settings saved.</p>");
   page += F("<p><a href='/'>Back</a></p>");
   appendFooter(page);
   sendHtml(page);
@@ -11509,6 +11883,7 @@ void handleSettingsImport() {
   importSettingsLight(root, candidate, candidate_runtime, stats);
   importSettingsLeds(root, candidate, candidate_runtime, stats);
   importSettingsRelayEnforcement(root, candidate, candidate_runtime, stats);
+  importSettingsRelayPulsing(root, candidate, candidate_runtime, stats);
   importSettingsInputs(root, candidate, candidate_runtime, stats);
 
   String page;
@@ -11529,6 +11904,7 @@ void handleSettingsImport() {
   const bool light_changed = lightConfigDiffers(before, candidate);
   const bool led_changed = ledConfigDiffers(before, candidate);
   const bool relay_enforcement_changed = relayEnforcementConfigDiffers(before, candidate);
+  const bool relay_pulse_changed = relayPulseConfigDiffers(before, candidate);
   const bool input_changed = inputConfigDiffers(before, candidate);
   const bool wifi_dynamic_power_changed = before.wifi_dynamic_power != candidate.wifi_dynamic_power;
 
@@ -11570,6 +11946,7 @@ void handleSettingsImport() {
     refreshRelayEnforcementRuntime(true);
     saveLastRelaySnapshotIfNeeded();
   }
+  if (relay_pulse_changed) refreshRelayPulseRuntime(true);
   if (led_changed || input_changed) updateDeviceLeds(true);
   if (wifi_dynamic_power_changed) resetWifiDynamicPowerRuntime(true);
 
@@ -12303,6 +12680,7 @@ void setupRoutes() {
   server.on(F("/energy"), HTTP_POST, handleEnergySave);
   server.on(F("/leds"), HTTP_POST, handleLedSave);
   server.on(F("/relay-enforcement"), HTTP_POST, handleRelayEnforcementSave);
+  server.on(F("/relay-pulsing"), HTTP_POST, handleRelayPulseSave);
   server.on(F("/buttons"), HTTP_POST, handleButtonSave);
   server.on(F("/power"), HTTP_POST, handlePowerSave);
   server.on(F("/light"), HTTP_POST, handleLightSave);

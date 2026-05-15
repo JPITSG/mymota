@@ -164,6 +164,8 @@ overview, system, device, network, and maintenance areas.
   broadcasts, webhook actions, debounce, and hold timing.
 - Device State Enforcement controls relay restore-at-boot, relay turn-on-at-boot,
   relay turn-back-on-after-off behavior, and light restore-at-boot.
+- Relay Pulsing can automatically turn a relay back off after it has been on
+  for a configured number of seconds.
 - Wi-Fi stores SSID, password, hostname, PHY mode, and dynamic TX power.
 - MQTT stores broker host, port, topic, native MQTT protocol keepalive, and
   state keepalive.
@@ -239,6 +241,16 @@ Graceful reboots, such as firmware upgrades and soft reboot actions, save a
 relay snapshot so devices can return to their pre-reboot state when configured
 to do so. Cold reboot clears the graceful snapshot. Force reset skips normal
 shutdown handling and uses the low-level reset path.
+
+## Relay Pulsing
+
+Relay Pulsing turns a relay back off after it has been switched on for a
+configured number of seconds.
+
+The timer starts whenever the relay is turned on from the web UI, MQTT,
+Tasmota-style HTTP command, webhook, physical input, or other runtime firmware
+path. Turning the relay off manually cancels the pending pulse. Pulse turn-off
+does not trigger time-based restore-after-off enforcement.
 
 ## Light Support
 
