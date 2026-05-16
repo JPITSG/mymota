@@ -3615,18 +3615,23 @@ bool powerSavingConfigChangeLocked(const StoredConfig &before, const StoredConfi
          (before.power_saving_persist ? 1 : 0) != (candidate.power_saving_persist ? 1 : 0);
 }
 
+bool powerSavingConfigChangeLocked(uint8_t mode, uint8_t persist) {
+  if (!config.power_saving_locked) return false;
+  return sanitizePowerSavingMode(config.power_saving_mode) != sanitizePowerSavingMode(mode) ||
+         (config.power_saving_persist ? 1 : 0) != (persist ? 1 : 0);
+}
+
 bool saveSystemConfig(uint8_t mode, uint8_t persist, uint8_t locked,
                       uint16_t recovery_limit, uint16_t recovery_stable_seconds) {
-  StoredConfig candidate = config;
-  candidate.power_saving_mode = sanitizePowerSavingMode(mode);
-  candidate.power_saving_persist = persist ? 1 : 0;
-  candidate.power_saving_locked = locked ? 1 : 0;
-  if (powerSavingConfigChangeLocked(config, candidate)) {
+  mode = sanitizePowerSavingMode(mode);
+  persist = persist ? 1 : 0;
+  locked = locked ? 1 : 0;
+  if (powerSavingConfigChangeLocked(mode, persist)) {
     return false;
   }
-  config.power_saving_mode = sanitizePowerSavingMode(mode);
-  config.power_saving_persist = persist ? 1 : 0;
-  config.power_saving_locked = locked ? 1 : 0;
+  config.power_saving_mode = mode;
+  config.power_saving_persist = persist;
+  config.power_saving_locked = locked;
   config.boot_recovery_limit = sanitizeBootRecoveryLimit(recovery_limit);
   config.boot_recovery_stable_seconds = sanitizeBootRecoveryStableSeconds(recovery_stable_seconds);
   config.boot_recovery_reserved = 0;
@@ -9561,10 +9566,10 @@ void appendFooter(String &page, bool live_poll = true, bool reboot_wait = false)
   page += F("function vf(f){var t=(f.getAttribute('data-target')||'').toLowerCase(),m=Number(f.getAttribute('data-ota-max')||0),i=f.querySelector('input[type=file]'),c=f.querySelector('.firmware-verify');if(!i||!t)return true;var file=i.files&&i.files[0]?i.files[0]:null;if(file&&m&&file.size>m){i.setCustomValidity('Firmware file is '+file.size+' bytes; OTA max upload is '+m+' bytes. Use a smaller bridge build first.');return false;}if(c&&!c.checked){i.setCustomValidity('');return true;}var n=file?file.name.toLowerCase():'';var o=!n||n.indexOf(t)>=0;i.setCustomValidity(o?'':'Firmware file name must include '+t);return o;}");
   page += F("function fu(f){var c=f.querySelector('.firmware-verify');f.action='/update?verify='+(!c||c.checked?'1':'0');}");
   page += F("function fw(){var a=document.querySelectorAll('.firmware-upload');for(var i=0;i<a.length;i++){(function(f){var x=f.querySelector('input[type=file]'),c=f.querySelector('.firmware-verify');fu(f);if(x)x.onchange=function(){vf(f);this.reportValidity();};if(c)c.onchange=function(){fu(f);vf(f);if(x)x.reportValidity();};f.addEventListener('submit',function(e){fu(f);if(!vf(f)){e.preventDefault();if(x)x.reportValidity();}},true);})(a[i]);}}");
-  page += F("function lu(i){var e=i.getAttribute('data-live'),s=i.getAttribute('data-suffix')||'';if(e)t(e,i.value+s);}function la(i){lu(i);var fd=new FormData();fd.append(i.name,i.value);fd.append('_inline','1');fetch('/light',{method:'POST',body:fd,cache:'no-store'}).then(function(r){if(!r.ok)return r.text().then(function(x){throw Error(x||r.statusText)});live();}).catch(function(x){alert(x.message||x);});}");
+  page += F("function lu(i){var e=i.getAttribute('data-live'),s=i.getAttribute('data-suffix')||'';if(e)t(e,i.value+s);}function la(i){lu(i);var body=new URLSearchParams();body.append(i.name,i.value);body.append('_inline','1');fetch('/light',{method:'POST',body:body,cache:'no-store'}).then(function(r){if(!r.ok)return r.text().then(function(x){throw Error(x||r.statusText)});live();}).catch(function(x){alert(x.message||x);});}");
   page += F("function bi(){var a=document.querySelectorAll('.button-action');for(var i=0;i<a.length;i++){a[i].onchange=function(){ba(this)};ba(a[i]);}var m=document.querySelectorAll('.input-mode');for(var j=0;j<m.length;j++){m[j].onchange=function(){im(this)};im(m[j]);}var c=document.querySelectorAll('.relay-boot-choice');for(var q=0;q<c.length;q++){c[q].onchange=function(){rb(this)};rb(c[q]);}var l=document.querySelectorAll('.light-auto');for(var k=0;k<l.length;k++){l[k].oninput=function(){lu(this)};l[k].onchange=function(){la(this)};}var t=document.getElementById('template-json');if(t){t.oninput=ts;t.onchange=ts;}ts();}bi();fw();");
   page += F("document.addEventListener('click',function(e){var b=e.target;while(b&&b.tagName!='BUTTON'&&b.tagName!='INPUT')b=b.parentNode;if(!b||!b.form)return;var t=(b.type||'').toLowerCase();if(t=='submit'||t=='image')b.form._s=b;},true);");
-  page += F("document.addEventListener('submit',function(e){var f=e.target;if(!f||f.getAttribute('data-inline')!='1')return;e.preventDefault();var fd=new FormData(f),b=e.submitter||f._s;if(b&&b.name)fd.append(b.name,b.value);fd.append('_inline','1');fetch(f.getAttribute('action')||location.pathname,{method:(f.method||'POST').toUpperCase(),body:fd,cache:'no-store'}).then(function(r){if(!r.ok)return r.text().then(function(x){throw Error(x||r.statusText)});live();}).catch(function(x){alert(x.message||x);});},true);");
+  page += F("document.addEventListener('submit',function(e){var f=e.target;if(!f||f.getAttribute('data-inline')!='1')return;e.preventDefault();var fd=new FormData(f),b=e.submitter||f._s;if(b&&b.name)fd.append(b.name,b.value);fd.append('_inline','1');var body=new URLSearchParams();fd.forEach(function(v,k){body.append(k,v);});fetch(f.getAttribute('action')||location.pathname,{method:(f.method||'POST').toUpperCase(),body:body,cache:'no-store'}).then(function(r){if(!r.ok)return r.text().then(function(x){throw Error(x||r.statusText)});live();}).catch(function(x){alert(x.message||x);});},true);");
   if (live_poll) {
     page += F("setInterval(live,1000);setInterval(ck,1000);live();");
   }
@@ -9579,6 +9584,16 @@ void appendFooter(String &page, bool live_poll = true, bool reboot_wait = false)
 void sendHtml(String &page) {
   server.sendHeader(F("Cache-Control"), F("no-store"));
   server.send(200, F("text/html"), page);
+}
+
+void sendInlineOkOrHome() {
+  server.sendHeader(F("Cache-Control"), F("no-store"));
+  if (server.hasArg(F("_inline"))) {
+    server.send(204, F("text/plain"), "");
+    return;
+  }
+  server.sendHeader(F("Location"), F("/"), true);
+  server.send(303, F("text/plain"), "");
 }
 
 void beginStreamedResponse(const char *content_type) {
@@ -10894,11 +10909,7 @@ void handleSystemSave() {
     }
   }
 
-  StoredConfig candidate = config;
-  candidate.power_saving_mode = sanitizePowerSavingMode(mode);
-  candidate.power_saving_persist = persist;
-  candidate.power_saving_locked = locked;
-  if (powerSavingConfigChangeLocked(config, candidate)) {
+  if (powerSavingConfigChangeLocked(mode, persist)) {
     server.send(423, F("text/plain"), F("Power saving is locked"));
     return;
   }
@@ -10908,13 +10919,7 @@ void handleSystemSave() {
     return;
   }
 
-  String page;
-  page.reserve(700);
-  appendHeader(page, F("myMota System"));
-  page += F("<p class='ok'>System settings saved.</p>");
-  page += F("<p><a href='/'>Back</a></p>");
-  appendFooter(page);
-  sendHtml(page);
+  sendInlineOkOrHome();
 }
 
 void handleMqttSave() {
@@ -10958,13 +10963,7 @@ void handleMqttSave() {
     return;
   }
 
-  String page;
-  page.reserve(700);
-  appendHeader(page, F("myMota MQTT"));
-  page += F("<p class='ok'>MQTT settings saved.</p>");
-  page += F("<p><a href='/'>Back</a></p>");
-  appendFooter(page);
-  sendHtml(page);
+  sendInlineOkOrHome();
 }
 
 void handleEnergySave() {
@@ -11007,13 +11006,7 @@ void handleEnergySave() {
     return;
   }
 
-  String page;
-  page.reserve(700);
-  appendHeader(page, F("myMota Energy"));
-  page += F("<p class='ok'>Energy settings saved.</p>");
-  page += F("<p><a href='/'>Back</a></p>");
-  appendFooter(page);
-  sendHtml(page);
+  sendInlineOkOrHome();
 }
 
 void handleLedSave() {
@@ -11054,13 +11047,7 @@ void handleLedSave() {
   }
   updateDeviceLeds(true);
 
-  String page;
-  page.reserve(700);
-  appendHeader(page, F("myMota LEDs"));
-  page += F("<p class='ok'>LED settings saved.</p>");
-  page += F("<p><a href='/'>Back</a></p>");
-  appendFooter(page);
-  sendHtml(page);
+  sendInlineOkOrHome();
 }
 
 void handleRelayEnforcementSave() {
@@ -11125,13 +11112,7 @@ void handleRelayEnforcementSave() {
     return;
   }
 
-  String page;
-  page.reserve(700);
-  appendHeader(page, F("myMota Device State Enforcement"));
-  page += F("<p class='ok'>Device state enforcement settings saved.</p>");
-  page += F("<p><a href='/'>Back</a></p>");
-  appendFooter(page);
-  sendHtml(page);
+  sendInlineOkOrHome();
 }
 
 void handleRelayPulseSave() {
@@ -11171,13 +11152,7 @@ void handleRelayPulseSave() {
     return;
   }
 
-  String page;
-  page.reserve(700);
-  appendHeader(page, F("myMota Relay Pulsing"));
-  page += F("<p class='ok'>Relay pulsing settings saved.</p>");
-  page += F("<p><a href='/'>Back</a></p>");
-  appendFooter(page);
-  sendHtml(page);
+  sendInlineOkOrHome();
 }
 
 bool readButtonEventText(uint8_t button, const char *prefix, bool hold, uint8_t action,
@@ -11375,13 +11350,7 @@ void handleButtonSave() {
   }
   updateDeviceLeds(true);
 
-  String page;
-  page.reserve(700);
-  appendHeader(page, F("myMota Inputs"));
-  page += F("<p class='ok'>Input settings saved.</p>");
-  page += F("<p><a href='/'>Back</a></p>");
-  appendFooter(page);
-  sendHtml(page);
+  sendInlineOkOrHome();
 }
 
 void handlePowerSave() {
@@ -11406,8 +11375,7 @@ void handlePowerSave() {
     return;
   }
   updateDeviceLeds(true);
-  server.sendHeader(F("Location"), F("/"), true);
-  server.send(303, F("text/plain"), "");
+  sendInlineOkOrHome();
 }
 
 void handleLightSave() {
@@ -11530,13 +11498,7 @@ void handleLightSave() {
     }
   }
 
-  if (server.hasArg("_inline")) {
-    server.send(204, F("text/plain"), "");
-    return;
-  }
-
-  server.sendHeader(F("Location"), F("/"), true);
-  server.send(303, F("text/plain"), "");
+  sendInlineOkOrHome();
 }
 
 bool executeDeviceCommand(const char *raw, size_t cmd_len, const char *arg, size_t arg_len, String &out, String &error) {
