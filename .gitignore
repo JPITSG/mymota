@@ -2,4 +2,4 @@
 .pio/
 firmware.map
 
-mymotaUpgrade.sh
+mymotaUpgrade.py
